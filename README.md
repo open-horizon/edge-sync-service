@@ -1,7 +1,7 @@
 # edge-sync-service
 Cloud - Edge synchronization service
 
-[![Build Status](https://travis.com/open-horizon/edge-sync-service.svg?token=hqrt7uq8y12VRZq8Txpa&branch=master)](https://travis.com/open-horizon/edge-sync-service)
+[![Build Status](https://travis-ci.org/open-horizon/edge-sync-service.svg?branch=master)](https://travis-ci.org/open-horizon/edge-sync-service)
 ![macOS](https://img.shields.io/badge/os-macOS-green.svg?style=flat)
 ![Linux](https://img.shields.io/badge/os-linux-green.svg?style=flat)
 
