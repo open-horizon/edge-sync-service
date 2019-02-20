@@ -19,11 +19,6 @@ env:
 
 install:
   # Prepare for build
-  - cd ../..
-  - mkdir -p ../github.com
-  - mv edge-sync-service-dev ../github.com/open-horizon
-  - cd ../github.com/open-horizon
-  - cd edge-sync-service
   - ./get_dependencies.sh
   - mkdir -p build
 
