@@ -61,17 +61,16 @@ The following is a list of the main features provided by the sync service:
 2. cd into the workspace directory
 3. Run:
      1. `export GOPATH=$(pwd)`
-     2. `mkdir -p src/github.ibm.com/edge-sync-service`
-     3. `git clone git@github.ibm.com:edge-sync-service/edge-sync-service.git src/github.ibm.com/edge-sync-service/edge-sync-service`
-     4. `cd src/github.ibm.com/edge-sync-service/edge-sync-service`
-     5. `./get_dependencies.sh`
+     2. `go get github.com/open-horizon/edge-sync-service`
+     3. `cd src/github.com/open-horizon/edge-sync-service`
+     4. `./get_dependencies.sh`
 
 ### Build
 
 To build the edge synch service, from the root of the workspace run:
 
 1. `export GOPATH=$(pwd)` (if not already done)
-2. `go install github.ibm.com/edge-sync-service/edge-sync-service/cmd/edge-sync-service`
+2. `go install github.com/open-horizon/edge-sync-service/cmd/edge-sync-service`
 
 To build the edge sync service container, from the root of the edge-sync-service repository run:
 
@@ -79,7 +78,7 @@ To build the edge sync service container, from the root of the edge-sync-service
 2. `./buildContainer.sh <platform>` (where platform is amd64, armhf, or arm64)
 
 **Notes:**
-1. The container will be tagged *edge-sync-service/edge-sync-service:latest*
+1. The container will be tagged *open-horizon/edge-sync-service:latest*
 2. To build a container for armhf (arm-32), you need to:
     1. Run the build script on a Linux box
     2. On the Linux box that you are going to run the build script run:
@@ -105,7 +104,7 @@ to configure them, make sure the file /etc/edge-sync-service/sync.conf does **NO
 ##### SSL/TLS (access via HTTPS or connecting to broker via SSL/TLS)
 
 The edge-sync-service when running on the "edge" will always only listen to requests using HTTPS. It automatically generates
-it's own self signed certificate and key pair. The CA certificate is */var/wiotp-edge/persist/sync/certs/cert.pem*.
+it's own self signed certificate and key pair. The CA certificate is */var/edge-sync-service/persist/sync/certs/cert.pem*.
 
 The edge-sync-service when running on the "cloud" can listen either as HTTPS or as HTTP depending on whether or not the
 configuration properties **ServerCertificate** and **ServerKey** or the environment variables **SERVER_CERTIFICATE** and
@@ -138,7 +137,7 @@ To generate the Swagger document for the Edge Synchronization Service you must:
 1. Install go-swagger by running:
     1. `brew tap go-swagger/go-swagger`
     2. `brew install go-swagger`
-2. From within your clone of the edge-sync-service/edge-sync-service repository, run:
+2. From within your clone of the open-horizon/edge-sync-service repository, run:
     - `swagger generate spec -o ./swagger.json -m -b ./cmd/edge-sync-service`
 
 **Note:** This will create an extra file in your clone of the repository. Do **NOT** commit the file.
