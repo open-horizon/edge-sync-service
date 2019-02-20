@@ -12,7 +12,7 @@ if [[ -z ${1} ]]; then
  
   if [[ ! -d ../edge-utilities ]]; then
     rm -f ../edge-utilities
-    go get github.com/open-horizon/edge-utilities.git
+    go get github.com/open-horizon/edge-utilities
   fi
 
   find ${GOPATH} -name vendor.json -exec ${0} \{\} \;
