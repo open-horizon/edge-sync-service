@@ -1,0 +1,49 @@
+language: go
+go:
+  - "1.10"
+branches:
+  except:
+    - /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-(0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*)?(\+[0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*)?$/
+
+services:
+  - docker
+  - mongodb
+
+env:
+  global:
+    - IMPORT_PEFIX=github.com/open-horizon
+    - EDGE_COMPONENT_NAME=edge-sync-service
+    - BUILD_FLAGS='-i -tags "netgo"'
+    - LD_FLAGS="-linkmode external -extldflags -static -s -w"
+    - BUILD_OUTPUT=build
+
+install:
+  # Prepare for build
+  - cd ../..
+  - mkdir ../github.com
+  - mv edge-sync-service-dev ../github.com/open-horizon
+  - cd ../github.com/open-horizon
+  - cd edge-sync-service
+  - ./get_dependencies.sh
+  - mkdir -p build
+
+before_script:
+  #
+
+script:
+  # Build
+  - env GOOS=linux GOARCH=amd64 CGO_BUILD=0 go build ${BUILD_FLAGS} -ldflags "${LD_FLAGS}" -o ${BUILD_OUTPUT}/${EDGE_COMPONENT_NAME} ${IMPORT_PEFIX}/${EDGE_COMPONENT_NAME}/cmd/${EDGE_COMPONENT_NAME}
+  #
+  # Run coverage
+  - ./runCoverage.sh
+  #
+  # Build samples
+  - env GOOS=linux GOARCH=amd64 CGO_BUILD=0 go build ${BUILD_FLAGS} -ldflags "${LD_FLAGS}" -o ${BUILD_OUTPUT}/edge-sync-service-mgmt ${IMPORT_PEFIX}/${EDGE_COMPONENT_NAME}/cmd/edge-sync-service-mgmt
+  - env GOOS=linux GOARCH=amd64 CGO_BUILD=0 go build ${BUILD_FLAGS} -ldflags "${LD_FLAGS}" -o ${BUILD_OUTPUT}/receive-file ${IMPORT_PEFIX}/${EDGE_COMPONENT_NAME}/cmd/receive-file
+  - env GOOS=linux GOARCH=amd64 CGO_BUILD=0 go build ${BUILD_FLAGS} -ldflags "${LD_FLAGS}" -o ${BUILD_OUTPUT}/send-file ${IMPORT_PEFIX}/${EDGE_COMPONENT_NAME}/cmd/send-file
+
+after_success:
+  #
+
+after_script:
+  #- $HOME/build.common/bin/notify-slack.sh
