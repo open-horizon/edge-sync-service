@@ -1,0 +1,6 @@
+build/*
+core/base/persist
+core/communications/persist
+core/storage/persist
+.DS_STORE
+vendor/*/

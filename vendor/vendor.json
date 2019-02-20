@@ -1,0 +1,111 @@
+{
+	"comment": "",
+	"ignore": "test",
+	"package": [
+		{
+			"checksumSHA1": "15IV+XctBBGO7lvmYfV66dkVp7Y=",
+			"path": "github.com/eclipse/paho.mqtt.golang",
+			"revision": "36d01c2b4cbeb3d2a12063e4880ce30800af9560",
+			"revisionTime": "2018-03-15T09:10:34Z",
+			"version": "=v1.1.1",
+			"versionExact": "v1.1.1"
+		},
+		{
+			"checksumSHA1": "ITCnG3uKUnqNXrnnulKokjQKfN4=",
+			"path": "github.com/eclipse/paho.mqtt.golang/packets",
+			"revision": "36d01c2b4cbeb3d2a12063e4880ce30800af9560",
+			"revisionTime": "2018-03-15T09:10:34Z",
+			"version": "=v1.1.1",
+			"versionExact": "v1.1.1"
+		},
+		{
+			"checksumSHA1": "ySzd4wbbkGYl9Ch1dJbJOAmNXWQ=",
+			"path": "github.com/etcd-io/bbolt",
+			"revision": "63597a96ec0ad9e6d43c3fc81e809909e0237461",
+			"revisionTime": "2019-01-28T18:11:30Z",
+			"version": "=v1.3.2",
+			"versionExact": "v1.3.2"
+		},
+		{
+			"checksumSHA1": "5paEOrPNmte9PRyvpBF8HTDjQD4=",
+			"path": "github.com/globalsign/mgo",
+			"revision": "113d3961e7311526535a1ef7042196563d442761",
+			"revisionTime": "2018-06-15T13:49:36Z",
+			"version": "=r2018.06.15",
+			"versionExact": "r2018.06.15"
+		},
+		{
+			"checksumSHA1": "zdy6XflmESAiFmyptSqpUMfXSyo=",
+			"path": "github.com/globalsign/mgo/bson",
+			"revision": "113d3961e7311526535a1ef7042196563d442761",
+			"revisionTime": "2018-06-15T13:49:36Z",
+			"version": "=r2018.06.15",
+			"versionExact": "r2018.06.15"
+		},
+		{
+			"checksumSHA1": "//bXQG4HblBwxHJDIW/PklXAxu0=",
+			"path": "github.com/globalsign/mgo/internal/json",
+			"revision": "113d3961e7311526535a1ef7042196563d442761",
+			"revisionTime": "2018-06-15T13:49:36Z",
+			"version": "=r2018.06.15",
+			"versionExact": "r2018.06.15"
+		},
+		{
+			"checksumSHA1": "loubUcDO2QAStKIlVd7DqSeoEaw=",
+			"path": "github.com/globalsign/mgo/internal/sasl",
+			"revision": "113d3961e7311526535a1ef7042196563d442761",
+			"revisionTime": "2018-06-15T13:49:36Z",
+			"version": "=r2018.06.15",
+			"versionExact": "r2018.06.15"
+		},
+		{
+			"checksumSHA1": "xjfEsfN7ho6dDOVeUQJhW4KzD2I=",
+			"path": "github.com/globalsign/mgo/internal/scram",
+			"revision": "113d3961e7311526535a1ef7042196563d442761",
+			"revisionTime": "2018-06-15T13:49:36Z",
+			"version": "=r2018.06.15",
+			"versionExact": "r2018.06.15"
+		},
+		{
+			"checksumSHA1": "H8wo+NR5z+VRl0wqPYpVQfC06ks=",
+			"path": "github.com/go-stack/stack",
+			"revision": "2fee6af1a9795aafbe0253a0cfbdf668e1fb8a9a",
+			"revisionTime": "2018-08-26T13:48:48Z",
+			"version": "=v1.8.0",
+			"versionExact": "v1.8.0"
+		},
+		{
+			"checksumSHA1": "yNyE9MrpDJQAxOxSipSIBgBhuNQ=",
+			"path": "github.com/google/uuid",
+			"revision": "9b3b1e0f5f99ae461456d768e7d301a7acdaa2d8",
+			"revisionTime": "2018-09-17T14:00:05Z",
+			"version": "=v1.1.0",
+			"versionExact": "v1.1.0"
+		},
+		{
+			"checksumSHA1": "f3Y7JIZH61oMmp8nphqe8Mg+XoU=",
+			"path": "golang.org/x/net/internal/socks",
+			"revision": "65e2d4e15006aab9813ff8769e768bbf4bb667a0",
+			"revisionTime": "2019-02-01T23:59:58Z"
+		},
+		{
+			"checksumSHA1": "mCMW3hvbWFW1k5il9yyO7ELOdws=",
+			"path": "golang.org/x/net/proxy",
+			"revision": "65e2d4e15006aab9813ff8769e768bbf4bb667a0",
+			"revisionTime": "2019-02-01T23:59:58Z"
+		},
+		{
+			"checksumSHA1": "F+tqxPGFt5x7DKZakbbMmENX1oQ=",
+			"path": "golang.org/x/net/websocket",
+			"revision": "65e2d4e15006aab9813ff8769e768bbf4bb667a0",
+			"revisionTime": "2019-02-01T23:59:58Z"
+		},
+		{
+			"checksumSHA1": "25eWuZl9nc6J3+a1fJochJPLhZM=",
+			"path": "golang.org/x/sys/unix",
+			"revision": "3b5209105503162ded1863c307ac66fec31120dd",
+			"revisionTime": "2019-02-09T17:16:25Z"
+		}
+	],
+	"rootPath": "github.com/open-horizon/edge-sync-service"
+}

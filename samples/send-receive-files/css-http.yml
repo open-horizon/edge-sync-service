@@ -1,0 +1,28 @@
+version: '3'
+services:
+ edge-sync-service-css:
+   image: "edge-sync-service/edge-sync-service:latest"
+   ports:
+   - "8080:8080"
+   environment:
+     NODE_TYPE: CSS
+     COMMUNICATION_PROTOCOL: http
+     ORG_ID: myorg
+     MONGO_AUTH_DB_NAME: d_edge
+     MONGO_ADDRESS_CSV: <some host>:27017
+     LOG_TRACE_DESTINATION: "stdout,file"
+     LOG_LEVEL: INFO
+     LOG_ROOT_PATH: /var/edge-sync-service/log
+     TRACE_LEVEL: INFO
+     TRACE_ROOT_PATH: /var/edge-sync-service/trace
+     PERSISTENCE_ROOT_PATH: /var/edge-sync-service/persist
+   volumes:
+   - /var/edge-sync-service:/var/edge-sync-service
+   restart: always
+   networks:
+     edge-bridge:
+       aliases:
+       - edge-sync-service-css
+
+networks:
+ edge-bridge: {}

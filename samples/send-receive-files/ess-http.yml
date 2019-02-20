@@ -1,0 +1,31 @@
+version: '3'
+services:
+ edge-sync-service-ess:
+   image: "edge-sync-service/edge-sync-service:latest"
+   ports:
+   - "8443:8443"
+   environment:
+     NODE_TYPE: ESS
+     COMMUNICATION_PROTOCOL: http
+     UNSECURE_LISTENING_PORT: 8090
+     HTTP_CSS_HOST: edge-sync-service-css
+     HTTP_CSS_PORT: 8080
+     ORG_ID: myorg
+     DESTINATION_TYPE: edge
+     DESTINATION_ID: node1
+     LOG_TRACE_DESTINATION: "stdout,file"
+     LOG_LEVEL: INFO
+     LOG_ROOT_PATH: /var/edge-sync-service/log
+     TRACE_LEVEL: INFO
+     TRACE_ROOT_PATH: /var/edge-sync-service/trace
+     PERSISTENCE_ROOT_PATH: /var/edge-sync-service/persist
+   volumes:
+   - /var/edge-sync-service-ess:/var/edge-sync-service
+   restart: always
+   networks:
+     edge-bridge:
+       aliases:
+       - edge-sync-service-ess
+
+networks:
+ edge-bridge: {}
