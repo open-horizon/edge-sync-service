@@ -1,0 +1,1462 @@
+{
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "schemes": [
+    "http"
+  ],
+  "swagger": "2.0",
+  "info": {
+    "description": "This is the main package of the edge synchronization service",
+    "title": "Edge Syncronization Service",
+    "version": "0.0.1"
+  },
+  "host": "localhost",
+  "basePath": "/",
+  "paths": {
+    "/api/v1/destinations/{orgID}": {
+      "get": {
+        "description": "Provides a list of destinations for an organization, i.e., ESS nodes (belonging to orgID) that have registered with the CSS.\nThis is a CSS only API.",
+        "produces": [
+          "application/json",
+          "text/plain"
+        ],
+        "summary": "List all known destinations.",
+        "operationId": "handleDestinations",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the destinations to return.",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Destinations response",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Destination"
+              }
+            }
+          },
+          "404": {
+            "description": "No destinations found",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve the destinations",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{orgID}/{objectType}": {
+      "put": {
+        "description": "Register or delete a webhook for the specified object type.\nA webhook is used to process notifications on updates for objects of the specified object type.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "text/plain"
+        ],
+        "summary": "Register or delete a webhook.",
+        "operationId": "handleWebhook",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the objects for the webhook. Present only when working with a CSS, removed from the path when working with an ESS",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object type of the objects for the webhook",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "description": "The webhook's data",
+            "name": "payload",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/webhookUpdate"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Webhook registered/deleted",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to update the webhook's data",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{orgID}/{objectType}/{objectID}": {
+      "get": {
+        "description": "Get the metadata of an object of the specified object type and object ID.\nThe metadata indicates if the objects includes data which can then be obtained using the appropriate API.",
+        "produces": [
+          "application/json",
+          "text/plain"
+        ],
+        "summary": "Get an object.",
+        "operationId": "handleGetObject",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the object to return. Present only when working with a CSS, removed from the path when working with an ESS",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object type of the object to return",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object to return",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Object response",
+            "schema": {
+              "$ref": "#/definitions/MetaData"
+            }
+          },
+          "404": {
+            "description": "Object not found",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve the object",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "put": {
+        "description": "Update/create the object of the specified object type and object ID.\nIf an object with the same type and ID exists that object is updated, otherwise a new object is created.",
+        "produces": [
+          "text/plain"
+        ],
+        "summary": "Update/create an object.",
+        "operationId": "handleUpdateObject",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the object to update/create. Present only when working with a CSS, removed from the path when working with an ESS",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object type of the object to update/create",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object to update/create",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "payload",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/objectUpdate"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Object updated",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to update/create the object",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "delete": {
+        "description": "Delete the object of the specified object type and object ID.\nDestinations of the object will be notified that the object has been deleted.",
+        "produces": [
+          "text/plain"
+        ],
+        "summary": "Delete an object.",
+        "operationId": "handleDeleteObject",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the object to delete. Present only when working with a CSS, removed from the path when working with an ESS",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object type of the object to delete",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object to delete",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Object deleted",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to delete the object",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{orgID}/{objectType}/{objectID}/activate": {
+      "put": {
+        "description": "Mark the object of the specified object type and object ID as active.\nAn object can be created as inactive which means it is not delivered to its destinations.\nThis API is used to activate such objects and initiate the distribution of the object to its destinations.",
+        "produces": [
+          "text/plain"
+        ],
+        "summary": "Mark an object as active.",
+        "operationId": "handleActivateObject",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the object to mark as active. Present only when working with a CSS, removed from the path when working with an ESS",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object type of the object to mark as active",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object to mark as active",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Object marked as active",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to mark the object active",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{orgID}/{objectType}/{objectID}/consumed": {
+      "put": {
+        "description": "Mark the object of the specified object type and object ID as having been consumed by the application.\nAfter the object is marked as consumed it will not be delivered to the application again (even if the sync service is restarted).",
+        "produces": [
+          "text/plain"
+        ],
+        "summary": "Mark an object as consumed.",
+        "operationId": "handleObjectConsumed",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the object to mark as consumed. Present only when working with a CSS, removed from the path when working with an ESS",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object type of the object to mark as consumed",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object to mark as consumed",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Object marked as consumed",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to mark the object consumed",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{orgID}/{objectType}/{objectID}/data": {
+      "get": {
+        "description": "Get the data of the object of the specified object type and object ID.\nThe metadata of the object indicates if the object includes data (noData is false).",
+        "produces": [
+          "application/octet-stream",
+          "text/plain"
+        ],
+        "summary": "Get the data of an object.",
+        "operationId": "handleObjectGetData",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the object whose data will be retrieved. Present only when working with a CSS, removed from the path when working with an ESS",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object type of the object whose data will be retrieved",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object whose data will be retrieved",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Object data",
+            "schema": {
+              "type": "string",
+              "format": "binary"
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve the object's data",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "put": {
+        "description": "Update the data of the object of the specified object type and object ID.\nThe data can be updated without modifying the object's metadata.",
+        "consumes": [
+          "application/octet-stream"
+        ],
+        "produces": [
+          "text/plain"
+        ],
+        "summary": "Update the data of an object.",
+        "operationId": "handleObjectPutData",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the object whose data will be updated. Present only when working with a CSS, removed from the path when working with an ESS",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object type of the object whose data will be updated",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object whose data will be updated",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "description": "The object's new data",
+            "name": "payload",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "binary"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Object data updated",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "404": {
+            "description": "The specified object doesn't exist",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to update the object's data",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{orgID}/{objectType}/{objectID}/deleted": {
+      "put": {
+        "description": "Confirm the deletion of the object of the specified object type and object ID by the application.\nThe application should invoke this API after it completed the actions associated with deleting the object.",
+        "produces": [
+          "text/plain"
+        ],
+        "summary": "The service confirms object deletion.",
+        "operationId": "handleObjectDeleted",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the object to confirm its deletion. Present only when working with a CSS, removed from the path when working with an ESS",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object type of the object to confirm its deletion",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object to confirm its deletion",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Object's deletion confirmed",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to confirm the object's deletion",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{orgID}/{objectType}/{objectID}/destinations": {
+      "get": {
+        "description": "Get the list of sync service (ESS) nodes which are the destinations of the object of the specified object type and object ID.\nThe delivery status of the object is provided for each destination along with its type and ID.\nThis is a CSS only API.",
+        "produces": [
+          "text/plain"
+        ],
+        "summary": "Get the destinations of an object.",
+        "operationId": "handleObjectDestinations",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the object whose destinations will be retrieved. Present only when working with a CSS, removed from the path when working with an ESS",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object type of the object whose destinations will be retrieved",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object whose destinations will be retrieved",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Object destinations and their status",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/DestinationsStatus"
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve the object's destinations",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{orgID}/{objectType}/{objectID}/received": {
+      "put": {
+        "description": "Mark the object of the specified object type and object ID as having been received by the application.\nAfter the object is marked as received it will only be delivered to the application again if specified in the objects request.",
+        "produces": [
+          "text/plain"
+        ],
+        "summary": "Mark an object as received.",
+        "operationId": "handleObjectReceived",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the object to mark as received.",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object type of the object to mark as received",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object to mark as received",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Object marked as received",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to mark the object received",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{orgID}/{objectType}/{objectID}/status": {
+      "get": {
+        "description": "Get the status of the object of the specified object type and object ID.\nThe status can be one of the following:\nnotReady - The object is not ready to be sent to destinations.\nready - The object is ready to be sent to destinations.\nreceived - The object's metadata has been received but not all its data.\ncompletelyReceived - The full object (metadata and data) has been received.\nconsumed - The object has been consumed by the application.\ndeleted - The object was deleted.",
+        "produces": [
+          "text/plain"
+        ],
+        "summary": "Get the status of an object.",
+        "operationId": "handleObjectStatus",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the object whose status will be retrieved. Present only when working with a CSS, removed from the path when working with an ESS",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object type of the object whose status will be retrieved",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object whose status will be retrieved",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Object status",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve the object's status",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{orgID}/{objectType}?received=bool": {
+      "get": {
+        "description": "Get the list of objects of the specified object type that have pending (unconsumed) updates.\nAn application would typically invoke this API periodically to check for updates (an alternative is to use a webhook).",
+        "produces": [
+          "application/json",
+          "text/plain"
+        ],
+        "summary": "Get updated objects.",
+        "operationId": "handleListUpdatedObjects",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the updated objects to return. Present only when working with a CSS, removed from the path when working with an ESS",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object type of the updated objects to return",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "boolean",
+            "description": "Whether or not to include the objects that have been marked as received by the application",
+            "name": "received",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated objects response",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/MetaData"
+              }
+            }
+          },
+          "404": {
+            "description": "No updated objects found",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve the updated objects",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations": {
+      "get": {
+        "description": "Get the list of existing organizations. Relevant to CSS only.",
+        "produces": [
+          "application/json",
+          "text/plain"
+        ],
+        "summary": "Get organizations.",
+        "operationId": "handleGetOrganizations",
+        "responses": {
+          "200": {
+            "description": "Organizations response",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/organization"
+              }
+            }
+          },
+          "404": {
+            "description": "No organizations found",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve the organizations",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{orgID}": {
+      "put": {
+        "description": "Store organization information.",
+        "produces": [
+          "text/plain"
+        ],
+        "summary": "Update organization.",
+        "operationId": "handleOrganizations",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the organization to update.",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "payload",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/Organization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The organization was successfuly updated",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to update the organization",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "delete": {
+        "description": "Remove organization information and clean up all resources (objects, destinations, etc.) all resources (objects, destinations, etc.) associated\nwith the deleted organization.",
+        "produces": [
+          "text/plain"
+        ],
+        "summary": "Delete organization.",
+        "operationId": "handleOrganizations",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the organization to delete.",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The organization was successfuly deleted",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to delete the organization",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/resend": {
+      "post": {
+        "description": "Used by an ESS to ask the CSS to resend it all the objects (supported only for ESS to CSS requests).\nAn application only needs to use this API in case the data it previously obtained from the ESS was lost.",
+        "produces": [
+          "text/plain"
+        ],
+        "summary": "Request to resend objects.",
+        "operationId": "handleResend",
+        "responses": {
+          "204": {
+            "description": "The request will be sent",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "400": {
+            "description": "The request is not allowed on Cloud Sync-Service",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/security/{type}/{orgID}": {
+      "get": {
+        "produces": [
+          "text/plain"
+        ],
+        "summary": "Retrieve the list of destination or object ACLs for an organization.",
+        "operationId": "handleACLGetAll",
+        "parameters": [
+          {
+            "enum": [
+              "destinations",
+              "objects"
+            ],
+            "type": "string",
+            "description": "The type of the ACL whose username list should be retrieved.",
+            "name": "type",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The orgID in which the ACL for the destination type or object type exists.",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The list of ACLs retrieved of the specified type.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "404": {
+            "description": "No ACLs found",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve the list of ACLs retrieved of the specified type.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/security/{type}/{orgID}/{key}": {
+      "get": {
+        "produces": [
+          "text/plain"
+        ],
+        "summary": "Retrieve the list of usernames from an ACL for a destination type or an object type.",
+        "operationId": "handleACLGet",
+        "parameters": [
+          {
+            "enum": [
+              "destinations",
+              "objects"
+            ],
+            "type": "string",
+            "description": "The type of the ACL whose username list should be retrieved.",
+            "name": "type",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The orgID in which the ACL for the destination type or object type exists.",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The destination type or object type that is being protected by the ACL.",
+            "name": "key",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The list of usernames was retrieved from the specified ACL.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "404": {
+            "description": "ACL not found",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve the usernames from the specified ACL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "put": {
+        "description": "Bulk add/remove of username(s) to/from an ACL for a destination type or an object type. If the\nfirst username is being added, the ACL is created. If the last username is removed, the ACL\nis deleted.",
+        "produces": [
+          "text/plain"
+        ],
+        "summary": "Bulk add/remove of username(s) to/from an ACL for a destination type or an object type.",
+        "operationId": "handleBulkACLUpdate",
+        "parameters": [
+          {
+            "enum": [
+              "destinations",
+              "objects"
+            ],
+            "type": "string",
+            "description": "The type of the ACL to which the specified username(s) will be added/removed.",
+            "name": "type",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The orgID in which the ACL for the destination type or object type exists.",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The destination type or object type that is being protected by the ACL.",
+            "name": "key",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "payload",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/bulkACLUpdate"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The username(s) were added/removed to/from the specified ACL.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to add/remove the username(s) to/from the specified ACL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/security/{type}/{orgID}/{key}/{username}": {
+      "put": {
+        "description": "Add a username to an ACL for a destination type or an object type. If the first username is being added,\nthe ACL is created.",
+        "produces": [
+          "text/plain"
+        ],
+        "summary": "Add a username to an ACL for a destination type or an object type.",
+        "operationId": "handleACLUpdate",
+        "parameters": [
+          {
+            "enum": [
+              "destinations",
+              "objects"
+            ],
+            "type": "string",
+            "description": "The type of the ACL to which the specified username will be added.",
+            "name": "type",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The orgID in which the ACL for the destination type or object type exists.",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The destination type or object type that is being protected by the ACL.",
+            "name": "key",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The username to add to the specified ACL.",
+            "name": "username",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The username was added to the specified ACL.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to add the username to the specified ACL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "delete": {
+        "description": "Remove a username from an ACL for a destination type or an object type. If the last username is removed,\nthe ACL is deleted as well.",
+        "produces": [
+          "text/plain"
+        ],
+        "summary": "Remove a username from an ACL for a destination type or an object type.",
+        "operationId": "handleACLDelete",
+        "parameters": [
+          {
+            "enum": [
+              "destinations",
+              "objects"
+            ],
+            "type": "string",
+            "description": "The type of the ACL to remove the specified username from.",
+            "name": "type",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The orgID in which the ACL for the destination type or object type exists.",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The destination type or object type that is being protected by the ACL.",
+            "name": "key",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The username to remove from the specified ACL.",
+            "name": "username",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The username was removed from the specified ACL.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to remove the username from the specified ACL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "Destination": {
+      "description": "Each sync service edge node (ESS) has an address that is composed of the node's ID, Type, and Organization.\nAn ESS node communicates with the CSS using either MQTT or HTTP.",
+      "type": "object",
+      "title": "Destination describes a sync service node.",
+      "required": [
+        "destinationType",
+        "destinationID",
+        "communication"
+      ],
+      "properties": {
+        "communication": {
+          "description": "Communication is the communication protocol used by the destination to connect (can be MQTT or HTTP)",
+          "type": "string",
+          "x-go-name": "Communication"
+        },
+        "destinationID": {
+          "description": "DestID is the destination ID",
+          "type": "string",
+          "x-go-name": "DestID"
+        },
+        "destinationOrgID": {
+          "description": "DestOrgID is the destination organization ID\nEach sync service object belongs to a single organization",
+          "type": "string",
+          "x-go-name": "DestOrgID"
+        },
+        "destinationType": {
+          "description": "DestType is the destination type",
+          "type": "string",
+          "x-go-name": "DestType"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
+    "DestinationsStatus": {
+      "description": "DestinationsStatus describes the delivery status of an object for a destination\nDestinationsStatus provides information about the delivery status of an object for a certain destination.\nThe status can be one of the following:\nIndication whether the object has been delivered to the destination\npending - inidicates that the object is pending delivery to this destination\ndelivering - indicates that the object is being delivered to this destination\ndelivered - indicates that the object was delivered to this destination",
+      "type": "object",
+      "required": [
+        "destinationType",
+        "destinationID",
+        "status"
+      ],
+      "properties": {
+        "destinationID": {
+          "description": "DestID is the destination ID",
+          "type": "string",
+          "x-go-name": "DestID"
+        },
+        "destinationType": {
+          "description": "DestType is the destination type",
+          "type": "string",
+          "x-go-name": "DestType"
+        },
+        "status": {
+          "description": "Status is the destination status",
+          "type": "string",
+          "x-go-name": "Status"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
+    "MessagingGroup": {
+      "description": "MessagingGroup maps organization to its messaging group",
+      "type": "object",
+      "properties": {
+        "GroupName": {
+          "type": "string"
+        },
+        "OrgID": {
+          "type": "string"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
+    "MetaData": {
+      "description": "Every object includes metadata (mandatory) and data (optional). The metadata and data can be updated independently.\nEach sync service node (ESS) has an address that is composed of the node's ID, Type, and Organization.\nTo send an object to a single node set the destinationType and destinationID fields to match the node's Type and ID.\nTo send an object to all the nodes of a certain type set destinationType to the appropriate type and leave destinationID empty.\nIf both destinationType and destinationID are empty the object is sent to all nodes.",
+      "type": "object",
+      "title": "MetaData is the metadata that identifies and defines the sync service object.",
+      "required": [
+        "objectID",
+        "objectType"
+      ],
+      "properties": {
+        "activationTime": {
+          "description": "ActivationTime is a timestamp/date as to when this object should automatically be activated.\nThe timestamp should be provided in RFC3339 format.\nOptional field, if omitted (and Inactive is true) the object is never automatically activated.",
+          "type": "string",
+          "x-go-name": "ActivationTime"
+        },
+        "autodelete": {
+          "description": "AutoDelete is a flag indicating whether to delete the object after it is delivered to all its destinations from the DestinationsList.\nOptional field, default is false (do not delete).\nThis field is used only when working with the CSS. Objects are always deleted after delivery on the ESS.",
+          "type": "boolean",
+          "x-go-name": "AutoDelete"
+        },
+        "chunkSize": {
+          "description": "ChunkSize is an internal field indicating the maximal message payload size.\nThis field should not be set by users.",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ChunkSize"
+        },
+        "consumers": {
+          "description": "ExpectedConsumers is the number of applications that are expected to indicate that they have consumed the object.\nOptional field, default is 1.",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ExpectedConsumers"
+        },
+        "deleted": {
+          "description": "Deleted is a flag indicating to applications polling for updates that this object has been deleted.\nRead only field, should not be set by users.",
+          "type": "boolean",
+          "x-go-name": "Deleted"
+        },
+        "description": {
+          "description": "Description is a textual description of the object.\nOptional field, empty by default.",
+          "type": "string",
+          "x-go-name": "Description"
+        },
+        "destinationDataUri": {
+          "description": "DestinationDataURI is a URI indicating where the receiver of the object should store it.\nCurrently only file URIs are supported.\nThis field is available only when working with the CSS.\nOptional field, if omitted the object is stored in the node's internal storage.",
+          "type": "string",
+          "x-go-name": "DestinationDataURI"
+        },
+        "destinationID": {
+          "description": "DestID is the ID of the destination. If omitted the object is sent to all ESSs with the same DestType.\nThis field is ignored when working with ESS (the destination is the CSS).",
+          "type": "string",
+          "x-go-name": "DestID"
+        },
+        "destinationOrgID": {
+          "description": "DestOrgID is the organization ID of the object (an object belongs to exactly one organization).\nThis field is ignored when working with ESS (the ESS's orgID is used).",
+          "type": "string",
+          "x-go-name": "DestOrgID"
+        },
+        "destinationType": {
+          "description": "DestType is the type of destination to send the object to.\nIf omitted (and if DestinationsList is omitted too) the object is broadcasted to all known destinations.\nThis field is ignored when working with ESS (the destination is always the CSS).",
+          "type": "string",
+          "x-go-name": "DestType"
+        },
+        "destinationsList": {
+          "description": "DestinationsList is the list of destinations as type:id pairs to send the object to.\nWhen a DestinationsList is provided DestType and DestID must be omitted.\nThis field is ignored when working with ESS (the destination is always the CSS).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "DestinationsList"
+        },
+        "expiration": {
+          "description": "Expiration is a timestamp/date indicating when the object expires.\nWhen the object expires it is automatically deleted.\nThe timestamp should be provided in RFC3339 format.\nOptional field, if omitted the object doesn't expire.",
+          "type": "string",
+          "x-go-name": "Expiration"
+        },
+        "inactive": {
+          "description": "Inactive is a flag indicating that this object is inactive for now.\nAn object can be created as inactive which means it is not delivered to its destination. The object can be activated later.\nOptional field, default is false (object active).",
+          "type": "boolean",
+          "x-go-name": "Inactive"
+        },
+        "instanceID": {
+          "description": "InstanceID is an internal instance ID.\nThis field should not be set by users.",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "InstanceID"
+        },
+        "link": {
+          "description": "Link is a link to where the data for this object can be fetched from.\nThe link is set and used by the application. The sync service does not access the link.\nOptional field, if omitted the data must be provided by the application.",
+          "type": "string",
+          "x-go-name": "Link"
+        },
+        "metaOnly": {
+          "description": "MetaOnly is a flag that indicates that this update is only of the metadata. The current object's data is left unchanged.\nOptional field, default is false (both data and metadata are updated).",
+          "type": "boolean",
+          "x-go-name": "MetaOnly"
+        },
+        "noData": {
+          "description": "NoData is a flag indicating that there is no data for this object.\nObjects with no data can be used, for example, to send notifications.\nOptional field, default is false (object includes data).",
+          "type": "boolean",
+          "x-go-name": "NoData"
+        },
+        "objectID": {
+          "description": "ObjectID is a unique identifier of the object",
+          "type": "string",
+          "x-go-name": "ObjectID"
+        },
+        "objectSize": {
+          "description": "ObjectSize is an internal field indicating the size of the object's data.\nThis field should not be set by users.",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ObjectSize"
+        },
+        "objectType": {
+          "description": "ObjectType is the type of the object.\nThe type is used to group multiple objects, for example when checking for object updates.",
+          "type": "string",
+          "x-go-name": "ObjectType"
+        },
+        "originID": {
+          "description": "OriginID is the ID of origin of the object. Set by the internal code.\nRead only field, should not be set by users.",
+          "type": "string",
+          "x-go-name": "OriginID"
+        },
+        "originType": {
+          "description": "OriginType is the type of origin of the object. Set by the internal code.\nRead only field, should not be set by users.",
+          "type": "string",
+          "x-go-name": "OriginType"
+        },
+        "sourceDataUri": {
+          "description": "SourceDataURI is a URI indicating where the sender of the object should read the data from.\nCurrently only file URIs are supported.\nThis field is available only when working with the ESS.\nOptional field, if omitted the object's data should be provided by the user.",
+          "type": "string",
+          "x-go-name": "SourceDataURI"
+        },
+        "version": {
+          "description": "Version is the object's version (as used by the application).\nOptional field, empty by default.",
+          "type": "string",
+          "x-go-name": "Version"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
+    "Organization": {
+      "description": "Organization contains organization's information",
+      "type": "object",
+      "properties": {
+        "address": {
+          "description": "Address is the broker address to be used when connecting to this organization",
+          "type": "string",
+          "x-go-name": "Address"
+        },
+        "org-id": {
+          "description": "OrgID is the organization ID of the organization",
+          "type": "string",
+          "x-go-name": "OrgID"
+        },
+        "password": {
+          "description": "Password is the password to be used when connecting to this organization",
+          "type": "string",
+          "x-go-name": "Password"
+        },
+        "user": {
+          "description": "User is the user name to be used when connecting to this organization",
+          "type": "string",
+          "x-go-name": "User"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
+    "StoredOrganization": {
+      "description": "StoredOrganization contains organization and its update timestamp",
+      "type": "object",
+      "properties": {
+        "Org": {
+          "$ref": "#/definitions/Organization"
+        },
+        "Timestamp": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
+    "bulkACLUpdate": {
+      "description": "bulkACLUpdate is the payload used when performing a bulk update on an ACL (either adding usernames to an\nACL or removing usernames from an ACL.",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Action is an action, which can be either add (to add usernames) or remove (to remove usernames)",
+          "type": "string",
+          "x-go-name": "Action"
+        },
+        "usernames": {
+          "description": "Usernames is an array of usernames to be added or removed from the ACL as appropriate",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Usernames"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/core/base"
+    },
+    "objectUpdate": {
+      "description": "objectUpdate includes the object's metadata and data\nA sync service object includes metadata and optionally binary data.\nWhen an object is created the metadata must be provided. The metadata and the data can then be updated together or one at a time.",
+      "type": "object",
+      "properties": {
+        "data": {
+          "description": "Data is a the object's binary data",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint8"
+          },
+          "x-go-name": "Data"
+        },
+        "meta": {
+          "$ref": "#/definitions/MetaData"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/core/base"
+    },
+    "organization": {
+      "description": "organization includes the organization's id and broker address",
+      "type": "object",
+      "properties": {
+        "address": {
+          "description": "Broker address",
+          "type": "string",
+          "x-go-name": "Address"
+        },
+        "org-id": {
+          "description": "Organization OD",
+          "type": "string",
+          "x-go-name": "OrgID"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/core/base"
+    },
+    "webhookUpdate": {
+      "description": "webhookUpdate includes the webhook's action and URL\nA webhook can be used to allow the sync service to invoke actions when new information becomes available.\nAn application can choose between using a webhook and periodically polling the sync service for updates.",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Action is an action can be either register (create/update a webhook) or delete (delete the webhook)",
+          "type": "string",
+          "x-go-name": "Action"
+        },
+        "url": {
+          "description": "URL is the URL to invoke when new information for the object is available",
+          "type": "string",
+          "x-go-name": "URL"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/core/base"
+    }
+  }
+}
