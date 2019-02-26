@@ -76,6 +76,24 @@ func (communication *Wrapper) SendNotificationMessage(notificationTopic string, 
 	return comm.SendNotificationMessage(notificationTopic, destType, destID, instanceID, metaData)
 }
 
+// SendFeedbackMessage sends a feedback message from the ESS to the CSS
+func (communication *Wrapper) SendFeedbackMessage(code int, retryInterval int32, reason string, metaData *common.MetaData) common.SyncServiceError {
+	comm, err := communication.selectCommunicator(common.Configuration.CommunicationProtocol, "", "", "")
+	if err != nil {
+		return err
+	}
+	return comm.SendFeedbackMessage(code, retryInterval, reason, metaData)
+}
+
+// SendErrorMessage sends an error message from the ESS to the CSS
+func (communication *Wrapper) SendErrorMessage(err common.SyncServiceError, metaData *common.MetaData) common.SyncServiceError {
+	comm, err := communication.selectCommunicator(common.Configuration.CommunicationProtocol, "", "", "")
+	if err != nil {
+		return err
+	}
+	return comm.SendErrorMessage(err, metaData)
+}
+
 // Register sends a registration message to be sent by an ESS
 func (communication *Wrapper) Register() common.SyncServiceError {
 	comm, err := communication.selectCommunicator(common.Configuration.CommunicationProtocol, "", "", "")

@@ -475,7 +475,7 @@ func (store *BoltStorage) GetObjectDestinations(metaData common.MetaData) ([]com
 }
 
 // UpdateObjectDeliveryStatus changes the object's delivery status for the destination
-func (store *BoltStorage) UpdateObjectDeliveryStatus(status string, orgID string, objectType string, objectID string,
+func (store *BoltStorage) UpdateObjectDeliveryStatus(status string, message string, orgID string, objectType string, objectID string,
 	destType string, destID string) common.SyncServiceError {
 	return nil
 }
@@ -577,6 +577,11 @@ func (store *BoltStorage) RetrieveDestination(orgID string, destType string, des
 // RetrieveDestinationProtocol retrieves communication protocol for the destination
 func (store *BoltStorage) RetrieveDestinationProtocol(orgID string, destType string, destID string) (string, common.SyncServiceError) {
 	return common.Configuration.CommunicationProtocol, nil
+}
+
+// GetObjectsForDestination retrieves objects that are in use on a given node
+func (store *BoltStorage) GetObjectsForDestination(orgID string, destType string, destID string) ([]common.ObjectStatus, common.SyncServiceError) {
+	return nil, nil
 }
 
 // UpdateNotificationRecord updates/adds a notification record to the object

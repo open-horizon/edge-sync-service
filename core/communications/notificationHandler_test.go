@@ -12,13 +12,7 @@ func TestNotificationHandler(t *testing.T) {
 
 	if common.Registered {
 		t.Errorf("Registered flag is true")
-	} else {
-		handleRegAck()
-		if !common.Registered {
-			t.Errorf("Registered flag is false after calling handleRegAck")
-		}
 	}
-
 	common.Configuration.NodeType = common.ESS
 	common.Configuration.DestinationType = "device"
 	common.Configuration.DestinationID = "dev1"
@@ -145,18 +139,13 @@ func TestNotificationHandler(t *testing.T) {
 			t.Errorf("An error occurred in notification fetch (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 		} else {
 			if notification == nil {
-				if status == common.PartiallyReceived {
-					t.Errorf("No notification record (objectID = %s)", row.metaData.ObjectID)
-				}
-			} else {
-				if status == common.CompletelyReceived {
-					t.Errorf("Notification record created for completely received object (objectID = %s): %#v", row.metaData.ObjectID, notification)
-				} else {
-					if notification.Status != common.Getdata {
-						t.Errorf("Wrong notification status: %s instead of getdata (objectID = %s)", notification.Status,
-							row.metaData.ObjectID)
-					}
-				}
+				t.Errorf("No notification record (objectID = %s)", row.metaData.ObjectID)
+			} else if notification.Status != common.Getdata && status == common.PartiallyReceived {
+				t.Errorf("Wrong notification status: %s instead of getdata (objectID = %s)", notification.Status,
+					row.metaData.ObjectID)
+			} else if notification.Status != common.Received && status == common.CompletelyReceived {
+				t.Errorf("Wrong notification status: %s instead of getdata (objectID = %s)", notification.Status,
+					row.metaData.ObjectID)
 			}
 		}
 
@@ -166,7 +155,7 @@ func TestNotificationHandler(t *testing.T) {
 		common.Configuration.NodeType = common.ESS
 
 		if row.chunk1 != nil {
-			if err := handleData(row.chunk1); err != nil {
+			if _, err := handleData(row.chunk1); err != nil {
 				t.Errorf("handleData failed (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 			} else if row.chunk2 != nil {
 				// Check notification
@@ -213,7 +202,7 @@ func TestNotificationHandler(t *testing.T) {
 					}
 				}
 				// Get another chunk
-				if err := handleData(row.chunk2); err != nil {
+				if _, err := handleData(row.chunk2); err != nil {
 					t.Errorf("handleData failed (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 				} else {
 					id := common.GetNotificationID(*notification)
@@ -416,9 +405,9 @@ func TestNotificationHandler(t *testing.T) {
 						t.Errorf("No notification record (objectID = %s)", row.metaData.ObjectID)
 
 					} else {
-						if notification.Status != common.AckConsumed {
-							t.Errorf("Wrong notification status: %s instead of ackconsumed (objectID = %s)", notification.Status,
-								row.metaData.ObjectID)
+						if notification.Status != common.ConsumedByDestination {
+							t.Errorf("Wrong notification status: %s instead of ConsumedByDestination (objectID = %s)",
+								notification.Status, row.metaData.ObjectID)
 						}
 					}
 				}

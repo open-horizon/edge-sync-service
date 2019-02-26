@@ -1,6 +1,7 @@
 package security
 
 import (
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -70,10 +71,15 @@ func SetAuthentication(auth Authentication) {
 	authenticator = auth
 }
 
-// Authenticate  authenticates a particular appKey/appSecret pair and indicates
+// Authenticate  authenticates a particular HTTP request and indicates
 // whether it is an edge node, org admin, or plain user. Also returned is the
 // user's org and identitity. An edge node's identity is destType/destID
-func Authenticate(appKey, appSecret string) (int, string, string) {
+func Authenticate(request *http.Request) (int, string, string) {
+	appKey, appSecret, ok := request.BasicAuth()
+	if !ok {
+		return AuthFailed, "", ""
+	}
+
 	authenticationCacheLock.RLock()
 	entry, ok := authenticationCache[appKey]
 	authenticationCacheLock.RUnlock()
@@ -85,7 +91,7 @@ func Authenticate(appKey, appSecret string) (int, string, string) {
 		}
 
 	}
-	code, orgID, userID := authenticator.Authenticate(appKey, appSecret)
+	code, orgID, userID := authenticator.Authenticate(request)
 	if code != AuthFailed {
 		entry = authenticationCacheElement{appSecret, code, orgID, userID, now.Add(authenticationCacheDuration)}
 		authenticationCacheLock.Lock()
@@ -100,10 +106,10 @@ func Authenticate(appKey, appSecret string) (int, string, string) {
 	return code, orgID, userID
 }
 
-// CanUserCreateObject checks if the user identified by the supplied username and password,
+// CanUserCreateObject checks if the user identified by the credentials in the supplied request,
 // can create an object of the object type, and send it to the destinations in the meta data.
-func CanUserCreateObject(username, password, orgID string, metaData *common.MetaData) bool {
-	code, userOrgID, userID := Authenticate(username, password)
+func CanUserCreateObject(request *http.Request, orgID string, metaData *common.MetaData) bool {
+	code, userOrgID, userID := Authenticate(request)
 	if code == AuthFailed || code == AuthEdgeNode || userOrgID != orgID {
 		return false
 	}
@@ -144,10 +150,10 @@ func CanUserCreateObject(username, password, orgID string, metaData *common.Meta
 	return false
 }
 
-// CanUserAccessObject checks if the user identified by the supplied username and password,
+// CanUserAccessObject checks if the user identified by the credentials in the supplied request,
 // can read/modify the specified object type.
-func CanUserAccessObject(username, password, orgID, objectType string) bool {
-	code, userOrgID, userID := Authenticate(username, password)
+func CanUserAccessObject(request *http.Request, orgID, objectType string) bool {
+	code, userOrgID, userID := Authenticate(request)
 	if code == AuthFailed || code == AuthEdgeNode || userOrgID != orgID {
 		return false
 	}

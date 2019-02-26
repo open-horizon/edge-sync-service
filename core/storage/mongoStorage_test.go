@@ -485,6 +485,9 @@ func TestMongoStorageObjectDestinations(t *testing.T) {
 				} else if dests[0].Status != common.Pending {
 					t.Errorf("GetObjectDestinations returned wrong status: %s instead of Pending (objectID = %s).\n", dests[0].Status,
 						test.metaData.ObjectID)
+				} else if dests[0].Message != "" {
+					t.Errorf("GetObjectDestinations returned wrong message: %s instead of empty message (objectID = %s).\n", dests[0].Message,
+						test.metaData.ObjectID)
 				}
 			} else {
 				if len(dests) != 2 {
@@ -501,6 +504,14 @@ func TestMongoStorageObjectDestinations(t *testing.T) {
 						}
 						if dests[1].Status != common.Pending {
 							t.Errorf("GetObjectDestinations returned wrong status: %s instead of Pending (objectID = %s).\n", dests[1].Status,
+								test.metaData.ObjectID)
+						}
+						if dests[0].Message != "" {
+							t.Errorf("GetObjectDestinations returned wrong message: %s instead of empty message (objectID = %s).\n", dests[0].Message,
+								test.metaData.ObjectID)
+						}
+						if dests[1].Message != "" {
+							t.Errorf("GetObjectDestinations returned wrong message: %s instead of empty message (objectID = %s).\n", dests[1].Message,
 								test.metaData.ObjectID)
 						}
 					}
@@ -526,7 +537,7 @@ func TestMongoStorageObjectDestinations(t *testing.T) {
 		}
 
 		// Change status to Delivered for dest1
-		if err := store.UpdateObjectDeliveryStatus(common.Delivered, test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID,
+		if err := store.UpdateObjectDeliveryStatus(common.Delivered, "", test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID,
 			dest1.DestType, dest1.DestID); err != nil {
 			t.Errorf("UpdateObjectDeliveryStatus failed (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
 		} else if dests, err := store.GetObjectDestinationsList(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID); err != nil {
@@ -539,6 +550,24 @@ func TestMongoStorageObjectDestinations(t *testing.T) {
 				if d.Status != common.Delivered && d.Destination != dest2 {
 					t.Errorf("GetObjectDestinations returned wrong status: %s instead of Delivered (objectID = %s).\n", d.Status,
 						test.metaData.ObjectID)
+				}
+			}
+		}
+
+		// Change status to Error for dest1
+		if err := store.UpdateObjectDeliveryStatus(common.Error, "Error", test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID,
+			dest1.DestType, dest1.DestID); err != nil {
+			t.Errorf("UpdateObjectDeliveryStatus failed (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+		} else if dests, err := store.GetObjectDestinationsList(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID); err != nil {
+			t.Errorf("GetObjectDestinationsList failed (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+		} else {
+			if len(dests) == 0 {
+				t.Errorf("GetObjectDestinationsList returned no destinations (objectID = %s).\n", test.metaData.ObjectID)
+			}
+			for _, d := range dests {
+				if (d.Status != common.Error || d.Message != "Error") && d.Destination != dest2 {
+					t.Errorf("GetObjectDestinations returned wrong status or message: (%s, %s) instead of (error, Error) (objectID = %s).\n", d.Status,
+						d.Message, test.metaData.ObjectID)
 				}
 			}
 		}

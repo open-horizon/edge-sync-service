@@ -499,9 +499,18 @@ func getObjectDestinationsStatus(orgID string, objectType string, objectID strin
 	}
 	result := make([]common.DestinationsStatus, 0)
 	for _, d := range dests {
-		result = append(result, common.DestinationsStatus{DestType: d.Destination.DestType, DestID: d.Destination.DestID, Status: d.Status})
+		result = append(result, common.DestinationsStatus{DestType: d.Destination.DestType, DestID: d.Destination.DestID,
+			Status: d.Status, Message: d.Message})
 	}
 	return result, nil
+}
+
+// Get objects that are in use on a given node
+func getObjectsForDestination(orgID string, destType string, destID string) ([]common.ObjectStatus, common.SyncServiceError) {
+	if common.Configuration.NodeType != common.CSS {
+		return nil, nil
+	}
+	return store.GetObjectsForDestination(orgID, destType, destID)
 }
 
 func deleteWebhook(orgID string, objectType string, url string) common.SyncServiceError {

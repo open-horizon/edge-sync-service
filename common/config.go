@@ -104,6 +104,11 @@ type Config struct {
 	// LeadershipTimeout is the timeout for leadership updates in seconds
 	LeadershipTimeout int32 `env:"LEADERSHIP_TIMEOUT"`
 
+	// AuthenticationHandler indicates which Authentication handler should be used.
+	// The current possible values are:
+	//     dummy - for the dummyAuthenticate Authentication handler
+	AuthenticationHandler string `env:"AUTHENTICATION_HANDLER"`
+
 	// CommunicationProtocol is a comma separated list of protocols to be used for communication between CSS and ESS
 	//  The elements of the list can be 'http', 'mqtt', and 'wiotp'
 	//  wiotp indicates MQTT communication via the Watson IoT Platform and mqtt indicates direct MQTT communication to a broker
@@ -581,6 +586,7 @@ func init() {
 	Configuration.SecureListeningPort = 8443
 	Configuration.UnsecureListeningPort = 8080
 	Configuration.LeadershipTimeout = 30
+	Configuration.AuthenticationHandler = "dummy"
 	Configuration.CSSOnWIoTP = false
 	Configuration.UsingEdgeConnector = false
 	Configuration.MQTTUseSSL = true

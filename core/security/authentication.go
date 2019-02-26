@@ -1,13 +1,15 @@
 package security
 
+import "net/http"
+
 // Authentication is the interface invoked by the Sync Service for authentication
 // related stuff. An implementation of this interface is provided by the code
 // starting up the Sync Service to the Sync Service core code.type
 type Authentication interface {
-	// Authenticate  authenticates a particular appKey/appSecret pair and indicates
+	// Authenticate  authenticates a particular HTTP request and indicates
 	// whether it is an edge node, org admin, or plain user. Also returned is the
 	// user's org and identitity. An edge node's identity is destType/destID
-	Authenticate(appKey, appSecret string) (int, string, string)
+	Authenticate(request *http.Request) (int, string, string)
 
 	// KeyandSecretForURL returns an app key and an app secret pair to be
 	// used by the ESS when communicating with the specified URL.

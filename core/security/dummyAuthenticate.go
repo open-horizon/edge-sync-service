@@ -2,6 +2,7 @@ package security
 
 import (
 	"encoding/json"
+	"net/http"
 	"os"
 	"strings"
 
@@ -47,7 +48,7 @@ func (auth *DummyAuthenticate) Start() {
 	return
 }
 
-// Authenticate  authenticates a particular appKey/appSecret pair and indicates
+// Authenticate  authenticates a particular HTTP request and indicates
 // whether it is an edge node, org admin, or plain user. Also returned is the
 // user's org and identitity. An edge node's identity is destType/destID
 //
@@ -57,7 +58,12 @@ func (auth *DummyAuthenticate) Start() {
 //      if a userID is a regular user or a sync admin. If the userID does not
 //      appear there, it is assumed to be an admin for the specified org.
 //      Edge node app keys are of the form orgID/destType/destID
-func (auth *DummyAuthenticate) Authenticate(appKey, appSecret string) (int, string, string) {
+func (auth *DummyAuthenticate) Authenticate(request *http.Request) (int, string, string) {
+	appKey, _, ok := request.BasicAuth()
+	if !ok {
+		return AuthFailed, "", ""
+	}
+
 	parts := strings.Split(appKey, "/")
 	if len(parts) == 3 {
 		return AuthEdgeNode, parts[0], parts[1] + "/" + parts[2]

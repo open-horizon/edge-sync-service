@@ -29,13 +29,21 @@ var unauthorizedBytes = []byte("Unauthorized")
 
 // HTTP is the struct for the HTTP communications layer
 type HTTP struct {
-	httpClient http.Client
-	started    bool
+	httpClient          http.Client
+	started             bool
+	httpPollTimer       *time.Timer
+	httpPollStopChannel chan int
 }
 
 type updateMessage struct {
 	Type     string
 	MetaData common.MetaData
+}
+
+type feedbackMessage struct {
+	Code          int
+	RetryInterval int32
+	Reason        string
 }
 
 // StartCommunication starts communications
@@ -69,13 +77,58 @@ func (communication *HTTP) StartCommunication() common.SyncServiceError {
 		}
 	}
 	communication.started = true
+
 	return nil
+}
+
+func (communication *HTTP) startPolling() {
+	go func() {
+		keepRunning := true
+		initialPoll := true
+		interval := uint16(1)
+		communication.httpPollTimer = time.NewTimer(time.Second * time.Duration(interval))
+		for keepRunning {
+			select {
+			case <-communication.httpPollTimer.C:
+				update := false
+				for communication.Poll() {
+					update = true
+				}
+				if initialPoll || update {
+					interval = common.Configuration.HTTPPollingInterval / 10
+					update = false
+					initialPoll = false
+				} else if interval < common.Configuration.HTTPPollingInterval {
+					interval += common.Configuration.HTTPPollingInterval / 10
+				}
+				communication.httpPollTimer = time.NewTimer(time.Second * time.Duration(interval))
+
+			case <-communication.httpPollStopChannel:
+				keepRunning = false
+			}
+		}
+		communication.httpPollTimer = nil
+	}()
 }
 
 // StopCommunication stops communications
 func (communication *HTTP) StopCommunication() common.SyncServiceError {
 	communication.started = false
+	if communication.httpPollTimer != nil {
+		communication.httpPollTimer.Stop()
+		communication.httpPollStopChannel <- 1
+	}
+
 	return nil
+}
+
+func (communication *HTTP) handleRegAck() {
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("Received regack")
+	}
+	common.Registered = true
+	communication.httpPollStopChannel = make(chan int, 1)
+	communication.startPolling()
 }
 
 func (communication *HTTP) createError(response *http.Response, action string) common.SyncServiceError {
@@ -91,13 +144,7 @@ func (communication *HTTP) createError(response *http.Response, action string) c
 }
 
 func (communication *HTTP) handleGetUpdates(writer http.ResponseWriter, request *http.Request) {
-	username, password, ok := request.BasicAuth()
-	if !ok {
-		writer.WriteHeader(http.StatusForbidden)
-		writer.Write(unauthorizedBytes)
-		return
-	}
-	code, orgID, user := security.Authenticate(username, password)
+	code, orgID, user := security.Authenticate(request)
 	if code != security.AuthEdgeNode {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
@@ -223,7 +270,7 @@ func (communication *HTTP) SendNotificationMessage(notificationTopic string, des
 		return &Error{"Failed to send HTTP request. Error: " + err.Error()}
 	}
 	defer response.Body.Close()
-	if response.StatusCode == http.StatusOK {
+	if response.StatusCode == http.StatusNoContent {
 		switch notificationTopic {
 		case common.Update:
 			// Push the data
@@ -251,7 +298,7 @@ func (communication *HTTP) SendNotificationMessage(notificationTopic string, des
 		return nil
 	}
 
-	return communication.createError(response, "send notification")
+	return communication.createError(response, "send notification "+notificationTopic)
 }
 
 func (communication *HTTP) handleRegister(writer http.ResponseWriter, request *http.Request) {
@@ -261,13 +308,7 @@ func (communication *HTTP) handleRegister(writer http.ResponseWriter, request *h
 	}
 
 	if request.Method == http.MethodPut {
-		username, password, ok := request.BasicAuth()
-		if !ok {
-			writer.WriteHeader(http.StatusForbidden)
-			writer.Write(unauthorizedBytes)
-			return
-		}
-		code, orgID, user := security.Authenticate(username, password)
+		code, orgID, user := security.Authenticate(request)
 		if code != security.AuthEdgeNode {
 			writer.WriteHeader(http.StatusForbidden)
 			writer.Write(unauthorizedBytes)
@@ -296,7 +337,7 @@ func (communication *HTTP) handleRegister(writer http.ResponseWriter, request *h
 			common.Destination{DestOrgID: orgID, DestType: destType, DestID: destID, Communication: common.HTTPProtocol},
 			persistentStorage)
 		if err == nil {
-			writer.WriteHeader(http.StatusOK)
+			writer.WriteHeader(http.StatusNoContent)
 		} else {
 			if log.IsLogging(logger.ERROR) {
 				log.Error(err.Error())
@@ -327,8 +368,8 @@ func (communication *HTTP) Register() common.SyncServiceError {
 		return &Error{"Failed to send HTTP request to register. Error: " + err.Error()}
 	}
 	defer response.Body.Close()
-	if response.StatusCode == http.StatusOK {
-		handleRegAck()
+	if response.StatusCode == http.StatusNoContent {
+		communication.handleRegAck()
 		return nil
 	}
 	if log.IsLogging(logger.ERROR) {
@@ -365,9 +406,12 @@ func (communication *HTTP) GetData(metaData common.MetaData, offset int64) commo
 		return &Error{"Error in GetData: failed to get data. Error: " + err.Error()}
 	}
 	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return &notificationHandlerError{"Error in GetData: failed to receive data from the other side"}
+	}
 	if metaData.DestinationDataURI != "" {
 		if _, err := dataURI.StoreData(metaData.DestinationDataURI, response.Body, 0); err != nil {
-			return &notificationHandlerError{fmt.Sprintf("Error in GetData: failed to store data in data URI. Error: %s\n", err)}
+			return &notificationHandlerError{fmt.Sprintf("Error in GetData: failed to store data in data URI. Error: %s", err)}
 		}
 	} else {
 		found, err := Store.StoreObjectData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, response.Body)
@@ -449,8 +493,13 @@ func (communication *HTTP) Poll() bool {
 	for _, message := range payload {
 		switch message.Type {
 		case common.Update:
-			if err = handleUpdate(message.MetaData, 1); err != nil && log.IsLogging(logger.ERROR) {
-				log.Error("Failed to handle update. Error: %s\n", err)
+			if err = handleUpdate(message.MetaData, 1); err != nil {
+				if log.IsLogging(logger.ERROR) {
+					log.Error("Failed to handle update. Error: %s\n", err)
+				}
+				if err = communication.SendErrorMessage(err, &message.MetaData); err != nil && log.IsLogging(logger.ERROR) {
+					log.Error("Failed to send error message. Error: %s\n", err)
+				}
 			}
 		case common.Consumed:
 			err = handleObjectConsumed(message.MetaData.DestOrgID, message.MetaData.ObjectType,
@@ -494,13 +543,7 @@ func (communication *HTTP) extract(writer http.ResponseWriter, request *http.Req
 	var err error
 	ok = false
 
-	username, password, ok := request.BasicAuth()
-	if !ok {
-		writer.WriteHeader(http.StatusForbidden)
-		writer.Write(unauthorizedBytes)
-		return
-	}
-	code, orgID, user := security.Authenticate(username, password)
+	code, orgID, user := security.Authenticate(request)
 	if code != security.AuthEdgeNode {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
@@ -584,6 +627,13 @@ func (communication *HTTP) handleObjects(writer http.ResponseWriter, request *ht
 			err = handleAckConsumed(orgID, objectType, objectID, destType, destID, instanceID)
 		case common.Received:
 			err = handleObjectReceived(orgID, objectType, objectID, destType, destID, instanceID)
+		case common.Feedback:
+
+			payload := feedbackMessage{}
+			if err = json.NewDecoder(request.Body).Decode(&payload); err == nil {
+				err = handleFeedback(orgID, objectType, objectID, destType, destID, instanceID, payload.Code, payload.RetryInterval, payload.Reason)
+			}
+
 		case common.Delete:
 			metaData, extractErr := communication.extractMetaData(request)
 			if extractErr != nil {
@@ -612,7 +662,7 @@ func (communication *HTTP) handleObjects(writer http.ResponseWriter, request *ht
 			return
 		}
 		if err == nil {
-			writer.WriteHeader(http.StatusOK)
+			writer.WriteHeader(http.StatusNoContent)
 		} else {
 			if log.IsLogging(logger.ERROR) {
 				log.Error(err.Error())
@@ -708,7 +758,7 @@ func (communication *HTTP) pushData(metaData *common.MetaData) common.SyncServic
 	if err != nil {
 		return &Error{"Failed to send HTTP request. Error: " + err.Error()}
 	}
-	if response.StatusCode != http.StatusOK {
+	if response.StatusCode != http.StatusNoContent {
 		if log.IsLogging(logger.ERROR) {
 			log.Error("Failed to send data. Received code: %d %s", response.StatusCode, response.Status)
 		}
@@ -733,7 +783,7 @@ func (communication *HTTP) ResendObjects() common.SyncServiceError {
 		return &Error{"Failed to send HTTP request to resend objects. Error: " + err.Error()}
 	}
 	defer response.Body.Close()
-	if response.StatusCode == http.StatusOK {
+	if response.StatusCode == http.StatusNoContent {
 		handleAckResend()
 		return nil
 	}
@@ -768,6 +818,56 @@ func (communication *HTTP) UpdateOrganization(org common.Organization, timestamp
 // DeleteOrganization removes an organization
 func (communication *HTTP) DeleteOrganization(orgID string) common.SyncServiceError {
 	return nil
+}
+
+// SendFeedbackMessage sends a feedback message from the ESS to the CSS
+func (communication *HTTP) SendFeedbackMessage(code int, retryInterval int32, reason string, metaData *common.MetaData) common.SyncServiceError {
+	if common.Configuration.NodeType != common.ESS {
+		return nil
+	}
+
+	notification := common.Notification{ObjectID: metaData.ObjectID, ObjectType: metaData.ObjectType,
+		DestOrgID: metaData.DestOrgID, DestID: metaData.OriginID, DestType: metaData.OriginType,
+		Status: common.Feedback, InstanceID: metaData.InstanceID}
+	if err := Store.UpdateNotificationRecord(notification); err != nil {
+		return err
+	}
+
+	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, common.Feedback)
+
+	var request *http.Request
+	var err error
+
+	body, err := json.MarshalIndent(feedbackMessage{code, retryInterval, reason}, "", "  ")
+	if err != nil {
+		return &Error{"Failed to marshal payload. Error: " + err.Error()}
+	}
+
+	request, err = http.NewRequest("PUT", url, bytes.NewReader(body))
+	request.ContentLength = int64(len(body))
+
+	username, password := security.KeyandSecretForURL(url)
+	request.SetBasicAuth(username, password)
+
+	response, err := communication.httpClient.Do(request)
+	if err != nil {
+		return &Error{"Failed to send HTTP request. Error: " + err.Error()}
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusNoContent {
+		return handleAckFeedback(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID, metaData.InstanceID)
+	}
+
+	return communication.createError(response, "send feedback")
+}
+
+// SendErrorMessage sends an error message from the ESS to the CSS
+func (communication *HTTP) SendErrorMessage(err common.SyncServiceError, metaData *common.MetaData) common.SyncServiceError {
+	if common.Configuration.NodeType != common.ESS {
+		return nil
+	}
+	code, retryInterval, reason := common.CreateFeedback(err)
+	return communication.SendFeedbackMessage(code, retryInterval, reason, metaData)
 }
 
 func buildObjectURL(orgID string, objectType string, objectID string, instanceID int64, topic string) string {

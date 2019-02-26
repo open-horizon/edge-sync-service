@@ -26,6 +26,9 @@ type messagePayload struct {
 	Offset            int64              `json:"offset,omitempty"`
 	Destination       common.Destination `json:"destination,omitempty"`
 	PersistentStorage bool               `json:"persistent,omitempty"`
+	FeedbackCode      int                `json:"feedback-code,omitempty"`
+	RetryInterval     int32              `json:"retry,omitempty"`
+	Reason            string             `json:"reason,omitempty"`
 }
 
 type brokerAddresses struct {
@@ -120,7 +123,7 @@ func (context *context) parallelMessageHandler(client mqtt.Client, msg mqtt.Mess
 	if command == common.Getdata || command == common.Data {
 		context.communicator.dataQ <- &messageInfo
 	} else if command == common.AckRegister {
-		handleRegAck()
+		context.communicator.handleRegAck()
 	} else if command == common.AckResend {
 		handleAckResend()
 	} else {
@@ -182,12 +185,15 @@ func processMessage(messageInfo *messageHandlerInfo) {
 			err = handleRegistration(messagePayload.Destination, messagePayload.PersistentStorage)
 		}
 	case common.AckRegister:
-		handleRegAck()
+		context.communicator.handleRegAck()
 	case common.Update:
 		if int64(messagePayload.Meta.ChunkSize) < messagePayload.Meta.ObjectSize && !leader.CheckIfLeader() {
 			err = &Error{"Non-leader received update message with chunked data, ignoring."}
 		} else {
 			err = handleUpdate(messagePayload.Meta, common.Configuration.MaxInflightChunks)
+			if err != nil {
+				context.communicator.SendErrorMessage(err, meta)
+			}
 		}
 	case common.Updated:
 		err = handleObjectUpdated(meta.DestOrgID, meta.ObjectType, meta.ObjectID, meta.DestType, meta.DestID, meta.InstanceID)
@@ -210,11 +216,19 @@ func processMessage(messageInfo *messageHandlerInfo) {
 	case common.Getdata:
 		err = handleGetData(messagePayload.Meta, messagePayload.Offset)
 	case common.Data:
-		err = handleData(payload)
+		meta, err = handleData(payload)
+		if meta != nil && err != nil {
+			context.communicator.SendErrorMessage(err, meta)
+		}
 	case common.Resend:
 		err = handleResendRequest(messagePayload.Destination)
 	case common.AckResend:
 		err = handleAckResend()
+	case common.Feedback:
+		err = handleFeedback(meta.DestOrgID, meta.ObjectType, meta.ObjectID, meta.DestType, meta.DestID, meta.InstanceID, messagePayload.FeedbackCode,
+			messagePayload.RetryInterval, messagePayload.Reason)
+	case common.AckFeedback:
+		err = handleAckFeedback(meta.DestOrgID, meta.ObjectType, meta.ObjectID, meta.OriginType, meta.OriginID, meta.InstanceID)
 	default:
 		err = &Error{"Received message that doesn't match any subscription."}
 	}
@@ -940,6 +954,43 @@ func (communication *MQTT) SendNotificationMessage(notificationTopic string, des
 	return communication.publishMessage(metaData.DestOrgID, destType, destID, messageJSON, chunked)
 }
 
+// SendFeedbackMessage sends a feedback message from the ESS to the CSS
+func (communication *MQTT) SendFeedbackMessage(code int, retryInterval int32, reason string, metaData *common.MetaData) common.SyncServiceError {
+	if common.Configuration.NodeType != common.ESS {
+		return nil
+	}
+	messagePayload := &messagePayload{Command: common.Feedback, Meta: *metaData, FeedbackCode: code, RetryInterval: retryInterval, Reason: reason}
+	messageJSON, err := json.Marshal(messagePayload)
+	if err != nil {
+		return &Error{"Failed to send notification. Error: " + err.Error()}
+	}
+
+	notification := common.Notification{ObjectID: metaData.ObjectID, ObjectType: metaData.ObjectType,
+		DestOrgID: metaData.DestOrgID, DestID: metaData.OriginID, DestType: metaData.OriginType,
+		Status: common.Feedback, InstanceID: metaData.InstanceID}
+
+	// Store the notification records in storage as part of the object
+	if err := Store.UpdateNotificationRecord(notification); err != nil {
+		return err
+	}
+
+	if log.IsLogging(logger.TRACE) {
+		log.Trace("Sending feedback notification")
+	}
+
+	return communication.publishMessage(metaData.DestOrgID, common.Configuration.DestinationType, common.Configuration.DestinationID,
+		messageJSON, false)
+}
+
+// SendErrorMessage sends an error message from the ESS to the CSS
+func (communication *MQTT) SendErrorMessage(err common.SyncServiceError, metaData *common.MetaData) common.SyncServiceError {
+	if common.Configuration.NodeType != common.ESS {
+		return nil
+	}
+	code, retryInterval, reason := common.CreateFeedback(err)
+	return communication.SendFeedbackMessage(code, retryInterval, reason, metaData)
+}
+
 // Register sends a registration message to be sent by an ESS
 func (communication *MQTT) Register() common.SyncServiceError {
 	if common.Configuration.NodeType != common.ESS {
@@ -1309,4 +1360,8 @@ func (communication *MQTT) checkForUpdates() {
 			}
 		}
 	}()
+}
+
+func (communication *MQTT) handleRegAck() {
+	common.Registered = true
 }

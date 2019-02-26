@@ -47,7 +47,7 @@ func (store *InMemoryStorage) Init() common.SyncServiceError {
 	currentTimeInSeconds := currentTime / 1e9
 	persistedTimeBase := currentTimeInSeconds
 
-	dir := common.Configuration.PersistenceRootPath + "sync/local/"
+	dir := common.Configuration.PersistenceRootPath + "/sync/local/"
 	err := os.MkdirAll(dir, 0755)
 	if err == nil {
 		path := dir + "persisted-data"
@@ -472,7 +472,7 @@ func (store *InMemoryStorage) GetObjectDestinations(metaData common.MetaData) ([
 }
 
 // UpdateObjectDeliveryStatus changes the object's delivery status for the destination
-func (store *InMemoryStorage) UpdateObjectDeliveryStatus(status string, orgID string, objectType string, objectID string,
+func (store *InMemoryStorage) UpdateObjectDeliveryStatus(status string, message string, orgID string, objectType string, objectID string,
 	destType string, destID string) common.SyncServiceError {
 	return nil
 }
@@ -573,6 +573,11 @@ func (store *InMemoryStorage) RetrieveDestination(orgID string, destType string,
 // RetrieveDestinationProtocol retrieves communication protocol for the destination
 func (store *InMemoryStorage) RetrieveDestinationProtocol(orgID string, destType string, destID string) (string, common.SyncServiceError) {
 	return common.Configuration.CommunicationProtocol, nil
+}
+
+// GetObjectsForDestination retrieves objects that are in use on a given node
+func (store *InMemoryStorage) GetObjectsForDestination(orgID string, destType string, destID string) ([]common.ObjectStatus, common.SyncServiceError) {
+	return nil, nil
 }
 
 // UpdateNotificationRecord updates/adds a notification record to the object

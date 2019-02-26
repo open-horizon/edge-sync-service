@@ -159,6 +159,7 @@ func resendNotificationsForDestination(dest common.Destination, resendReceivedOb
 				// and the CSS has a notification with "data" or "received by destination" status.
 				// Send update notification for this object.
 				n.Status = common.Update
+				n.ResendTime = 0
 				if err := Store.UpdateNotificationRecord(*n); err != nil && log.IsLogging(logger.ERROR) {
 					log.Error("Failed to update notification record. Error: " + err.Error())
 				}

@@ -25,9 +25,6 @@ var resendStopChannel chan int
 var activateTicker *time.Ticker
 var activateStopChannel chan int
 
-var httpPollTimer *time.Timer
-var httpPollStopChannel chan int
-
 var waitingOnBlockChannel bool
 var blockChannel chan int
 
@@ -38,7 +35,6 @@ func init() {
 	blockChannel = make(chan int, 1)
 	resendStopChannel = make(chan int, 1)
 	activateStopChannel = make(chan int, 1)
-	httpPollStopChannel = make(chan int, 1)
 }
 
 // Start starts up the synnc service
@@ -139,24 +135,6 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 		resendTicker = nil
 	}()
 
-	if common.Configuration.NodeType == common.ESS && common.Configuration.CommunicationProtocol == common.HTTPProtocol {
-		go func() {
-			keepRunning := true
-			for keepRunning {
-				httpPollTimer = time.NewTimer(time.Second * time.Duration(common.Configuration.HTTPPollingInterval))
-				select {
-				case <-httpPollTimer.C:
-					for httpComm.Poll() {
-					}
-
-				case <-httpPollStopChannel:
-					keepRunning = false
-				}
-			}
-			httpPollTimer = nil
-		}()
-	}
-
 	activateTicker = time.NewTicker(time.Second * time.Duration(common.Configuration.ObjectActivationInterval))
 	go func() {
 		keepRunning := true
@@ -211,11 +189,6 @@ func Stop(quiesceTime int) {
 	if activateTicker != nil {
 		activateTicker.Stop()
 		activateStopChannel <- 1
-	}
-
-	if httpPollTimer != nil {
-		httpPollTimer.Stop()
-		httpPollStopChannel <- 1
 	}
 
 	timer := time.NewTimer(time.Duration(2) * time.Second)

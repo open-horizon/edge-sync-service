@@ -29,6 +29,9 @@ const (
 	destinationTypeLabel = "Destination type"
 	destinationIDLabel   = "Destination ID"
 	communicationsLabel  = "Communications protocol"
+	messageLabel         = "Message"
+	objectTypeLabel      = "Object Type"
+	objectIDLabel        = "Object ID"
 	statusLabel          = "Status"
 )
 
@@ -37,12 +40,15 @@ var (
 	cert           = flag.String("cert", "", "Specifiy the file containing the server's CA certificate")
 	configFile     = flag.String("c", "/etc/edge-sync-service/sync.conf", "Specify the configuration file to use")
 	destinations   = flag.Bool("show-destinations", false, "Show registered destinations")
+	destType       = flag.String("dt", "", "The type of the destination whose information will be shown")
 	genCert        = flag.Bool("generate-cert", false, "Generate a development server certificate")
-	objectID       = flag.String("id", "", "The ID of the object whose information will be shown")
+	id             = flag.String("id", "", "The ID of the object/destination whose information will be shown")
 	objectType     = flag.String("type", "", "The type of the object whose information will be shown")
 	orgID          = flag.String("org", "", "Specify the organization ID to work with")
 	serverAddress  = flag.String("s", "localhost:8080", "Specify the address and port of the Cloud Sync Service")
 	serverProtocol = flag.String("p", "https", "Specify the protocol of the Cloud Sync Service")
+	appKey         = flag.String("key", "", "Specify the app key to be used when connecting to the Sync Service")
+	appSecret      = flag.String("secret", "", "Specify the app secret to be used when connecting to the Sync Service")
 )
 
 func main() {
@@ -71,9 +77,11 @@ func main() {
 
 	if *destinations {
 		showDestinations()
-	} else if len(*objectType) != 0 && len(*objectID) != 0 {
+	} else if len(*objectType) != 0 && len(*id) != 0 {
 		showObjectInfo()
-	} else if len(*objectType) == 0 || len(*objectID) == 0 {
+	} else if len(*destType) != 0 && len(*id) != 0 {
+		showDestinationInfo()
+	} else if len(*objectType) == 0 || len(*id) == 0 {
 		fmt.Printf("To show an object's information, you must supply its type and ID.\n")
 		os.Exit(1)
 	}
@@ -218,6 +226,42 @@ func setupCertificates() bool {
 	return true
 }
 
+func showDestinationInfo() {
+	syncClient, message := createSyncClient()
+	if message != "" {
+		fmt.Println(message)
+		os.Exit(1)
+	}
+
+	objects, err := syncClient.GetDestinationObjects(*destType, *id)
+	if err != nil {
+		fmt.Printf("Failed to fetch the objects at the destination from the server. Error: %s\n", err)
+		os.Exit(1)
+	}
+
+	objTypeLength := len(objectTypeLabel)
+	objIDLength := len(objectIDLabel)
+
+	for _, obj := range objects {
+		if len(obj.ObjectType) > objTypeLength {
+			objTypeLength = len(obj.ObjectType)
+		}
+		if len(obj.ObjectID) > objIDLength {
+			objIDLength = len(obj.ObjectID)
+		}
+	}
+
+	fmt.Printf("%*s  |  %*s  |  %s\n", -objTypeLength, objectTypeLabel, -objIDLength, objectIDLabel,
+		statusLabel)
+	fmt.Printf("%s  |  %s  |  %s\n", strings.Repeat("-", objTypeLength), strings.Repeat("-", objIDLength),
+		strings.Repeat("-", len(statusLabel)))
+
+	for _, obj := range objects {
+		fmt.Printf("%*s  |  %*s  |  %s\n", -objTypeLength, obj.ObjectType, -objIDLength, obj.ObjectID,
+			obj.Status)
+	}
+}
+
 func showDestinations() {
 	syncClient, message := createSyncClient()
 	if message != "" {
@@ -261,30 +305,30 @@ func showObjectInfo() {
 		os.Exit(1)
 	}
 
-	metaData, err := syncClient.GetObjectMetadata(*objectType, *objectID)
+	metaData, err := syncClient.GetObjectMetadata(*objectType, *id)
 	if err != nil {
 		fmt.Printf("Failed to fetch the object's metadata from the server. Error: %s\n", err)
 		os.Exit(1)
 	}
 
-	status, err := syncClient.GetObjectStatus(*objectType, *objectID)
+	status, err := syncClient.GetObjectStatus(*objectType, *id)
 	if err != nil {
 		fmt.Printf("Failed to fetch the object's status from the server. Error: %s\n", err)
 		os.Exit(1)
 	}
 
 	if status == "" {
-		fmt.Printf("The object %s:%s is not on the server.\n", *objectType, *objectID)
+		fmt.Printf("The object %s:%s is not on the server.\n", *objectType, *id)
 		return
 	}
 
-	destinations, err := syncClient.GetObjectDestinations(*objectType, *objectID)
+	destinations, err := syncClient.GetObjectDestinations(*objectType, *id)
 	if err != nil {
 		fmt.Printf("Failed to fetch the object's destinations from the server. Error: %s\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("Information about the object %s:%s\n", *objectType, *objectID)
+	fmt.Printf("Information about the object %s:%s\n", *objectType, *id)
 	fmt.Printf("  Status: %s\n", status)
 	if len(metaData.Description) != 0 {
 		fmt.Printf("  Description: %s\n", metaData.Description)
@@ -312,17 +356,17 @@ func showObjectInfo() {
 			}
 		}
 
-		fmt.Printf("  %*s  |  %*s  |  %s\n", -destTypeLength, destinationTypeLabel, -destIDLength, destinationIDLabel,
-			statusLabel)
-		fmt.Printf("  %s  |  %s  |  %s\n", strings.Repeat("-", destTypeLength), strings.Repeat("-", destIDLength),
-			strings.Repeat("-", statusLength))
+		fmt.Printf("  %*s  |  %*s  |  %*s  |  %s\n", -destTypeLength, destinationTypeLabel, -destIDLength, destinationIDLabel,
+			-statusLength, statusLabel, messageLabel)
+		fmt.Printf("  %s  |  %s  |  %s  |  %s\n", strings.Repeat("-", destTypeLength), strings.Repeat("-", destIDLength),
+			strings.Repeat("-", statusLength), strings.Repeat("-", len(messageLabel)))
 
 		for _, dest := range destinations {
-			fmt.Printf("  %*s  |  %*s  |  %s\n", -destTypeLength, dest.DestType, -destIDLength, dest.DestID,
-				dest.Status)
+			fmt.Printf("  %*s  |  %*s  |  %*s  |  %s\n", -destTypeLength, dest.DestType, -destIDLength, dest.DestID,
+				-statusLength, dest.Status, dest.Message)
 		}
 	} else {
-		fmt.Printf("No destinations for the object %s:%s\n", *objectType, *objectID)
+		fmt.Printf("No destinations for the object %s:%s\n", *objectType, *id)
 	}
 }
 
@@ -343,6 +387,10 @@ func createSyncClient() (*client.SyncServiceClient, string) {
 
 	if len(*orgID) > 0 {
 		syncClient.SetOrgID(*orgID)
+	}
+
+	if len(*appKey) > 0 {
+		syncClient.SetAppKeyAndSecret(*appKey, *appSecret)
 	}
 
 	return syncClient, ""
