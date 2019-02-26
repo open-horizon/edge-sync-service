@@ -60,6 +60,63 @@
         }
       }
     },
+    "/api/v1/destinations/{orgID}/{destType}/{destID}/objects": {
+      "get": {
+        "description": "Provides a list of objects that are in use by the destination ESS node.\nThis is a CSS only API.",
+        "produces": [
+          "application/json",
+          "text/plain"
+        ],
+        "summary": "List all objects that are in use by the destination.",
+        "operationId": "handleDestinations",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the destination to retrieve objects for.",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The destType of the destination to retrieve objects for.",
+            "name": "destType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The destID of the destination to retrieve objects for.",
+            "name": "destID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Objects response",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ObjectStatus"
+              }
+            }
+          },
+          "404": {
+            "description": "No objects found",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve the objects",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
     "/api/v1/objects/{orgID}/{objectType}": {
       "put": {
         "description": "Register or delete a webhook for the specified object type.\nA webhook is used to process notifications on updates for objects of the specified object type.",
@@ -97,7 +154,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Webhook registered/deleted",
             "schema": {
               "type": "string"
@@ -204,7 +261,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Object updated",
             "schema": {
               "type": "string"
@@ -450,7 +507,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Object data updated",
             "schema": {
               "type": "string"
@@ -1166,7 +1223,7 @@
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
     },
     "DestinationsStatus": {
-      "description": "DestinationsStatus describes the delivery status of an object for a destination\nDestinationsStatus provides information about the delivery status of an object for a certain destination.\nThe status can be one of the following:\nIndication whether the object has been delivered to the destination\npending - inidicates that the object is pending delivery to this destination\ndelivering - indicates that the object is being delivered to this destination\ndelivered - indicates that the object was delivered to this destination",
+      "description": "DestinationsStatus describes the delivery status of an object for a destination\nDestinationsStatus provides information about the delivery status of an object for a certain destination.\nThe status can be one of the following:\nIndication whether the object has been delivered to the destination\npending - inidicates that the object is pending delivery to this destination\ndelivering - indicates that the object is being delivered to this destination\ndelivered - indicates that the object was delivered to this destination\nconsumed - indicates that the object was consumed by this destination\nerror - indicates that a feedback error message was received from this destination",
       "type": "object",
       "required": [
         "destinationType",
@@ -1184,10 +1241,35 @@
           "type": "string",
           "x-go-name": "DestType"
         },
+        "message": {
+          "description": "Message is the message for the destination",
+          "type": "string",
+          "x-go-name": "Message"
+        },
         "status": {
           "description": "Status is the destination status",
           "type": "string",
           "x-go-name": "Status"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
+    "IOError": {
+      "description": "IOError is the error for requests failed because of the IO",
+      "type": "object",
+      "properties": {
+        "Message": {
+          "type": "string"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
+    "InternalError": {
+      "description": "InternalError is a general error",
+      "type": "object",
+      "properties": {
+        "Message": {
+          "type": "string"
         }
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
@@ -1344,6 +1426,38 @@
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
     },
+    "ObjectStatus": {
+      "description": "ObjectStatus describes the delivery status of an object for a destination\nThe status can be one of the following:\nIndication whether the object has been delivered to the destination\ndelivering - indicates that the object is being delivered\ndelivered - indicates that the object was delivered\nconsumed - indicates that the object was consumed\nerror - indicates that a feedback error message was received",
+      "type": "object",
+      "required": [
+        "objectType",
+        "objectID",
+        "status"
+      ],
+      "properties": {
+        "objectID": {
+          "description": "ObjectID is the object ID",
+          "type": "string",
+          "x-go-name": "ObjectID"
+        },
+        "objectType": {
+          "description": "ObjectType is the object type",
+          "type": "string",
+          "x-go-name": "ObjectType"
+        },
+        "orgID": {
+          "description": "OrgID is the organization ID of the organization",
+          "type": "string",
+          "x-go-name": "OrgID"
+        },
+        "status": {
+          "description": "Status is the object status for this destination",
+          "type": "string",
+          "x-go-name": "Status"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
     "Organization": {
       "description": "Organization contains organization's information",
       "type": "object",
@@ -1353,7 +1467,7 @@
           "type": "string",
           "x-go-name": "Address"
         },
-        "org-id": {
+        "orgID": {
           "description": "OrgID is the organization ID of the organization",
           "type": "string",
           "x-go-name": "OrgID"
@@ -1367,6 +1481,26 @@
           "description": "User is the user name to be used when connecting to this organization",
           "type": "string",
           "x-go-name": "User"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
+    "PathError": {
+      "description": "PathError is the error for path issues",
+      "type": "object",
+      "properties": {
+        "Message": {
+          "type": "string"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
+    "SecurityError": {
+      "description": "SecurityError is the error for requests failed because of security",
+      "type": "object",
+      "properties": {
+        "Message": {
+          "type": "string"
         }
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
