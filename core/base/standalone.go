@@ -27,8 +27,8 @@ func init() {
 	flag.StringVar(&swaggerFile, "swagger", "", "Name of the file with the generated swagger document for the Edge sync service APIs")
 }
 
-// StandaloneSyncService runs a standalone Sync Service
-func StandaloneSyncService(auth security.Authentication) {
+// ConfigStandaloneSyncService Configures a standalone Sync Service
+func ConfigStandaloneSyncService() {
 	flag.Parse()
 
 	err := common.Load(configFile)
@@ -55,7 +55,10 @@ func StandaloneSyncService(auth security.Authentication) {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		os.Exit(98)
 	}
+}
 
+// StandaloneSyncService runs a standalone Sync Service
+func StandaloneSyncService(auth security.Authentication) {
 	logFileSize, err :=
 		logger.AdjustMaxLogfileSize(common.Configuration.LogTraceFileSizeKB, common.DefaultLogTraceFileSize,
 			common.Configuration.LogRootPath)

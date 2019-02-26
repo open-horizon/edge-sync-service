@@ -1,6 +1,7 @@
 package common
 
 import (
+	"os"
 	"strings"
 	"time"
 )
@@ -26,6 +27,42 @@ type SetupError struct {
 }
 
 func (e *SetupError) Error() string {
+	return e.Message
+}
+
+// SecurityError is the error for requests failed because of security
+type SecurityError struct {
+	Message string
+}
+
+func (e *SecurityError) Error() string {
+	return e.Message
+}
+
+// IOError is the error for requests failed because of the IO
+type IOError struct {
+	Message string
+}
+
+func (e *IOError) Error() string {
+	return e.Message
+}
+
+// PathError is the error for path issues
+type PathError struct {
+	Message string
+}
+
+func (e *PathError) Error() string {
+	return e.Message
+}
+
+// InternalError is a general error
+type InternalError struct {
+	Message string
+}
+
+func (e *InternalError) Error() string {
 	return e.Message
 }
 
@@ -195,6 +232,7 @@ type Notification struct {
 type StoreDestinationStatus struct {
 	Destination Destination `bson:"destination"`
 	Status      string      `bson:"status"`
+	Message     string      `bson:"message"`
 }
 
 // DestinationsStatus describes the delivery status of an object for a destination
@@ -204,26 +242,57 @@ type StoreDestinationStatus struct {
 //   pending - inidicates that the object is pending delivery to this destination
 //   delivering - indicates that the object is being delivered to this destination
 //   delivered - indicates that the object was delivered to this destination
+//   consumed - indicates that the object was consumed by this destination
+//   error - indicates that a feedback error message was received from this destination
 // swagger:model
 type DestinationsStatus struct {
 	// DestType is the destination type
 	//   required: true
-	DestType string `json:"destinationType" bson:"destination-type"`
+	DestType string `json:"destinationType"`
 
 	// DestID is the destination ID
 	//   required: true
-	DestID string `json:"destinationID" bson:"destination-id"`
+	DestID string `json:"destinationID"`
 
 	// Status is the destination status
 	//   required: true
-	Status string `json:"status" bson:"status"`
+	Status string `json:"status"`
+
+	// Message is the message for the destination
+	//    required: false
+	Message string `json:"message"`
+}
+
+// ObjectStatus describes the delivery status of an object for a destination
+// The status can be one of the following:
+// Indication whether the object has been delivered to the destination
+//   delivering - indicates that the object is being delivered
+//   delivered - indicates that the object was delivered
+//   consumed - indicates that the object was consumed
+//   error - indicates that a feedback error message was received
+// swagger:model
+type ObjectStatus struct {
+	// OrgID is the organization ID of the organization
+	OrgID string `json:"orgID"`
+
+	// ObjectType is the object type
+	//   required: true
+	ObjectType string `json:"objectType"`
+
+	// ObjectID is the object ID
+	//   required: true
+	ObjectID string `json:"objectID"`
+
+	// Status is the object status for this destination
+	//   required: true
+	Status string `json:"status"`
 }
 
 // Organization contains organization's information
 // swagger:model
 type Organization struct {
 	// OrgID is the organization ID of the organization
-	OrgID string `json:"org-id" bson:"org-id"`
+	OrgID string `json:"orgID" bson:"org-id"`
 
 	// User is the user name to be used when connecting to this organization
 	User string `json:"user" bson:"user"`
@@ -264,6 +333,7 @@ const (
 	Updated               = "updated"
 	Consumed              = "consumed"
 	AckConsumed           = "ackconsumed"
+	ConsumedByDestination = "consumedByDest"
 	Getdata               = "getdata"
 	Data                  = "data"
 	UpdatePending         = "updatePending"
@@ -282,6 +352,9 @@ const (
 	ReceivedPending       = "receivedpending"
 	AckReceived           = "ackreceived"
 	ReceivedByDestination = "receivedByDest"
+	Feedback              = "feedback"
+	AckFeedback           = "ackFeedaback"
+	Error                 = "error"
 )
 
 // Indication whether the object has been delivered to the destination
@@ -289,7 +362,17 @@ const (
 	Pending    = "pending"
 	Delivering = "delivering"
 	Delivered  = "delivered"
-	// Consumed
+	// Consumed (defined above)
+	// Error (defined above)
+)
+
+// Feedback codes
+const (
+	InternalErrorCode = iota
+	IOErrorCode
+	SecurityErrorCode
+	PathErrorCode
+	lastErrorCode // Add new error codes before this one
 )
 
 // Magic is a magic number placed in the front of various payloads
@@ -360,4 +443,46 @@ func CreateNotificationID(orgID string, objectType string, objectID string, dest
 	strBuilder.WriteByte(':')
 	strBuilder.WriteString(destID)
 	return strBuilder.String()
+}
+
+// CreateFeedback extracts feedback parameters from an error
+func CreateFeedback(err SyncServiceError) (code int, retryInterval int32, reason string) {
+	retryInterval = 0
+	reason = err.Error()
+	switch err.(type) {
+	case *SecurityError:
+		code = SecurityErrorCode
+	case *IOError:
+		code = IOErrorCode
+	case *PathError:
+		code = PathErrorCode
+	default:
+		code = InternalErrorCode
+	}
+	return
+}
+
+// IsErrorFeedback returns true if the feedback code corresponds to an error
+func IsErrorFeedback(code int) bool {
+	if code < lastErrorCode {
+		return true
+	}
+	return false
+}
+
+// CreateError creates a sync-service error from a Go error
+func CreateError(err error, message string) SyncServiceError {
+	if os.IsPermission(err) {
+		return &SecurityError{message + err.Error()}
+	}
+	switch err.(type) {
+	case *os.PathError:
+		return &PathError{message + err.Error()}
+	case *os.LinkError:
+		return &IOError{message + err.Error()}
+	case *os.SyscallError:
+		return &IOError{message + err.Error()}
+	default:
+		return &InternalError{message + err.Error()}
+	}
 }

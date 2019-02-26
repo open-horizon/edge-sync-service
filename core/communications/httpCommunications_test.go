@@ -103,8 +103,8 @@ func TestHTTPCommUpdatedObjects(t *testing.T) {
 			request, _ := http.NewRequest(http.MethodPut, consumedURL, nil)
 			request.SetBasicAuth("myorg000/httpDevice/dev1", "")
 			httpComm.handleObjects(writer, request)
-			if writer.statusCode != http.StatusOK {
-				t.Errorf("The call to handleObjects(consumed) returned %d instead of %d\n", writer.statusCode, http.StatusOK)
+			if writer.statusCode != http.StatusNoContent {
+				t.Errorf("The call to handleObjects(consumed) returned %d instead of %d\n", writer.statusCode, http.StatusNoContent)
 			}
 		}
 	}
@@ -122,8 +122,8 @@ func TestHttpCommCssMisc(t *testing.T) {
 	request, _ := http.NewRequest(http.MethodPut, resendURL, nil)
 	request.SetBasicAuth(common.Configuration.OrgID+"/httpDevice/dev1", "")
 	httpComm.handleObjects(writer, request)
-	if writer.statusCode != http.StatusOK {
-		t.Errorf("The call to handleObjects(resend) returned %d instead of %d\n", writer.statusCode, http.StatusOK)
+	if writer.statusCode != http.StatusNoContent {
+		t.Errorf("The call to handleObjects(resend) returned %d instead of %d\n", writer.statusCode, http.StatusNoContent)
 	}
 
 	// Dummy functions in HTTP communications
@@ -141,7 +141,7 @@ func TestHttpCommCssMisc(t *testing.T) {
 	request.SetBasicAuth(common.Configuration.OrgID+"/httpDevice/dev1", "")
 	httpComm.handleObjects(writer, request)
 	if writer.statusCode != http.StatusBadRequest {
-		t.Errorf("The call to handleObjects(resend) returned %d instead of %d\n", writer.statusCode, http.StatusOK)
+		t.Errorf("The call to handleObjects(resend) returned %d instead of %d\n", writer.statusCode, http.StatusBadRequest)
 	}
 
 	writer = newHTTPCommTestResponseWriter()
@@ -168,7 +168,7 @@ func TestHttpCommCssMisc(t *testing.T) {
 
 	httpComm.handleRegister(writer, request)
 	if writer.statusCode != http.StatusMethodNotAllowed {
-		t.Errorf("The call to handleRegister returned %d instead of %d\n", writer.statusCode, http.StatusOK)
+		t.Errorf("The call to handleRegister returned %d instead of %d\n", writer.statusCode, http.StatusMethodNotAllowed)
 	}
 }
 
@@ -204,9 +204,9 @@ func TestHTTPCommEssSendObjects(t *testing.T) {
 		request, _ := http.NewRequest(http.MethodPut, theURL, bytes.NewReader(body))
 		request.SetBasicAuth(common.Configuration.OrgID+"/"+testObject.metaData.OriginType+"/"+testObject.metaData.OriginID, "")
 		httpComm.handleObjects(writer, request)
-		if writer.statusCode != http.StatusOK {
+		if writer.statusCode != http.StatusNoContent {
 			t.Errorf("The call to handleObjects(%s) returned %d instead of %d\n",
-				testObject.action, writer.statusCode, http.StatusOK)
+				testObject.action, writer.statusCode, http.StatusNoContent)
 		} else {
 			if testObject.data != nil {
 				theURL = testObject.metaData.DestOrgID + "/" + testObject.metaData.ObjectType + "/" +
@@ -214,9 +214,9 @@ func TestHTTPCommEssSendObjects(t *testing.T) {
 				request, _ := http.NewRequest(http.MethodPut, theURL, bytes.NewReader(testObject.data))
 				request.SetBasicAuth(common.Configuration.OrgID+"/"+testObject.metaData.OriginType+"/"+testObject.metaData.OriginID, "")
 				httpComm.handleObjects(writer, request)
-				if writer.statusCode != http.StatusOK {
+				if writer.statusCode != http.StatusNoContent {
 					t.Errorf("The call to handleObjects(data) returned %d instead of %d\n",
-						writer.statusCode, http.StatusOK)
+						writer.statusCode, http.StatusNoContent)
 				}
 			}
 		}
@@ -431,8 +431,8 @@ func registerTestDevice(orgID string, destType string, destID string, t *testing
 	request.SetBasicAuth(theURL, "")
 
 	httpComm.handleRegister(writer, request)
-	if writer.statusCode != http.StatusOK {
-		t.Errorf("The call to handleRegister returned %d instead of %d\n", writer.statusCode, http.StatusOK)
+	if writer.statusCode != http.StatusNoContent {
+		t.Errorf("The call to handleRegister returned %d instead of %d\n", writer.statusCode, http.StatusNoContent)
 	}
 }
 
@@ -456,7 +456,7 @@ func (ctx *testEssCommContext) testHandleRegister(writer http.ResponseWriter, re
 				parts[1] != common.Configuration.DestinationType || parts[2] != common.Configuration.DestinationID {
 				writer.WriteHeader(http.StatusBadRequest)
 			} else {
-				writer.WriteHeader(http.StatusOK)
+				writer.WriteHeader(http.StatusNoContent)
 			}
 		} else {
 			writer.WriteHeader(http.StatusMethodNotAllowed)
@@ -484,18 +484,23 @@ func (ctx *testEssCommContext) testHandleObjects(writer http.ResponseWriter, req
 		writer.Write(body)
 
 	case "getData":
-		writer.Header().Add("Content-Type", "application/octet-stream")
-		writer.WriteHeader(http.StatusOK)
-		writer.Write([]byte("wsxrfvyhnplijnygv"))
+		if request.Method == http.MethodGet {
+			writer.Header().Add("Content-Type", "application/octet-stream")
+			writer.WriteHeader(http.StatusOK)
+			writer.Write([]byte("wsxrfvyhnplijnygv"))
+		} else {
+			// This is "received" notification sent from httpComm.GetData
+			writer.WriteHeader(http.StatusNoContent)
+		}
 
 	case "notification":
-		writer.WriteHeader(http.StatusOK)
+		writer.WriteHeader(http.StatusNoContent)
 
 	case "pushData":
-		writer.WriteHeader(http.StatusOK)
+		writer.WriteHeader(http.StatusNoContent)
 
 	case "resend":
-		writer.WriteHeader(http.StatusOK)
+		writer.WriteHeader(http.StatusNoContent)
 
 	case "resendError":
 		writer.WriteHeader(http.StatusInternalServerError)

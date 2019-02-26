@@ -162,9 +162,9 @@ func (store *Cache) GetObjectDestinations(metaData common.MetaData) ([]common.De
 }
 
 // UpdateObjectDeliveryStatus changes the object's delivery status for the destination
-func (store *Cache) UpdateObjectDeliveryStatus(status string, orgID string, objectType string, objectID string,
+func (store *Cache) UpdateObjectDeliveryStatus(status string, message string, orgID string, objectType string, objectID string,
 	destType string, destID string) common.SyncServiceError {
-	return store.Store.UpdateObjectDeliveryStatus(status, orgID, objectType, objectID, destType, destID)
+	return store.Store.UpdateObjectDeliveryStatus(status, message, orgID, objectType, objectID, destType, destID)
 }
 
 // UpdateObjectDelivering marks the object as being delivered to all its destinations
@@ -257,6 +257,11 @@ func (store *Cache) RetrieveDestinationProtocol(orgID string, destType string, d
 		return d.Communication, nil
 	}
 	return "", &Error{fmt.Sprintf("Destination %s not found.", orgID+":"+destType+":"+destID)}
+}
+
+// GetObjectsForDestination retrieves objects that are in use on a given node
+func (store *Cache) GetObjectsForDestination(orgID string, destType string, destID string) ([]common.ObjectStatus, common.SyncServiceError) {
+	return store.Store.GetObjectsForDestination(orgID, destType, destID)
 }
 
 // UpdateNotificationRecord updates/adds a notification record to the object

@@ -20,6 +20,12 @@ type Communicator interface {
 	// SendNotificationMessage sends a notification message from the CSS to the ESS or from the ESS to the CSS
 	SendNotificationMessage(notificationTopic string, destType string, destID string, instanceID int64, metaData *common.MetaData) common.SyncServiceError
 
+	// SendFeedbackMessage sends a feedback message from the ESS to the CSS
+	SendFeedbackMessage(code int, retryInterval int32, reason string, metaData *common.MetaData) common.SyncServiceError
+
+	// SendErrorMessage sends an error message from the ESS to the CSS
+	SendErrorMessage(err common.SyncServiceError, metaData *common.MetaData) common.SyncServiceError
+
 	// Register sends a registration message to be sent by an ESS
 	Register() common.SyncServiceError
 

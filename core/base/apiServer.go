@@ -92,78 +92,88 @@ func setupAPIServer() {
 	http.Handle(organizationURL, http.StripPrefix(organizationURL, http.HandlerFunc(handleOrganizations)))
 }
 
-// swagger:operation GET /api/v1/destinations/{orgID} handleDestinations
-//
-// List all known destinations.
-//
-// Provides a list of destinations for an organization, i.e., ESS nodes (belonging to orgID) that have registered with the CSS.
-// This is a CSS only API.
-//
-// ---
-//
-// produces:
-// - application/json
-// - text/plain
-//
-// parameters:
-// - name: orgID
-//   in: path
-//   description: The orgID of the destinations to return.
-//   required: true
-//   type: string
-//
-// responses:
-//   '200':
-//     description: Destinations response
-//     schema:
-//       type: array
-//       items:
-//         "$ref": "#/definitions/Destination"
-//   '404':
-//     description: No destinations found
-//     schema:
-//       type: string
-//   '500':
-//     description: Failed to retrieve the destinations
-//     schema:
-//       type: string
 func handleDestinations(writer http.ResponseWriter, request *http.Request) {
 	if !common.Running {
 		writer.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
 
-	username, password, ok := request.BasicAuth()
-	if !ok {
-		writer.WriteHeader(http.StatusForbidden)
-		writer.Write(unauthorizedBytes)
-		return
-	}
-	code, userOrg, _ := security.Authenticate(username, password)
+	code, userOrg, _ := security.Authenticate(request)
 	if code == security.AuthFailed || code == security.AuthEdgeNode {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
 		return
 	}
 
-	if request.Method == http.MethodGet {
-		var orgID string
+	if request.Method != http.MethodGet {
+		writer.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var orgID string
+	var parts []string
+	if len(request.URL.Path) != 0 {
+		parts = strings.Split(request.URL.Path, "/")
 		if common.Configuration.NodeType == common.CSS {
-			if len(request.URL.Path) == 0 {
+			if len(parts) == 0 {
 				writer.WriteHeader(http.StatusBadRequest)
 				return
 			}
-			orgID = request.URL.Path
+			orgID = parts[0]
+			parts = parts[1:]
 		} else {
 			orgID = common.Configuration.OrgID
 		}
-
-		if userOrg != orgID && code != security.AuthSyncAdmin {
-			writer.WriteHeader(http.StatusForbidden)
-			writer.Write(unauthorizedBytes)
+	} else {
+		if common.Configuration.NodeType == common.CSS {
+			writer.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		orgID = common.Configuration.OrgID
+	}
 
+	if userOrg != orgID && code != security.AuthSyncAdmin {
+		writer.WriteHeader(http.StatusForbidden)
+		writer.Write(unauthorizedBytes)
+		return
+	}
+
+	if len(parts) == 0 || (len(parts) == 1 && len(parts[0]) == 0) {
+		// swagger:operation GET /api/v1/destinations/{orgID} handleDestinations
+		//
+		// List all known destinations.
+		//
+		// Provides a list of destinations for an organization, i.e., ESS nodes (belonging to orgID) that have registered with the CSS.
+		// This is a CSS only API.
+		//
+		// ---
+		//
+		// produces:
+		// - application/json
+		// - text/plain
+		//
+		// parameters:
+		// - name: orgID
+		//   in: path
+		//   description: The orgID of the destinations to return.
+		//   required: true
+		//   type: string
+		//
+		// responses:
+		//   '200':
+		//     description: Destinations response
+		//     schema:
+		//       type: array
+		//       items:
+		//         "$ref": "#/definitions/Destination"
+		//   '404':
+		//     description: No destinations found
+		//     schema:
+		//       type: string
+		//   '500':
+		//     description: Failed to retrieve the destinations
+		//     schema:
+		//       type: string
 		if dests, err := listDestinations(orgID); err != nil {
 			communications.SendErrorResponse(writer, err, "Failed to fetch the list of destinations. Error: ", 0)
 		} else {
@@ -179,8 +189,69 @@ func handleDestinations(writer http.ResponseWriter, request *http.Request) {
 				}
 			}
 		}
+	} else if len(parts) == 3 || (len(parts) == 4 && len(parts[3]) == 0) && parts[2] == "objects" {
+		// swagger:operation GET /api/v1/destinations/{orgID}/{destType}/{destID}/objects handleDestinations
+		//
+		// List all objects that are in use by the destination.
+		//
+		// Provides a list of objects that are in use by the destination ESS node.
+		// This is a CSS only API.
+		//
+		// ---
+		//
+		// produces:
+		// - application/json
+		// - text/plain
+		//
+		// parameters:
+		// - name: orgID
+		//   in: path
+		//   description: The orgID of the destination to retrieve objects for.
+		//   required: true
+		//   type: string
+		// - name: destType
+		//   in: path
+		//   description: The destType of the destination to retrieve objects for.
+		//   required: true
+		//   type: string
+		// - name: destID
+		//   in: path
+		//   description: The destID of the destination to retrieve objects for.
+		//   required: true
+		//   type: string
+		//
+		// responses:
+		//   '200':
+		//     description: Objects response
+		//     schema:
+		//       type: array
+		//       items:
+		//         "$ref": "#/definitions/ObjectStatus"
+		//   '404':
+		//     description: No objects found
+		//     schema:
+		//       type: string
+		//   '500':
+		//     description: Failed to retrieve the objects
+		//     schema:
+		//       type: string
+		if objects, err := getObjectsForDestination(orgID, parts[0], parts[1]); err != nil {
+			communications.SendErrorResponse(writer, err, "Failed to fetch the objects. Error: ", 0)
+		} else {
+			if len(objects) == 0 {
+				writer.WriteHeader(http.StatusNotFound)
+			} else {
+				if data, err := json.MarshalIndent(objects, "", "  "); err != nil {
+					communications.SendErrorResponse(writer, err, "Failed to marshal the list of objects. Error: ", 0)
+				} else {
+					writer.Header().Add(contentType, applicationJSON)
+					writer.WriteHeader(http.StatusOK)
+					writer.Write(data)
+				}
+			}
+		}
 	} else {
-		writer.WriteHeader(http.StatusMethodNotAllowed)
+		writer.WriteHeader(http.StatusBadRequest)
 	}
 }
 
@@ -211,13 +282,7 @@ func handleResend(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	username, password, ok := request.BasicAuth()
-	if !ok {
-		writer.WriteHeader(http.StatusForbidden)
-		writer.Write(unauthorizedBytes)
-		return
-	}
-	code, _, _ := security.Authenticate(username, password)
+	code, _, _ := security.Authenticate(request)
 	if code != security.AuthAdmin && code != security.AuthUser {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
@@ -239,13 +304,7 @@ func handleResend(writer http.ResponseWriter, request *http.Request) {
 }
 
 func handleShutdown(writer http.ResponseWriter, request *http.Request) {
-	username, password, ok := request.BasicAuth()
-	if !ok {
-		writer.WriteHeader(http.StatusForbidden)
-		writer.Write(unauthorizedBytes)
-		return
-	}
-	code, _, _ := security.Authenticate(username, password)
+	code, _, _ := security.Authenticate(request)
 	if code != security.AuthSyncAdmin {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
@@ -971,7 +1030,7 @@ func handleObjectGetData(orgID string, objectType string, objectID string, write
 //     format: binary
 //
 // responses:
-//   '200':
+//   '204':
 //     description: Object data updated
 //     schema:
 //       type: string
@@ -991,7 +1050,7 @@ func handleObjectPutData(orgID string, objectType string, objectID string, write
 		if !found {
 			writer.WriteHeader(http.StatusNotFound)
 		} else {
-			writer.WriteHeader(http.StatusOK)
+			writer.WriteHeader(http.StatusNoContent)
 		}
 	} else {
 		communications.SendErrorResponse(writer, err, "", 0)
@@ -1105,7 +1164,7 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 //     "$ref": "#/definitions/webhookUpdate"
 //
 // responses:
-//   '200':
+//   '204':
 //     description: Webhook registered/deleted
 //     schema:
 //       type: string
@@ -1140,7 +1199,7 @@ func handleWebhook(orgID string, objectType string, writer http.ResponseWriter, 
 			hookErr = registerWebhook(orgID, objectType, payload.URL)
 		}
 		if hookErr == nil {
-			writer.WriteHeader(http.StatusOK)
+			writer.WriteHeader(http.StatusNoContent)
 		} else {
 			communications.SendErrorResponse(writer, hookErr, "", 0)
 		}
@@ -1184,7 +1243,7 @@ func handleWebhook(orgID string, objectType string, writer http.ResponseWriter, 
 //     "$ref": "#/definitions/objectUpdate"
 //
 // responses:
-//   '200':
+//   '204':
 //     description: Object updated
 //     schema:
 //       type: string
@@ -1200,14 +1259,13 @@ func handleUpdateObject(orgID string, objectType string, objectID string, writer
 	var payload objectUpdate
 	err := json.NewDecoder(request.Body).Decode(&payload)
 	if err == nil {
-		username, password, ok := request.BasicAuth()
-		if !ok || !security.CanUserCreateObject(username, password, orgID, &payload.Meta) {
+		if !security.CanUserCreateObject(request, orgID, &payload.Meta) {
 			writer.WriteHeader(http.StatusForbidden)
 			writer.Write(unauthorizedBytes)
 			return
 		}
 		if err := updateObject(orgID, objectType, objectID, payload.Meta, payload.Data); err == nil {
-			writer.WriteHeader(http.StatusOK)
+			writer.WriteHeader(http.StatusNoContent)
 		} else {
 			communications.SendErrorResponse(writer, err, "", 0)
 		}
@@ -1251,13 +1309,7 @@ func handleGetOrganizations(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	username, password, ok := request.BasicAuth()
-	if !ok {
-		writer.WriteHeader(http.StatusForbidden)
-		writer.Write(unauthorizedBytes)
-		return
-	}
-	code, userOrg, _ := security.Authenticate(username, password)
+	code, userOrg, _ := security.Authenticate(request)
 	if code != security.AuthAdmin && code != security.AuthSyncAdmin {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
@@ -1312,13 +1364,7 @@ func handleOrganizations(writer http.ResponseWriter, request *http.Request) {
 	}
 	orgID = parts[0]
 
-	username, password, ok := request.BasicAuth()
-	if !ok {
-		writer.WriteHeader(http.StatusForbidden)
-		writer.Write(unauthorizedBytes)
-		return
-	}
-	code, userOrg, _ := security.Authenticate(username, password)
+	code, userOrg, _ := security.Authenticate(request)
 	if !((code == security.AuthAdmin && orgID == userOrg) || code == security.AuthSyncAdmin) {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
@@ -1423,13 +1469,7 @@ func handleSecurity(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	username, password, ok := request.BasicAuth()
-	if !ok {
-		writer.WriteHeader(http.StatusForbidden)
-		writer.Write(unauthorizedBytes)
-		return
-	}
-	code, userOrg, _ := security.Authenticate(username, password)
+	code, userOrg, _ := security.Authenticate(request)
 	if code == security.AuthFailed || code != security.AuthAdmin {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
@@ -1783,6 +1823,5 @@ func handleACLUpdate(request *http.Request, aclType string, orgID string, parts 
 }
 
 func canUserAccessObject(request *http.Request, orgID, objectType string) bool {
-	username, password, ok := request.BasicAuth()
-	return ok && security.CanUserAccessObject(username, password, orgID, objectType)
+	return security.CanUserAccessObject(request, orgID, objectType)
 }

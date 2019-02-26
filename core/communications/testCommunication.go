@@ -66,3 +66,13 @@ func (communication *TestComm) UpdateOrganization(org common.Organization, times
 func (communication *TestComm) DeleteOrganization(orgID string) common.SyncServiceError {
 	return nil
 }
+
+// SendFeedbackMessage sends a feedback message from the ESS to the CSS
+func (communication *TestComm) SendFeedbackMessage(code int, retryInterval int32, reason string, metaData *common.MetaData) common.SyncServiceError {
+	return nil
+}
+
+// SendErrorMessage sends an error message from the ESS to the CSS
+func (communication *TestComm) SendErrorMessage(err common.SyncServiceError, metaData *common.MetaData) common.SyncServiceError {
+	return nil
+}

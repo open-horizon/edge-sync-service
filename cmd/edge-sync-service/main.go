@@ -19,11 +19,29 @@ package main
 //go:generate swagger generate spec
 
 import (
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/open-horizon/edge-sync-service/common"
 	"github.com/open-horizon/edge-sync-service/core/security"
 
 	"github.com/open-horizon/edge-sync-service/core/base"
 )
 
 func main() {
-	base.StandaloneSyncService(&security.DummyAuthenticate{})
+	base.ConfigStandaloneSyncService()
+
+	var authenticationHandler security.Authentication
+
+	switch strings.ToLower(common.Configuration.AuthenticationHandler) {
+	case "dummy":
+		authenticationHandler = &security.DummyAuthenticate{}
+	default:
+		fmt.Printf("Unknown Authentication handler identifier %s. Valid values are dummy.\n",
+			common.Configuration.AuthenticationHandler)
+		os.Exit(99)
+	}
+
+	base.StandaloneSyncService(authenticationHandler)
 }

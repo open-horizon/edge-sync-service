@@ -100,7 +100,7 @@ type Storage interface {
 	GetObjectDestinations(metaData common.MetaData) ([]common.Destination, common.SyncServiceError)
 
 	// UpdateObjectDeliveryStatus changes the object's delivery status for the destination
-	UpdateObjectDeliveryStatus(status string, orgID string, objectType string, objectID string,
+	UpdateObjectDeliveryStatus(status string, message string, orgID string, objectType string, objectID string,
 		destType string, destID string) common.SyncServiceError
 
 	// UpdateObjectDelivering marks the object as being delivered to all its destinations
@@ -136,6 +136,9 @@ type Storage interface {
 
 	// Retrieve communication protocol for the destination
 	RetrieveDestinationProtocol(orgID string, destType string, destID string) (string, common.SyncServiceError)
+
+	// GetObjectsForDestination retrieves objects that are in use on a given node
+	GetObjectsForDestination(orgID string, destType string, destID string) ([]common.ObjectStatus, common.SyncServiceError)
 
 	// Update/add a notification record to an object
 	UpdateNotificationRecord(notification common.Notification) common.SyncServiceError

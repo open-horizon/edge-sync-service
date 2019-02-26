@@ -1,6 +1,7 @@
 package dataURI
 
 import (
+	"fmt"
 	"io"
 	"net/url"
 	"os"
@@ -23,7 +24,7 @@ func (e *Error) Error() string {
 // AppendData appends a chunk of data to the file stored at the given URI
 func AppendData(uri string, dataReader io.Reader, dataLength uint32, offset int64, total int64, isFirstChunk bool, isLastChunk bool) common.SyncServiceError {
 	if trace.IsLogging(logger.TRACE) {
-		trace.Trace("Storing data chunk at %s\n", uri)
+		trace.Trace("Storing data chunk at %s", uri)
 	}
 
 	dataURI, err := url.Parse(uri)
@@ -34,22 +35,22 @@ func AppendData(uri string, dataReader io.Reader, dataLength uint32, offset int6
 	filePath := dataURI.Path + ".tmp"
 	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
-		return &Error{"Failed to open file to append data. Error: " + err.Error()}
+		return common.CreateError(err, fmt.Sprintf("Failed to open file %s to append data. Error: ", dataURI.Path))
 	}
 	defer file.Close()
 	file.Seek(offset, io.SeekStart)
 
 	written, err := io.Copy(file, dataReader)
 	if err != nil && err != io.EOF {
-		return &Error{"Failed to write to file. Error: " + err.Error()}
+		return &common.IOError{Message: "Failed to write to file. Error: " + err.Error()}
 	}
 	if written != int64(dataLength) {
-		return &Error{"Failed to write all the data to file."}
+		return &common.IOError{Message: "Failed to write all the data to file."}
 	}
 
 	if isLastChunk {
 		if err := os.Rename(filePath, dataURI.Path); err != nil {
-			return err
+			return &common.IOError{Message: "Failed to rename data file. Error: " + err.Error()}
 		}
 	}
 	return nil
@@ -58,7 +59,7 @@ func AppendData(uri string, dataReader io.Reader, dataLength uint32, offset int6
 // StoreData writes the data to the file stored at the given URI
 func StoreData(uri string, dataReader io.Reader, dataLength uint32) (int64, common.SyncServiceError) {
 	if trace.IsLogging(logger.TRACE) {
-		trace.Trace("Storing data at %s\n", uri)
+		trace.Trace("Storing data at %s", uri)
 	}
 	dataURI, err := url.Parse(uri)
 	if err != nil || !strings.EqualFold(dataURI.Scheme, "file") {
@@ -68,7 +69,7 @@ func StoreData(uri string, dataReader io.Reader, dataLength uint32) (int64, comm
 	filePath := dataURI.Path + ".tmp"
 	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
-		return 0, &Error{"Failed to open file to write data. Error: " + err.Error()}
+		return 0, common.CreateError(err, fmt.Sprintf("Failed to open file %s to write data. Error: ", dataURI.Path))
 	}
 	defer file.Close()
 
@@ -76,13 +77,13 @@ func StoreData(uri string, dataReader io.Reader, dataLength uint32) (int64, comm
 
 	written, err := io.Copy(file, dataReader)
 	if err != nil && err != io.EOF {
-		return 0, &Error{"Failed to write to file. Error: " + err.Error()}
+		return 0, &common.IOError{Message: "Failed to write to file. Error: " + err.Error()}
 	}
 	if written != int64(dataLength) && dataLength != 0 {
-		return 0, &Error{"Failed to write all the data to file."}
+		return 0, &common.IOError{Message: "Failed to write all the data to file."}
 	}
 	if err := os.Rename(filePath, dataURI.Path); err != nil {
-		return 0, err
+		return 0, &common.IOError{Message: "Failed to rename data file. Error: " + err.Error()}
 	}
 	return written, nil
 }
@@ -96,12 +97,12 @@ func GetData(uri string) (io.Reader, common.SyncServiceError) {
 	}
 
 	if trace.IsLogging(logger.TRACE) {
-		trace.Trace("Retrieving data from %s\n", uri)
+		trace.Trace("Retrieving data from %s", uri)
 	}
 
 	file, err := os.Open(dataURI.Path)
 	if err != nil {
-		return nil, &Error{"Failed to open file to read data. Error: " + err.Error()}
+		return nil, common.CreateError(err, fmt.Sprintf("Failed to open file %s to read data. Error: ", dataURI.Path))
 	}
 	return file, nil
 }
@@ -115,12 +116,12 @@ func GetDataChunk(uri string, size int, offset int64) ([]byte, bool, int, common
 	}
 
 	if trace.IsLogging(logger.TRACE) {
-		trace.Trace("Retrieving data from %s\n", uri)
+		trace.Trace("Retrieving data from %s", uri)
 	}
 
 	file, err := os.Open(dataURI.Path)
 	if err != nil {
-		return nil, true, 0, &Error{"Failed to open file to read data. Error: " + err.Error()}
+		return nil, true, 0, common.CreateError(err, fmt.Sprintf("Failed to open file %s to read data. Error: ", dataURI.Path))
 	}
 	defer file.Close()
 
@@ -129,7 +130,7 @@ func GetDataChunk(uri string, size int, offset int64) ([]byte, bool, int, common
 	n, err := file.ReadAt(result, offset)
 	if n == size {
 		if err != nil { // This, most probably, can never happen when n == size, but the doc doesn't say it
-			return nil, true, 0, &Error{"Failed to read data. Error: " + err.Error()}
+			return nil, true, 0, &common.IOError{Message: "Failed to read data. Error: " + err.Error()}
 		}
 		var fi os.FileInfo
 		fi, err = file.Stat()
@@ -141,7 +142,7 @@ func GetDataChunk(uri string, size int, offset int64) ([]byte, bool, int, common
 		if err == io.EOF {
 			eof = true
 		} else {
-			return nil, true, 0, &Error{"Failed to read data. Error: " + err.Error()}
+			return nil, true, 0, &common.IOError{Message: "Failed to read data. Error: " + err.Error()}
 		}
 	}
 
@@ -154,5 +155,8 @@ func DeleteStoredData(uri string) common.SyncServiceError {
 	if err != nil || !strings.EqualFold(dataURI.Scheme, "file") {
 		return &Error{"Invalid data URI"}
 	}
-	return os.Remove(dataURI.Path)
+	if err = os.Remove(dataURI.Path); err != nil && !os.IsNotExist(err) {
+		return &common.IOError{Message: "Failed to delete data. Error: " + err.Error()}
+	}
+	return nil
 }

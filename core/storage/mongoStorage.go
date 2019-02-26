@@ -331,9 +331,12 @@ func (store *MongoStorage) GetObjectDestinationsList(orgID string, objectType st
 	return dests, nil
 }
 
-// UpdateObjectDeliveryStatus changes the object's delivery status for the destination
-func (store *MongoStorage) UpdateObjectDeliveryStatus(status string, orgID string, objectType string, objectID string,
+// UpdateObjectDeliveryStatus changes the object's delivery status and message for the destination
+func (store *MongoStorage) UpdateObjectDeliveryStatus(status string, message string, orgID string, objectType string, objectID string,
 	destType string, destID string) common.SyncServiceError {
+	if status == "" && message == "" {
+		return nil
+	}
 	result := object{}
 	id := createObjectCollectionID(orgID, objectType, objectID)
 
@@ -347,7 +350,12 @@ func (store *MongoStorage) UpdateObjectDeliveryStatus(status string, orgID strin
 		allConsumed := true
 		for i, d := range result.Destinations {
 			if !found && d.Destination.DestType == destType && d.Destination.DestID == destID {
-				d.Status = status
+				if message != "" || d.Status == common.Error {
+					d.Message = message
+				}
+				if status != "" {
+					d.Status = status
+				}
 				found = true
 				result.Destinations[i] = d
 			} else if d.Status != common.Consumed {
@@ -1066,11 +1074,54 @@ func (store *MongoStorage) RetrieveDestination(orgID string, destType string, de
 	return &result.Destination, nil
 }
 
+// GetObjectsForDestination retrieves objects that are in use on a given node
+func (store *MongoStorage) GetObjectsForDestination(orgID string, destType string, destID string) ([]common.ObjectStatus, common.SyncServiceError) {
+	notificationRecords := []notificationObject{}
+	query := bson.M{"$or": []bson.M{
+		bson.M{"notification.status": common.Update},
+		bson.M{"notification.status": common.UpdatePending},
+		bson.M{"notification.status": common.Updated},
+		bson.M{"notification.status": common.ReceivedByDestination},
+		bson.M{"notification.status": common.ConsumedByDestination},
+		bson.M{"notification.status": common.Error}},
+		"notification.destination-org-id": orgID,
+		"notification.destination-id":     destID,
+		"notification.destination-type":   destType}
+
+	if err := store.fetchAll(notifications, query, nil, &notificationRecords); err != nil && err != mgo.ErrNotFound {
+		return nil, &Error{fmt.Sprintf("Failed to fetch the notifications. Error: %s.", err)}
+	}
+
+	var status string
+	objectStatuses := make([]common.ObjectStatus, 0)
+	for _, n := range notificationRecords {
+		switch n.Notification.Status {
+		case common.Update:
+			status = common.Delivering
+		case common.UpdatePending:
+			status = common.Delivering
+		case common.Updated:
+			status = common.Delivering
+		case common.ReceivedByDestination:
+			status = common.Delivered
+		case common.ConsumedByDestination:
+			status = common.Consumed
+		case common.Error:
+			status = common.Error
+		}
+		objectStatus := common.ObjectStatus{OrgID: orgID, ObjectType: n.Notification.ObjectType, ObjectID: n.Notification.ObjectID, Status: status}
+		objectStatuses = append(objectStatuses, objectStatus)
+	}
+	return objectStatuses, nil
+}
+
 // UpdateNotificationRecord updates/adds a notification record to the object
 func (store *MongoStorage) UpdateNotificationRecord(notification common.Notification) common.SyncServiceError {
 	id := getNotificationCollectionID(&notification)
-	resendTime := time.Now().Unix() + int64(common.Configuration.ResendInterval*6)
-	notification.ResendTime = resendTime
+	if notification.ResendTime == 0 {
+		resendTime := time.Now().Unix() + int64(common.Configuration.ResendInterval*6)
+		notification.ResendTime = resendTime
+	}
 	n := notificationObject{ID: id, Notification: notification}
 	err := store.upsert(notifications,
 		bson.M{

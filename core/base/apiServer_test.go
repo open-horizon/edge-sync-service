@@ -43,7 +43,9 @@ func TestHandleDestinations(t *testing.T) {
 		orgID         string
 		status        int
 		expectedCount int
-	}{{"testerUser@myorg5", "myorg5", http.StatusOK, 3}, {"testerAdmin@plover5", "plover5", http.StatusOK, 2},
+	}{
+		{"testerUser@myorg5", "myorg5", http.StatusOK, 3},
+		{"testerAdmin@plover5", "plover5", http.StatusOK, 2},
 		{"tester@plover5", "plover5", http.StatusForbidden, -1}}
 
 	for _, test := range testData {
@@ -167,7 +169,7 @@ func testHandleObjectHelper(nodeType string, t *testing.T) {
 	}{
 		{http.MethodPut, "testerAdmin@myorg222", "myorg222", "type1", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
-			[]byte("abc"), http.StatusOK, nil, 0},
+			[]byte("abc"), http.StatusNoContent, nil, 0},
 		{http.MethodGet, "testerAdmin@myorg222", "myorg222", "type1", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
 			[]byte("abc"), http.StatusOK, nil, 1},
@@ -196,8 +198,10 @@ func testHandleObjectHelper(nodeType string, t *testing.T) {
 		{http.MethodGet, "testerAdmin@myorg222", "myorg222", "type1", "1", "destinations",
 			&common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
 			nil, http.StatusOK, nil, 20},
-		{http.MethodPut, "testerAdmin@myorg222", "myorg222", "type1", "", "", nil, nil, http.StatusOK, &webhookUpdate{Action: "register", URL: "http://abc"}, 21},
-		{http.MethodPut, "testerAdmin@myorg222", "myorg222", "type1", "", "", nil, nil, http.StatusBadRequest, &webhookUpdate{Action: "register", URL: "abc"}, 22},
+		{http.MethodPut, "testerAdmin@myorg222", "myorg222", "type1", "", "", nil, nil, http.StatusNoContent,
+			&webhookUpdate{Action: "register", URL: "http://abc"}, 21},
+		{http.MethodPut, "testerAdmin@myorg222", "myorg222", "type1", "", "", nil, nil, http.StatusBadRequest,
+			&webhookUpdate{Action: "register", URL: "abc"}, 22},
 		{http.MethodPut, "testerAdmin@myorg222", "myorg222", "type1", "1", "received", nil, nil, http.StatusBadRequest, nil, 23},
 		{http.MethodPost, "testerAdmin@myorg222", "myorg222", "type1", "1", "received", nil, nil, http.StatusMethodNotAllowed, nil, 24},
 
@@ -229,8 +233,10 @@ func testHandleObjectHelper(nodeType string, t *testing.T) {
 		{http.MethodGet, "testerAdmin@myorg", "myorg222", "type1", "1", "destinations",
 			&common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
 			nil, http.StatusForbidden, nil, 40},
-		{http.MethodPut, "testerFail@myorg222", "myorg222", "type1", "", "", nil, nil, http.StatusForbidden, &webhookUpdate{Action: "register", URL: "http://abc"}, 41},
-		{http.MethodPut, "testerAdmin@myorg", "myorg222", "type1", "", "", nil, nil, http.StatusForbidden, &webhookUpdate{Action: "register", URL: "http://abc"}, 42},
+		{http.MethodPut, "testerFail@myorg222", "myorg222", "type1", "", "", nil, nil, http.StatusForbidden,
+			&webhookUpdate{Action: "register", URL: "http://abc"}, 41},
+		{http.MethodPut, "testerAdmin@myorg", "myorg222", "type1", "", "", nil, nil, http.StatusForbidden,
+			&webhookUpdate{Action: "register", URL: "http://abc"}, 42},
 
 		{http.MethodPut, "testerUser@myorg222", "myorg222", "type1", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
@@ -250,7 +256,7 @@ func testHandleObjectHelper(nodeType string, t *testing.T) {
 
 		{http.MethodPut, "testerUser@myorg222", "myorg222", "type2", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type2", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
-			[]byte("abc"), http.StatusOK, nil, 53},
+			[]byte("abc"), http.StatusNoContent, nil, 53},
 		{http.MethodGet, "testerUser@myorg222", "myorg222", "type2", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type2", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
 			[]byte("abc"), http.StatusOK, nil, 53},
@@ -261,11 +267,12 @@ func testHandleObjectHelper(nodeType string, t *testing.T) {
 		{http.MethodPut, "testerUser@myorg222", "myorg222", "type2", "1", "deleted", nil, nil, http.StatusNoContent, nil, 58},
 		{http.MethodGet, "testerUser@myorg222", "myorg222", "type2", "", "", nil, nil, http.StatusOK, nil, 59},
 		{http.MethodGet, "testerUser@myorg222", "myorg222", "type2", "2", "", nil, nil, http.StatusNotFound, nil, 60},
-		{http.MethodPut, "testerUser@myorg222", "myorg222", "type2", "", "", nil, nil, http.StatusOK, &webhookUpdate{Action: "register", URL: "http://abc"}, 61},
+		{http.MethodPut, "testerUser@myorg222", "myorg222", "type2", "", "", nil, nil, http.StatusNoContent,
+			&webhookUpdate{Action: "register", URL: "http://abc"}, 61},
 
 		{http.MethodPut, "testerUser@myorg222", "myorg222", "type3", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type3", DestOrgID: "myorg222", DestID: "dev1", DestType: "device2"},
-			[]byte("abc"), http.StatusOK, nil, 62},
+			[]byte("abc"), http.StatusNoContent, nil, 62},
 		{http.MethodGet, "testerUser@myorg222", "myorg222", "type3", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type3", DestOrgID: "myorg222", DestID: "dev1", DestType: "device2"},
 			[]byte("abc"), http.StatusOK, nil, 63},
@@ -276,7 +283,8 @@ func testHandleObjectHelper(nodeType string, t *testing.T) {
 		{http.MethodPut, "testerUser@myorg222", "myorg222", "type3", "1", "deleted", nil, nil, http.StatusNoContent, nil, 68},
 		{http.MethodGet, "testerUser@myorg222", "myorg222", "type3", "", "", nil, nil, http.StatusOK, nil, 69},
 		{http.MethodGet, "testerUser@myorg222", "myorg222", "type3", "2", "", nil, nil, http.StatusNotFound, nil, 70},
-		{http.MethodPut, "testerUser@myorg222", "myorg222", "type3", "", "", nil, nil, http.StatusOK, &webhookUpdate{Action: "register", URL: "http://abc"}, 71},
+		{http.MethodPut, "testerUser@myorg222", "myorg222", "type3", "", "", nil, nil, http.StatusNoContent,
+			&webhookUpdate{Action: "register", URL: "http://abc"}, 71},
 	}
 
 	destInfo := []struct {
