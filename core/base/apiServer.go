@@ -190,7 +190,7 @@ func handleDestinations(writer http.ResponseWriter, request *http.Request) {
 			}
 		}
 	} else if len(parts) == 3 || (len(parts) == 4 && len(parts[3]) == 0) && parts[2] == "objects" {
-		// swagger:operation GET /api/v1/destinations/{orgID}/{destType}/{destID}/objects handleDestinations
+		// swagger:operation GET /api/v1/destinations/{orgID}/{destType}/{destID}/objects handleDestinationObjects
 		//
 		// List all objects that are in use by the destination.
 		//
@@ -1057,7 +1057,7 @@ func handleObjectPutData(orgID string, objectType string, objectID string, write
 	}
 }
 
-// swagger:operation GET /api/v1/objects/{orgID}/{objectType}?received=bool handleListUpdatedObjects
+// swagger:operation GET /api/v1/objects/{orgID}/{objectType} handleListUpdatedObjects
 //
 // Get updated objects.
 //
@@ -1372,7 +1372,7 @@ func handleOrganizations(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	switch request.Method {
-	// swagger:operation DELETE /api/v1/organizations/{orgID} handleOrganizations
+	// swagger:operation DELETE /api/v1/organizations/{orgID} handleDeleteOrganization
 	//
 	// Delete organization.
 	//
