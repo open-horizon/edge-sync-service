@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"fmt"
 	"testing"
 	"time"
 
@@ -23,6 +22,12 @@ func TestMongoStorageObjectExpiration(t *testing.T) {
 		t.Errorf("Failed to initialize storage driver. Error: %s\n", err.Error())
 		return
 	}
+	defer store.Stop()
+
+	dest1 := common.Destination{DestOrgID: "1myorg1", DestType: "device", DestID: "dev1", Communication: common.MQTTProtocol}
+	if err := store.StoreDestination(dest1); err != nil {
+		t.Errorf("StoreDestination failed. Error: %s\n", err.Error())
+	}
 
 	expirationTime1 := time.Now().Add(time.Second * 1).Format(time.RFC3339)
 	expirationTime2 := time.Now().Add(time.Second * 3).Format(time.RFC3339)
@@ -31,11 +36,11 @@ func TestMongoStorageObjectExpiration(t *testing.T) {
 		metaData common.MetaData
 		status   string
 	}{
-		{common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg", DestID: "dev1", DestType: "device"},
+		{common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "1myorg1", DestID: "dev1", DestType: "device"},
 			common.ReadyToSend},
-		{common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "myorg", DestID: "dev1", DestType: "device",
+		{common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "1myorg1", DestID: "dev1", DestType: "device",
 			Expiration: expirationTime1}, common.ReadyToSend},
-		{common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "myorg", DestID: "dev1", DestType: "device",
+		{common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "1myorg1", DestID: "dev1", DestType: "device",
 			Expiration: expirationTime2}, common.ReadyToSend},
 	}
 
@@ -46,7 +51,7 @@ func TestMongoStorageObjectExpiration(t *testing.T) {
 		}
 	}
 
-	objects, err := store.RetrieveObjects(tests[0].metaData.DestOrgID, tests[0].metaData.DestType, tests[0].metaData.DestID)
+	objects, err := store.RetrieveObjects(tests[0].metaData.DestOrgID, tests[0].metaData.DestType, tests[0].metaData.DestID, common.ResendAll)
 	if err != nil {
 		t.Errorf("RetrieveObjects failed. Error: %s\n", err.Error())
 	} else if len(objects) != 3 {
@@ -55,7 +60,7 @@ func TestMongoStorageObjectExpiration(t *testing.T) {
 
 	select {
 	case <-time.After(2 * time.Second):
-		objects, err = store.RetrieveObjects(tests[0].metaData.DestOrgID, tests[0].metaData.DestType, tests[0].metaData.DestID)
+		objects, err = store.RetrieveObjects(tests[0].metaData.DestOrgID, tests[0].metaData.DestType, tests[0].metaData.DestID, common.ResendAll)
 		if err != nil {
 			t.Errorf("RetrieveObjects failed. Error: %s\n", err.Error())
 		} else if len(objects) != 2 {
@@ -65,7 +70,7 @@ func TestMongoStorageObjectExpiration(t *testing.T) {
 
 	select {
 	case <-time.After(4 * time.Second):
-		objects, err = store.RetrieveObjects(tests[0].metaData.DestOrgID, tests[0].metaData.DestType, tests[0].metaData.DestID)
+		objects, err = store.RetrieveObjects(tests[0].metaData.DestOrgID, tests[0].metaData.DestType, tests[0].metaData.DestID, common.ResendAll)
 		if err != nil {
 			t.Errorf("RetrieveObjects failed. Error: %s\n", err.Error())
 		} else if len(objects) != 1 {
@@ -87,6 +92,11 @@ func TestMongoStorageOrgDeleteObjects(t *testing.T) {
 		return
 	}
 	defer store.Stop()
+
+	dest1 := common.Destination{DestOrgID: "zzzmyorg1", DestType: "device", DestID: "dev1", Communication: common.MQTTProtocol}
+	if err := store.StoreDestination(dest1); err != nil {
+		t.Errorf("StoreDestination failed. Error: %s\n", err.Error())
+	}
 
 	tests := []struct {
 		metaData common.MetaData
@@ -128,7 +138,7 @@ func TestMongoStorageOrgDeleteObjects(t *testing.T) {
 		t.Errorf("RetrieveUpdatedObjects returned wrong number of objects: %d instead of 2\n", len(objects))
 	}
 
-	objects, err = store.RetrieveObjects(tests[0].metaData.DestOrgID, tests[0].metaData.DestType, tests[0].metaData.DestID)
+	objects, err = store.RetrieveObjects(tests[0].metaData.DestOrgID, tests[0].metaData.DestType, tests[0].metaData.DestID, common.ResendAll)
 	if err != nil {
 		t.Errorf("RetrieveObjects failed. Error: %s\n", err.Error())
 	} else if len(objects) != 2 {
@@ -145,7 +155,7 @@ func TestMongoStorageOrgDeleteObjects(t *testing.T) {
 	} else if len(objects) != 0 {
 		t.Errorf("RetrieveUpdatedObjects returned objects after the organization has been deleted\n")
 	}
-	objects, err = store.RetrieveObjects(tests[0].metaData.DestOrgID, tests[0].metaData.DestType, tests[0].metaData.DestID)
+	objects, err = store.RetrieveObjects(tests[0].metaData.DestOrgID, tests[0].metaData.DestType, tests[0].metaData.DestID, common.ResendAll)
 	if err != nil {
 		t.Errorf("RetrieveObjects failed. Error: %s\n", err.Error())
 	} else if len(objects) != 0 {
@@ -410,8 +420,8 @@ func TestMongoStorageObjectDestinations(t *testing.T) {
 	}
 	defer store.Stop()
 
-	dest1 := common.Destination{DestOrgID: "myorg", DestType: "device", DestID: "dev1", Communication: common.MQTTProtocol}
-	dest2 := common.Destination{DestOrgID: "myorg", DestType: "device", DestID: "dev2", Communication: common.MQTTProtocol}
+	dest1 := common.Destination{DestOrgID: "org444", DestType: "device", DestID: "dev1", Communication: common.MQTTProtocol}
+	dest2 := common.Destination{DestOrgID: "org444", DestType: "device", DestID: "dev2", Communication: common.MQTTProtocol}
 	destArray := []string{"device:dev2", "device:dev1"}
 
 	if err := store.StoreDestination(dest1); err != nil {
@@ -425,15 +435,15 @@ func TestMongoStorageObjectDestinations(t *testing.T) {
 		metaData common.MetaData
 		status   string
 	}{
-		{common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg", DestID: "dev1", DestType: "device"},
+		{common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "org444", DestID: "dev1", DestType: "device"},
 			common.NotReadyToSend},
-		{common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "myorg", DestType: "device",
+		{common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "org444", DestType: "device",
 			Inactive: true}, common.NotReadyToSend},
-		{common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "myorg", DestID: "dev1", DestType: "device",
+		{common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "org444", DestID: "dev1", DestType: "device",
 			Inactive: true}, common.NotReadyToSend},
-		{common.MetaData{ObjectID: "4", ObjectType: "type1", DestOrgID: "myorg", DestID: "dev1", DestType: "device",
+		{common.MetaData{ObjectID: "4", ObjectType: "type1", DestOrgID: "org444", DestID: "dev1", DestType: "device",
 			NoData: true}, common.ReadyToSend},
-		{common.MetaData{ObjectID: "5", ObjectType: "type1", DestOrgID: "myorg",
+		{common.MetaData{ObjectID: "5", ObjectType: "type1", DestOrgID: "org444",
 			DestinationsList: destArray, NoData: true}, common.ReadyToSend},
 	}
 
@@ -624,7 +634,6 @@ func TestMongoStorageOrganizations(t *testing.T) {
 	if orgs, err := store.RetrieveOrganizations(); err != nil {
 		t.Errorf("RetrieveOrganizations failed. Error: %s\n", err.Error())
 	} else if len(orgs)-initialNumberOfOrgs != len(tests)-1 { // there are two tests with the same org id
-		fmt.Println(orgs)
 		t.Errorf("RetrieveOrganizations returned incorrect number of orgs: %d instead of %d\n", len(orgs)-initialNumberOfOrgs, len(tests)-1)
 	}
 
@@ -644,4 +653,77 @@ func TestMongoStorageOrganizations(t *testing.T) {
 	} else if len(orgs)-initialNumberOfOrgs != 0 {
 		t.Errorf("RetrieveOrganizations returned incorrect number of orgs: %d instead of %d\n", len(orgs)-initialNumberOfOrgs, 0)
 	}
+}
+
+func TestMongoStorageInactiveDestinations(t *testing.T) {
+	store := &MongoStorage{}
+	if err := store.Init(); err != nil {
+		t.Errorf("Failed to initialize storage driver. Error: %s\n", err.Error())
+		return
+	}
+	defer store.Stop()
+
+	destinations := []struct {
+		dest common.Destination
+	}{
+		{common.Destination{DestOrgID: "inactiveorg1", DestID: "1", DestType: "device", Communication: common.MQTTProtocol}},
+		{common.Destination{DestOrgID: "inactiveorg2", DestID: "2", DestType: "device", Communication: common.HTTPProtocol}},
+	}
+
+	for _, d := range destinations {
+		if err := store.StoreDestination(d.dest); err != nil {
+			t.Errorf("StoreDestination failed. Error: %s\n", err.Error())
+		}
+
+		if exists, err := store.DestinationExists(d.dest.DestOrgID, d.dest.DestType, d.dest.DestID); err != nil || !exists {
+			t.Errorf("Stored destination doesn't exist\n")
+		}
+	}
+
+	notifications := []struct {
+		n               common.Notification
+		shouldBeRemoved bool
+	}{
+		{common.Notification{ObjectID: "1", ObjectType: "type1", DestOrgID: "inactiveorg1", DestID: "1", DestType: "device",
+			Status: common.Update, InstanceID: 5}, true},
+		{common.Notification{ObjectID: "2", ObjectType: "type1", DestOrgID: "inactiveorg1", DestID: "2", DestType: "device",
+			Status: common.Update, InstanceID: 5}, false},
+		{common.Notification{ObjectID: "3", ObjectType: "type1", DestOrgID: "inactiveorg1", DestID: "1", DestType: "device",
+			Status: common.Getdata}, true},
+		{common.Notification{ObjectID: "4", ObjectType: "type1", DestOrgID: "inactiveorg2", DestID: "2", DestType: "device",
+			Status: common.Data}, true},
+		{common.Notification{ObjectID: "5", ObjectType: "type1", DestOrgID: "inactiveorg2", DestID: "1", DestType: "device",
+			Status: common.AckConsumed, InstanceID: 9}, false},
+		{common.Notification{ObjectID: "6", ObjectType: "type1", DestOrgID: "inactiveorg3", DestID: "1", DestType: "device",
+			Status: common.AckConsumed, InstanceID: 9}, false},
+	}
+
+	for _, n := range notifications {
+		if err := store.UpdateNotificationRecord(n.n); err != nil {
+			t.Errorf("UpdateNotificationRecord failed. Error: %s\n", err.Error())
+		}
+
+		if storedNotification, err := store.RetrieveNotificationRecord(n.n.DestOrgID, n.n.ObjectType, n.n.ObjectID, n.n.DestType,
+			n.n.DestID); err != nil {
+			t.Errorf("RetrieveNotificationRecord failed. Error: %s\n", err.Error())
+		} else if storedNotification == nil {
+			t.Errorf("RetrieveNotificationRecord returned nil notification\n")
+		}
+	}
+
+	store.RemoveInactiveDestinations(time.Now().Add(time.Hour * 24))
+
+	for _, d := range destinations {
+		if exists, _ := store.DestinationExists(d.dest.DestOrgID, d.dest.DestType, d.dest.DestID); exists {
+			t.Errorf("Inactive destination exists\n")
+		}
+	}
+
+	for _, n := range notifications {
+		if storedNotification, err := store.RetrieveNotificationRecord(n.n.DestOrgID, n.n.ObjectType, n.n.ObjectID, n.n.DestType,
+			n.n.DestID); (err == nil || storedNotification != nil) && n.shouldBeRemoved {
+			t.Errorf("Notification wasn't removed (object ID = %s)\n", n.n.ObjectID)
+		}
+	}
+
 }

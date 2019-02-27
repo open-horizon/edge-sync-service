@@ -93,23 +93,72 @@ func handleRegistration(dest common.Destination, persistentStorage bool) common.
 		if log.IsLogging(logger.INFO) {
 			log.Info("New destination: %s %s %s\n", dest.DestOrgID, dest.DestType, dest.DestID)
 		}
-		objects, err := Store.RetrieveObjects(dest.DestOrgID, dest.DestType, dest.DestID)
-		if err != nil {
-			return &notificationHandlerError{fmt.Sprintf("Error in handleRegistration. Error: %s\n", err)}
+		if err := sendNotificationsToNewDestination(dest, persistentStorage); err != nil {
+			return &notificationHandlerError{fmt.Sprintf("Error in handleRegistration: failed to send updates. Error: %s\n", err)}
 		}
+	}
 
-		if len(objects) > 0 {
-			destinations := make([]common.Destination, 1)
-			destinations[0] = dest
-			for _, metaData := range objects {
-				if err := SendNotification(metaData, destinations); err != nil {
-					return &notificationHandlerError{fmt.Sprintf("Error in handleRegistration. Error: %s\n", err)}
-				}
+	return nil
+}
+
+func sendNotificationsToNewDestination(dest common.Destination, persistentStorage bool) common.SyncServiceError {
+	resend := common.ResendDelivered
+	if persistentStorage {
+		resend = common.ResendUndelivered
+	}
+	objects, err := Store.RetrieveObjects(dest.DestOrgID, dest.DestType, dest.DestID, resend)
+	if err != nil {
+		return err
+	}
+
+	if len(objects) > 0 {
+		destinations := make([]common.Destination, 1)
+		destinations[0] = dest
+		for _, metaData := range objects {
+			if err := SendNotification(metaData, destinations); err != nil {
+				return err
 			}
 		}
 	}
 
 	return nil
+}
+
+// CSS: handle ESS ping
+// Return true if the destination is a new destination
+func handlePing(dest common.Destination, persistentStorage bool) (bool, common.SyncServiceError) {
+	if common.Configuration.NodeType == common.ESS {
+		return false, &notificationHandlerError{"ESS received ping"}
+	}
+
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("Handling ping of %s %s\n", dest.DestType, dest.DestID)
+	}
+
+	err := Store.UpdateDestinationLastPingTime(dest)
+	if err == nil {
+		return false, nil
+	}
+
+	if !storage.IsNotFound(err) {
+		return false, &notificationHandlerError{fmt.Sprintf("Error in handlePing: failed to update destination's last ping time. Error: %s\n", err)}
+	}
+
+	// Received ping from a destination that is not in the database
+	// Add to the destinations list
+	if err := Store.StoreDestination(dest); err != nil {
+		return false, &notificationHandlerError{fmt.Sprintf("Error in handlePing: failed to store destination. Error: %s\n", err)}
+	}
+	// Go through the objects and look for the relevant updates
+	if log.IsLogging(logger.INFO) {
+		log.Info("New destination discovered from ping: %s %s %s\n", dest.DestOrgID, dest.DestType, dest.DestID)
+	}
+
+	if err := sendNotificationsToNewDestination(dest, persistentStorage); err != nil {
+		return false, &notificationHandlerError{fmt.Sprintf("Error in handlePing: failed to send updates. Error: %s\n", err)}
+	}
+
+	return true, nil
 }
 
 // Handle a notification about object update
@@ -534,7 +583,7 @@ func handleResendRequest(dest common.Destination) common.SyncServiceError {
 		return &notificationHandlerError{fmt.Sprintf("Error in handleResendRequest: failed to send ack. Error: %s\n", err)}
 	}
 
-	objects, err := Store.RetrieveObjects(dest.DestOrgID, dest.DestType, dest.DestID)
+	objects, err := Store.RetrieveObjects(dest.DestOrgID, dest.DestType, dest.DestID, common.ResendAll)
 	if err != nil {
 		return &notificationHandlerError{fmt.Sprintf("Error in handleResendRequest. Error: %s\n", err)}
 	}

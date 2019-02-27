@@ -23,6 +23,7 @@ import (
 )
 
 const registerURL = "/spi/v1/register/"
+const pingURL = "/spi/v1/ping/"
 const objectRequestURL = "/spi/v1/objects/"
 
 var unauthorizedBytes = []byte("Unauthorized")
@@ -50,6 +51,7 @@ type feedbackMessage struct {
 func (communication *HTTP) StartCommunication() common.SyncServiceError {
 	if common.Configuration.NodeType == common.CSS {
 		http.Handle(registerURL, http.StripPrefix(registerURL, http.HandlerFunc(communication.handleRegister)))
+		http.Handle(pingURL, http.StripPrefix(pingURL, http.HandlerFunc(communication.handlePing)))
 		http.Handle(objectRequestURL, http.StripPrefix(objectRequestURL, http.HandlerFunc(communication.handleObjects)))
 	} else {
 		communication.httpClient = http.Client{Transport: &http.Transport{}}
@@ -301,7 +303,7 @@ func (communication *HTTP) SendNotificationMessage(notificationTopic string, des
 	return communication.createError(response, "send notification "+notificationTopic)
 }
 
-func (communication *HTTP) handleRegister(writer http.ResponseWriter, request *http.Request) {
+func (communication *HTTP) handleRegisterOrPing(url string, writer http.ResponseWriter, request *http.Request) {
 	if !communication.started || !common.Running {
 		writer.WriteHeader(http.StatusServiceUnavailable)
 		return
@@ -333,9 +335,13 @@ func (communication *HTTP) handleRegister(writer http.ResponseWriter, request *h
 				return
 			}
 		}
-		err := handleRegistration(
-			common.Destination{DestOrgID: orgID, DestType: destType, DestID: destID, Communication: common.HTTPProtocol},
-			persistentStorage)
+		var err error
+		destination := common.Destination{DestOrgID: orgID, DestType: destType, DestID: destID, Communication: common.HTTPProtocol}
+		if url == registerURL {
+			err = handleRegistration(destination, persistentStorage)
+		} else {
+			_, err = handlePing(destination, persistentStorage)
+		}
 		if err == nil {
 			writer.WriteHeader(http.StatusNoContent)
 		} else {
@@ -349,38 +355,57 @@ func (communication *HTTP) handleRegister(writer http.ResponseWriter, request *h
 	}
 }
 
-// Register sends a registration message to be sent by an ESS
-func (communication *HTTP) Register() common.SyncServiceError {
+func (communication *HTTP) handleRegister(writer http.ResponseWriter, request *http.Request) {
+	communication.handleRegisterOrPing(registerURL, writer, request)
+}
+
+func (communication *HTTP) handlePing(writer http.ResponseWriter, request *http.Request) {
+	communication.handleRegisterOrPing(pingURL, writer, request)
+}
+
+func (communication *HTTP) registerOrPing(url string) common.SyncServiceError {
 	if common.Configuration.NodeType != common.ESS {
 		return nil
 	}
 
-	url := buildRegisterURL(common.Configuration.OrgID, common.Configuration.DestinationType, common.Configuration.DestinationID)
-	request, err := http.NewRequest("PUT", url, nil)
+	requestURL := buildRegisterOrPingURL(url, common.Configuration.OrgID, common.Configuration.DestinationType, common.Configuration.DestinationID)
+	request, err := http.NewRequest("PUT", requestURL, nil)
 	q := request.URL.Query() // Get a copy of the query values.
 	q.Add("persistent-storage", strconv.FormatBool(common.Configuration.ESSPersistentStorage))
 	request.URL.RawQuery = q.Encode() // Encode and assign back to the original query.
-	username, password := security.KeyandSecretForURL(url)
+	username, password := security.KeyandSecretForURL(requestURL)
 	request.SetBasicAuth(username, password)
 
 	response, err := communication.httpClient.Do(request)
 	if err != nil {
-		return &Error{"Failed to send HTTP request to register. Error: " + err.Error()}
+		return &Error{"Failed to send HTTP request to register/ping. Error: " + err.Error()}
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusNoContent {
-		communication.handleRegAck()
+		if url == registerURL {
+			communication.handleRegAck()
+		}
 		return nil
 	}
 	if log.IsLogging(logger.ERROR) {
-		log.Error("Failed to register, received HTTP code %d %s", response.StatusCode, response.Status)
+		log.Error("Failed to register/ping, received HTTP code %d %s", response.StatusCode, response.Status)
 	}
-	return communication.createError(response, "register")
+	return communication.createError(response, "register/ping")
+}
+
+// Register sends a registration message to be sent by an ESS
+func (communication *HTTP) Register() common.SyncServiceError {
+	return communication.registerOrPing(registerURL)
 }
 
 // RegisterAck sends a registration acknowledgement message from the CSS
 func (communication *HTTP) RegisterAck(destination common.Destination) common.SyncServiceError {
 	return nil
+}
+
+// SendPing sends a ping message from ESS to CSS
+func (communication *HTTP) SendPing() common.SyncServiceError {
+	return communication.registerOrPing(pingURL)
 }
 
 // GetData requests data to be sent from the CSS to the ESS or from the ESS to the CSS
@@ -900,12 +925,12 @@ func buildResendURL(orgID string) string {
 	return strBuilder.String()
 }
 
-func buildRegisterURL(orgID string, destType string, destID string) string {
-	// common.HTTPCSSURL + registerURL + orgID + "/" + destType + "/" + destID
+func buildRegisterOrPingURL(url string, orgID string, destType string, destID string) string {
+	// common.HTTPCSSURL + url + orgID + "/" + destType + "/" + destID
 	var strBuilder strings.Builder
-	strBuilder.Grow(len(common.HTTPCSSURL) + len(registerURL) + len(orgID) + len(destType) + len(destID) + 2)
+	strBuilder.Grow(len(common.HTTPCSSURL) + len(url) + len(orgID) + len(destType) + len(destID) + 2)
 	strBuilder.WriteString(common.HTTPCSSURL)
-	strBuilder.WriteString(registerURL)
+	strBuilder.WriteString(url)
 	strBuilder.WriteString(orgID)
 	strBuilder.WriteByte('/')
 	strBuilder.WriteString(destType)

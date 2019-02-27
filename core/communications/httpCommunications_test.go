@@ -522,9 +522,9 @@ func testHTTPCommSetup(nodeType string) string {
 		// Store = &storage.InMemoryStorage{}
 		dir, _ := os.Getwd()
 		common.Configuration.PersistenceRootPath = dir + "/persist"
-		boltStor := &storage.BoltStorage{}
-		boltStor.Cleanup()
-		Store = boltStor
+		boltStore := &storage.BoltStorage{}
+		boltStore.Cleanup()
+		Store = boltStore
 	}
 
 	if err := Store.Init(); err != nil {

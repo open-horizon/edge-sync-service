@@ -355,6 +355,7 @@ const (
 	Feedback              = "feedback"
 	AckFeedback           = "ackFeedaback"
 	Error                 = "error"
+	Ping                  = "ping"
 )
 
 // Indication whether the object has been delivered to the destination
@@ -397,17 +398,24 @@ var SingleOrgCSS bool
 // HTTPCSSURL specifies the CSS URL for HTTP communication from ESS
 var HTTPCSSURL string
 
+// Types of various ACLs
+const (
+	DestinationsACLType = "destinations"
+	ObjectsACLType      = "objects"
+)
+
+// Resend flag options
+const (
+	ResendAll = iota
+	ResendDelivered
+	ResendUndelivered
+)
+
 // HashStrings uses FNV-1a (Fowler/Noll/Vo) fast and well dispersed hash functions
 // Reference: http://www.isthe.com/chongo/tech/comp/fnv/index.html
 const (
 	fnv32Init  uint32 = 0x811c9dc5
 	fnv32Prime uint32 = 0x01000193
-)
-
-// Types of various ACLs
-const (
-	DestinationsACLType = "destinations"
-	ObjectsACLType      = "objects"
 )
 
 // HashStrings hashes strings

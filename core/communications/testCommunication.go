@@ -36,6 +36,11 @@ func (communication *TestComm) RegisterAck(destination common.Destination) commo
 	return nil
 }
 
+// SendPing sends a ping message from ESS to CSS
+func (communication *TestComm) SendPing() common.SyncServiceError {
+	return nil
+}
+
 // GetData requests data to be sent from the CSS to the ESS or from the ESS to the CSS
 func (communication *TestComm) GetData(metaData common.MetaData, offset int64) common.SyncServiceError {
 	err := updateGetDataNotification(metaData, metaData.OriginType, metaData.OriginID, offset)

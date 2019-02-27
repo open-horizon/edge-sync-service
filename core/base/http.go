@@ -37,7 +37,8 @@ func startHTTPServer(ipAddress string, registerHandlers bool, swaggerFile string
 
 	if common.Configuration.ListeningType == common.ListeningSecurely {
 		setupSwaggerServing(swaggerFile, true, ipAddress, common.Configuration.SecureListeningPort)
-	} else if common.Configuration.ListeningType != common.ListeningUnix {
+	} else if common.Configuration.ListeningType != common.ListeningUnix &&
+		common.Configuration.ListeningType != common.ListeningSecureUnix {
 		setupSwaggerServing(swaggerFile, false, ipAddress, common.Configuration.UnsecureListeningPort)
 	}
 
@@ -55,7 +56,8 @@ func startHTTPServer(ipAddress string, registerHandlers bool, swaggerFile string
 			return &common.SetupError{Message: fmt.Sprintf("Failed to listen on %s. Error: %s", unsecureHTTPServer.Addr, err)}
 		}
 		go startHTTPServerHelper(false, listener)
-	} else if common.Configuration.ListeningType != common.ListeningUnix {
+	} else if common.Configuration.ListeningType != common.ListeningUnix &&
+		common.Configuration.ListeningType != common.ListeningSecureUnix {
 		listener, err := net.Listen("tcp", secureHTTPServer.Addr)
 		if err != nil {
 			return &common.SetupError{Message: fmt.Sprintf("Failed to listen on %s. Error: %s", secureHTTPServer.Addr, err)}
@@ -78,7 +80,7 @@ func startHTTPServer(ipAddress string, registerHandlers bool, swaggerFile string
 		if err != nil {
 			return &common.SetupError{Message: fmt.Sprintf("Failed to setup Unix Socket listening. Error: %s", err)}
 		}
-		go startHTTPServerHelper(false, listener)
+		go startHTTPServerHelper(common.Configuration.ListeningType == common.ListeningSecureUnix, listener)
 	}
 	return nil
 }
@@ -110,8 +112,14 @@ func startHTTPServerHelper(secure bool, listener net.Listener) {
 		if err == nil {
 			secureHTTPServer.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
 
-			if log.IsLogging(logger.INFO) {
-				log.Info("Listening on %d for HTTPS", common.Configuration.SecureListeningPort)
+			if common.Configuration.ListeningType != common.ListeningSecureUnix {
+				if log.IsLogging(logger.INFO) {
+					log.Info("Listening on %d for HTTPS", common.Configuration.SecureListeningPort)
+				}
+			} else {
+				if log.IsLogging(logger.INFO) {
+					log.Info("Listening on %s for UNIX (securely)", listener.Addr().String())
+				}
 			}
 
 			err = secureHTTPServer.ServeTLS(listener, "", "")

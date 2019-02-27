@@ -112,6 +112,15 @@ func (communication *Wrapper) RegisterAck(destination common.Destination) common
 	return comm.RegisterAck(destination)
 }
 
+// SendPing sends a ping message from ESS to CSS
+func (communication *Wrapper) SendPing() common.SyncServiceError {
+	comm, err := communication.selectCommunicator(common.Configuration.CommunicationProtocol, "", "", "")
+	if err != nil {
+		return err
+	}
+	return comm.SendPing()
+}
+
 // GetData requests data to be sent from the CSS to the ESS or from the ESS to the CSS
 func (communication *Wrapper) GetData(metaData common.MetaData, offset int64) common.SyncServiceError {
 	comm, err := communication.selectCommunicator("", metaData.DestOrgID, metaData.OriginType, metaData.OriginID)

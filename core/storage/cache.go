@@ -3,6 +3,7 @@ package storage
 import (
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/open-horizon/edge-sync-service/common"
@@ -12,6 +13,7 @@ import (
 type Cache struct {
 	destinations map[string]map[string]common.Destination
 	Store        Storage
+	lock         sync.RWMutex
 }
 
 // Init initializes the Cache store
@@ -19,10 +21,19 @@ func (store *Cache) Init() common.SyncServiceError {
 	if err := store.Store.Init(); err != nil {
 		return err
 	}
+
+	return store.cacheDestinations()
+}
+
+func (store *Cache) cacheDestinations() common.SyncServiceError {
 	destinations, err := store.Store.RetrieveDestinations("", "")
 	if err != nil {
 		return &Error{"Failed to initialize the cache. Error: " + err.Error()}
 	}
+
+	store.lock.Lock()
+	defer store.lock.Unlock()
+
 	store.destinations = make(map[string]map[string]common.Destination, 0)
 	for _, dest := range destinations {
 		if store.destinations[dest.DestOrgID] == nil {
@@ -102,8 +113,8 @@ func (store *Cache) RetrieveUpdatedObjects(orgID string, objectType string, rece
 }
 
 // RetrieveObjects returns the list of all the objects that need to be sent to the destination
-func (store *Cache) RetrieveObjects(orgID string, destType string, destID string) ([]common.MetaData, common.SyncServiceError) {
-	return store.Store.RetrieveObjects(orgID, destType, destID)
+func (store *Cache) RetrieveObjects(orgID string, destType string, destID string, resend int) ([]common.MetaData, common.SyncServiceError) {
+	return store.Store.RetrieveObjects(orgID, destType, destID, resend)
 }
 
 // RetrieveObject returns the object meta data with the specified parameters
@@ -195,6 +206,9 @@ func (store *Cache) RetrieveWebhooks(orgID string, objectType string) ([]string,
 
 // RetrieveDestinations returns all the destinations with the provided orgID and destType
 func (store *Cache) RetrieveDestinations(orgID string, destType string) ([]common.Destination, common.SyncServiceError) {
+	store.lock.RLock()
+	defer store.lock.RUnlock()
+
 	result := make([]common.Destination, 0)
 	if orgID == "" {
 		for _, orgDests := range store.destinations {
@@ -216,6 +230,9 @@ func (store *Cache) RetrieveDestinations(orgID string, destType string) ([]commo
 
 // DestinationExists returns true if the destination exists, and false otherwise
 func (store *Cache) DestinationExists(orgID string, destType string, destID string) (bool, common.SyncServiceError) {
+	store.lock.RLock()
+	defer store.lock.RUnlock()
+
 	if _, ok := store.destinations[orgID][destType+":"+destID]; ok {
 		return true, nil
 	}
@@ -227,6 +244,10 @@ func (store *Cache) StoreDestination(dest common.Destination) common.SyncService
 	if err := store.Store.StoreDestination(dest); err != nil {
 		return err
 	}
+
+	store.lock.Lock()
+	defer store.lock.Unlock()
+
 	if store.destinations[dest.DestOrgID] == nil {
 		store.destinations[dest.DestOrgID] = make(map[string]common.Destination, 0)
 	}
@@ -239,12 +260,30 @@ func (store *Cache) DeleteDestination(orgID string, destType string, destID stri
 	if err := store.Store.DeleteDestination(orgID, destType, destID); err != nil {
 		return err
 	}
+
+	store.lock.Lock()
+	defer store.lock.Unlock()
+
 	delete(store.destinations[orgID], destType+":"+destID)
 	return nil
 }
 
+// UpdateDestinationLastPingTime updates the last ping time for the destination
+func (store *Cache) UpdateDestinationLastPingTime(destination common.Destination) common.SyncServiceError {
+	return store.Store.UpdateDestinationLastPingTime(destination) // ???
+}
+
+// RemoveInactiveDestinations removes destinations that haven't sent ping since the provided timestamp
+func (store *Cache) RemoveInactiveDestinations(lastTimestamp time.Time) {
+	store.Store.RemoveInactiveDestinations(lastTimestamp)
+	store.cacheDestinations()
+}
+
 // RetrieveDestination retrieves a destination
 func (store *Cache) RetrieveDestination(orgID string, destType string, destID string) (*common.Destination, common.SyncServiceError) {
+	store.lock.RLock()
+	defer store.lock.RUnlock()
+
 	if d, ok := store.destinations[orgID][destType+":"+destID]; ok {
 		return &d, nil
 	}
@@ -253,6 +292,9 @@ func (store *Cache) RetrieveDestination(orgID string, destType string, destID st
 
 // RetrieveDestinationProtocol retrieves the communication protocol for the destination
 func (store *Cache) RetrieveDestinationProtocol(orgID string, destType string, destID string) (string, common.SyncServiceError) {
+	store.lock.RLock()
+	defer store.lock.RUnlock()
+
 	if d, ok := store.destinations[orgID][destType+":"+destID]; ok {
 		return d.Communication, nil
 	}

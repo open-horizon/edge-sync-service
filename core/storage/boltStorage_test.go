@@ -91,9 +91,9 @@ func TestBoltStorageDestinations(t *testing.T) {
 }
 
 func TestBoltCacheStorageDestinations(t *testing.T) {
-	boltStor := &BoltStorage{}
-	boltStor.Cleanup()
-	store := &Cache{Store: boltStor}
+	boltStore := &BoltStorage{}
+	boltStore.Cleanup()
+	store := &Cache{Store: boltStore}
 	if err := store.Init(); err != nil {
 		t.Errorf("Failed to initialize storage driver. Error: %s\n", err.Error())
 		return
