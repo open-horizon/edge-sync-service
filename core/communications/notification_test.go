@@ -27,9 +27,9 @@ func TestNotifications(t *testing.T) {
 	//Store = &storage.InMemoryStorage{}
 	dir, _ := os.Getwd()
 	common.Configuration.PersistenceRootPath = dir + "/persist"
-	boltStor := &storage.BoltStorage{}
-	boltStor.Cleanup()
-	Store = boltStor
+	boltStore := &storage.BoltStorage{}
+	boltStore.Cleanup()
+	Store = boltStore
 	if err := Store.Init(); err != nil {
 		t.Errorf("Failed to initialize storage driver. Error: %s\n", err.Error())
 	}
@@ -116,9 +116,9 @@ func TestActivateObjects(t *testing.T) {
 	}
 
 	//Store = &storage.InMemoryStorage{}
-	boltStor := &storage.BoltStorage{}
-	boltStor.Cleanup()
-	Store = boltStor
+	boltStore := &storage.BoltStorage{}
+	boltStore.Cleanup()
+	Store = boltStore
 	dir, _ := os.Getwd()
 	common.Configuration.PersistenceRootPath = dir + "/persist"
 	if err := Store.Init(); err != nil {
@@ -135,7 +135,7 @@ func TestActivateObjects(t *testing.T) {
 			t.Errorf("Failed to store object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
 		}
 	}
-	objects, err := Store.RetrieveObjects("notmyorg", "device", "dev1")
+	objects, err := Store.RetrieveObjects("notmyorg", "device", "dev1", common.ResendAll)
 	if err != nil {
 		t.Errorf("RetrieveObjects failed. Error: %s\n", err.Error())
 	} else if len(objects) != 1 {
@@ -143,7 +143,7 @@ func TestActivateObjects(t *testing.T) {
 	}
 
 	ActivateObjects()
-	objects, err = Store.RetrieveObjects("notmyorg", "device", "dev1")
+	objects, err = Store.RetrieveObjects("notmyorg", "device", "dev1", common.ResendAll)
 	if err != nil {
 		t.Errorf("RetrieveObjects failed. Error: %s\n", err.Error())
 	} else if len(objects) != 2 {
@@ -153,7 +153,7 @@ func TestActivateObjects(t *testing.T) {
 	select {
 	case <-time.After(1 * time.Second):
 		ActivateObjects()
-		objects, err := Store.RetrieveObjects("notmyorg", "device", "dev1")
+		objects, err := Store.RetrieveObjects("notmyorg", "device", "dev1", common.ResendAll)
 		if err != nil {
 			t.Errorf("RetrieveObjects failed. Error: %s\n", err.Error())
 		} else if len(objects) != 3 {

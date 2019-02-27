@@ -51,8 +51,9 @@ type object struct {
 }
 
 type destinationObject struct {
-	ID          string             `bson:"_id"`
-	Destination common.Destination `bson:"destination"`
+	ID           string              `bson:"_id"`
+	Destination  common.Destination  `bson:"destination"`
+	LastPingTime bson.MongoTimestamp `bson:"last-ping-time"`
 }
 
 type notificationObject struct {
@@ -533,7 +534,7 @@ func (store *MongoStorage) RetrieveUpdatedObjects(orgID string, objectType strin
 
 // RetrieveObjects returns the list of all the objects that need to be sent to the destination.
 // Adds the new destination to the destinations lists of the relevant objects.
-func (store *MongoStorage) RetrieveObjects(orgID string, destType string, destID string) ([]common.MetaData, common.SyncServiceError) {
+func (store *MongoStorage) RetrieveObjects(orgID string, destType string, destID string, resend int) ([]common.MetaData, common.SyncServiceError) {
 	result := []object{}
 	query := bson.M{"metadata.destination-org-id": orgID,
 		"$or": []bson.M{
@@ -558,22 +559,46 @@ OUTER:
 				(r.MetaData.DestID == "" || r.MetaData.DestID == destID) {
 				status := common.Pending
 				if r.Status == common.ReadyToSend && !r.MetaData.Inactive {
-					metaDatas = append(metaDatas, r.MetaData)
 					status = common.Delivering
 				}
-				// Add destination
+				needToUpdate := false
+				// Add destination if it doesn't exist
 				if dest, err := store.RetrieveDestination(orgID, destType, destID); err == nil {
-					r.Destinations = append(r.Destinations, common.StoreDestinationStatus{Destination: *dest, Status: status})
-					id := createObjectCollectionID(orgID, r.MetaData.ObjectType, r.MetaData.ObjectID)
-					if err := store.update(objects, bson.M{"_id": id, "last-update": r.LastUpdate},
-						bson.M{
-							"$set":         bson.M{"destinations": r.Destinations},
-							"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
-						}); err != nil {
-						if err == mgo.ErrNotFound {
-							continue OUTER
+					existingDestIndex := -1
+					for i, d := range r.Destinations {
+						if d.Destination == *dest {
+							existingDestIndex = i
+							break
 						}
-						return nil, &Error{fmt.Sprintf("Failed to update object's destinations. Error: %s.", err)}
+					}
+					if existingDestIndex != -1 {
+						d := r.Destinations[existingDestIndex]
+						if status == common.Delivering &&
+							(resend == common.ResendAll || (resend == common.ResendDelivered && d.Status != common.Consumed) ||
+								(resend == common.ResendUndelivered && d.Status != common.Consumed && d.Status != common.Delivered)) {
+							metaDatas = append(metaDatas, r.MetaData)
+							r.Destinations[existingDestIndex].Status = common.Delivering
+							needToUpdate = true
+						}
+					} else {
+						if status == common.Delivering {
+							metaDatas = append(metaDatas, r.MetaData)
+						}
+						needToUpdate = true
+						r.Destinations = append(r.Destinations, common.StoreDestinationStatus{Destination: *dest, Status: status})
+					}
+					if needToUpdate {
+						id := createObjectCollectionID(orgID, r.MetaData.ObjectType, r.MetaData.ObjectID)
+						if err := store.update(objects, bson.M{"_id": id, "last-update": r.LastUpdate},
+							bson.M{
+								"$set":         bson.M{"destinations": r.Destinations},
+								"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+							}); err != nil {
+							if err == mgo.ErrNotFound {
+								continue OUTER
+							}
+							return nil, &Error{fmt.Sprintf("Failed to update object's destinations. Error: %s.", err)}
+						}
 					}
 				}
 			}
@@ -1052,6 +1077,53 @@ func (store *MongoStorage) DeleteDestination(orgID string, destType string, dest
 		return &Error{fmt.Sprintf("Failed to delete destination. Error: %s.", err)}
 	}
 	return nil
+}
+
+// UpdateDestinationLastPingTime updates the last ping time for the destination
+func (store *MongoStorage) UpdateDestinationLastPingTime(destination common.Destination) common.SyncServiceError {
+	id := getDestinationCollectionID(destination)
+	err := store.update(destinations,
+		bson.M{"_id": id},
+		bson.M{"$currentDate": bson.M{"last-ping-time": bson.M{"$type": "timestamp"}}},
+	)
+	if err != nil {
+		if err == mgo.ErrNotFound {
+			return &NotFound{}
+		}
+		return &Error{fmt.Sprintf("Failed to update the last ping time for destination. Error: %s\n", err)}
+	}
+
+	return nil
+}
+
+// RemoveInactiveDestinations removes destinations that haven't sent ping since the provided timestamp
+func (store *MongoStorage) RemoveInactiveDestinations(lastTimestamp time.Time) {
+	timestamp, err := bson.NewMongoTimestamp(lastTimestamp, 1)
+	if err != nil {
+		return
+	}
+	query := bson.M{"last-ping-time": bson.M{"$lte": timestamp}}
+	selector := bson.M{"destination": bson.ElementDocument}
+	dests := []destinationObject{}
+	if err := store.fetchAll(destinations, query, selector, &dests); err != nil {
+		if err != mgo.ErrNotFound && log.IsLogging(logger.ERROR) {
+			log.Error("Error in mongoStorage.RemoveInactiveDestinations: failed to remove inactive destinations. Error: %s\n", err)
+		}
+		return
+	}
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("Removing inactive destinations")
+	}
+	for _, d := range dests {
+		if err := store.DeleteNotificationRecords(d.Destination.DestOrgID, "", "", d.Destination.DestType, d.Destination.DestID); err != nil &&
+			err != mgo.ErrNotFound && log.IsLogging(logger.ERROR) {
+			log.Error("Error in mongoStorage.RemoveInactiveDestinations: failed to remove notifications for inactive destinations. Error: %s\n", err)
+		}
+		if err := store.DeleteDestination(d.Destination.DestOrgID, d.Destination.DestType, d.Destination.DestID); err != nil &&
+			err != mgo.ErrNotFound && log.IsLogging(logger.ERROR) {
+			log.Error("Error in mongoStorage.RemoveInactiveDestinations: failed to remove inactive destination. Error: %s\n", err)
+		}
+	}
 }
 
 // RetrieveDestinationProtocol retrieves the communication protocol for the destination

@@ -186,6 +186,13 @@ func processMessage(messageInfo *messageHandlerInfo) {
 		}
 	case common.AckRegister:
 		context.communicator.handleRegAck()
+	case common.Ping:
+		new, pingErr := handlePing(messagePayload.Destination, messagePayload.PersistentStorage)
+		if new && pingErr == nil {
+			err = context.communicator.storeMessagingGroup(context.client, messagePayload.Destination.DestOrgID)
+		} else {
+			err = pingErr
+		}
 	case common.Update:
 		if int64(messagePayload.Meta.ChunkSize) < messagePayload.Meta.ObjectSize && !leader.CheckIfLeader() {
 			err = &Error{"Non-leader received update message with chunked data, ignoring."}
@@ -991,25 +998,29 @@ func (communication *MQTT) SendErrorMessage(err common.SyncServiceError, metaDat
 	return communication.SendFeedbackMessage(code, retryInterval, reason, metaData)
 }
 
-// Register sends a registration message to be sent by an ESS
-func (communication *MQTT) Register() common.SyncServiceError {
+func (communication *MQTT) sendRegisterOrPing(command string) common.SyncServiceError {
 	if common.Configuration.NodeType != common.ESS {
 		return nil
 	}
 	destination := common.Destination{
 		DestOrgID: common.Configuration.OrgID, DestType: common.Configuration.DestinationType, DestID: common.Configuration.DestinationID,
 		Communication: common.MQTTProtocol}
-	messagePayload := &messagePayload{Command: common.Register, Destination: destination,
+	messagePayload := &messagePayload{Command: command, Destination: destination,
 		PersistentStorage: common.Configuration.ESSPersistentStorage}
 	messageJSON, err := json.Marshal(messagePayload)
 	if err != nil {
-		return &Error{"Failed to register. Error: " + err.Error()}
+		return &Error{fmt.Sprintf("Failed to %s. Error: %s", command, err.Error())}
 	}
 	if log.IsLogging(logger.TRACE) {
-		log.Trace("Registering")
+		log.Trace("Sending " + command)
 	}
 	return communication.publishMessage(common.Configuration.OrgID, common.Configuration.DestinationType, common.Configuration.DestinationID,
 		messageJSON, false)
+}
+
+// Register sends a registration message to be sent by an ESS
+func (communication *MQTT) Register() common.SyncServiceError {
+	return communication.sendRegisterOrPing(common.Register)
 }
 
 // RegisterAck sends a registration acknowledgement message from the CSS
@@ -1023,6 +1034,11 @@ func (communication *MQTT) RegisterAck(destination common.Destination) common.Sy
 		log.Trace("Sending regack")
 	}
 	return communication.publishMessage(destination.DestOrgID, destination.DestType, destination.DestID, messageJSON, false)
+}
+
+// SendPing sends a ping message from ESS to CSS
+func (communication *MQTT) SendPing() common.SyncServiceError {
+	return communication.sendRegisterOrPing(common.Ping)
 }
 
 // GetData requests data to be sent from the CSS to the ESS or from the ESS to the CSS

@@ -64,7 +64,7 @@ type Storage interface {
 	RetrieveUpdatedObjects(orgID string, objectType string, received bool) ([]common.MetaData, common.SyncServiceError)
 
 	// Return the list of all the objects that need to be sent to the destination
-	RetrieveObjects(orgID string, destType string, destID string) ([]common.MetaData, common.SyncServiceError)
+	RetrieveObjects(orgID string, destType string, destID string, resend int) ([]common.MetaData, common.SyncServiceError)
 
 	// Return the object meta data with the specified parameters
 	RetrieveObject(orgID string, objectType string, objectID string) (*common.MetaData, common.SyncServiceError)
@@ -133,6 +133,12 @@ type Storage interface {
 
 	// Delete the destination
 	DeleteDestination(orgID string, destType string, destID string) common.SyncServiceError
+
+	// UpdateDestinationLastPingTime updates the last ping time for the destination
+	UpdateDestinationLastPingTime(destination common.Destination) common.SyncServiceError
+
+	// RemoveInactiveDestinations removes destinations that haven't sent ping since the provided timestamp
+	RemoveInactiveDestinations(lastTimestamp time.Time)
 
 	// Retrieve communication protocol for the destination
 	RetrieveDestinationProtocol(orgID string, destType string, destID string) (string, common.SyncServiceError)

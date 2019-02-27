@@ -25,6 +25,12 @@ var resendStopChannel chan int
 var activateTicker *time.Ticker
 var activateStopChannel chan int
 
+var pingTicker *time.Ticker
+var pingStopChannel chan int
+
+var removeESSTicker *time.Ticker
+var removeESSStopChannel chan int
+
 var waitingOnBlockChannel bool
 var blockChannel chan int
 
@@ -48,7 +54,8 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 
 	var ipAddress string
 	var err error
-	if common.Configuration.ListeningType != common.ListeningUnix {
+	if common.Configuration.ListeningType != common.ListeningUnix &&
+		common.Configuration.ListeningType != common.ListeningSecureUnix {
 		ipAddress, err = checkIPAddress(common.Configuration.ListeningAddress)
 		if err != nil {
 			return err
@@ -150,6 +157,44 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 		activateTicker = nil
 	}()
 
+	if common.Configuration.NodeType == common.ESS {
+		pingTicker = time.NewTicker(time.Hour * time.Duration(common.Configuration.ESSPingInterval))
+		go func() {
+			keepRunning := true
+			for keepRunning {
+				select {
+				case <-pingTicker.C:
+					communications.Comm.SendPing()
+
+				case <-pingStopChannel:
+					keepRunning = false
+				}
+			}
+			pingTicker = nil
+		}()
+	}
+
+	if common.Configuration.NodeType == common.CSS && common.Configuration.RemoveESSRegistrationTime > 0 {
+		removeESSTicker = time.NewTicker(time.Hour * 24 * time.Duration(common.Configuration.RemoveESSRegistrationTime))
+		lastTimestamp := time.Now()
+		go func() {
+			keepRunning := true
+			for keepRunning {
+				select {
+				case <-removeESSTicker.C:
+					if leader.CheckIfLeader() {
+						store.RemoveInactiveDestinations(lastTimestamp)
+					}
+					lastTimestamp = time.Now()
+
+				case <-removeESSStopChannel:
+					keepRunning = false
+				}
+			}
+			removeESSTicker = nil
+		}()
+	}
+
 	err = startHTTPServer(ipAddress, registerHandlers, swaggerFile)
 	if err == nil {
 		common.Running = true
@@ -189,6 +234,14 @@ func Stop(quiesceTime int) {
 	if activateTicker != nil {
 		activateTicker.Stop()
 		activateStopChannel <- 1
+	}
+	if pingTicker != nil {
+		pingTicker.Stop()
+		pingStopChannel <- 1
+	}
+	if removeESSTicker != nil {
+		removeESSTicker.Stop()
+		removeESSStopChannel <- 1
 	}
 
 	timer := time.NewTimer(time.Duration(2) * time.Second)

@@ -231,7 +231,7 @@ func testStorageObjects(storageType string, t *testing.T) {
 	}
 
 	// There are no objects to send
-	objects, err = store.RetrieveObjects(tests[0].metaData.DestOrgID, tests[0].metaData.DestType, tests[0].metaData.DestID)
+	objects, err = store.RetrieveObjects(tests[0].metaData.DestOrgID, tests[0].metaData.DestType, tests[0].metaData.DestID, common.ResendAll)
 	if err != nil {
 		t.Errorf("RetrieveObjects failed. Error: %s\n", err.Error())
 	} else if len(objects) != 0 {
@@ -319,17 +319,22 @@ func testStorageObjectData(storageType string, t *testing.T) {
 	}
 	defer store.Stop()
 
+	dest1 := common.Destination{DestOrgID: "org555", DestType: "device", DestID: "dev1", Communication: common.MQTTProtocol}
+	if err := store.StoreDestination(dest1); err != nil {
+		t.Errorf("StoreDestination failed. Error: %s\n", err.Error())
+	}
+
 	tests := []struct {
 		metaData common.MetaData
 		status   string
 		data     []byte
 		newData  []byte
 	}{
-		{common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg", DestID: "dev1", DestType: "device"},
+		{common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "org555", DestID: "dev1", DestType: "device"},
 			common.ReadyToSend, []byte("abcdefghijklmnopqrstuvwxyz"), []byte("new")},
-		{common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "myorg", DestID: "dev1", DestType: "device",
+		{common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "org555", DestID: "dev1", DestType: "device",
 			Inactive: true}, common.CompletelyReceived, []byte("abcdefghijklmnopqrstuvwxyz"), []byte("new")},
-		{common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "myorg", DestID: "dev1", DestType: "device"},
+		{common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "org555", DestID: "dev1", DestType: "device"},
 			common.ReadyToSend, nil, []byte("new")},
 	}
 
@@ -494,7 +499,7 @@ func testStorageObjectData(storageType string, t *testing.T) {
 		t.Errorf("RetrieveUpdatedObjects returned wrong object: %s instead of object ID = 2\n", objects[0].ObjectID)
 	}
 
-	objects, err = store.RetrieveObjects(tests[0].metaData.DestOrgID, tests[0].metaData.DestType, tests[0].metaData.DestID)
+	objects, err = store.RetrieveObjects(tests[0].metaData.DestOrgID, tests[0].metaData.DestType, tests[0].metaData.DestID, common.ResendAll)
 	if err != nil {
 		t.Errorf("RetrieveObjects failed. Error: %s\n", err.Error())
 	} else if len(objects) != 2 {
@@ -710,9 +715,9 @@ func setUpStorage(storageType string) (Storage, error) {
 	} else if storageType == boltdb {
 		dir, _ := os.Getwd()
 		common.Configuration.PersistenceRootPath = dir + "/persist"
-		boltStor := &BoltStorage{}
-		boltStor.Cleanup()
-		store = &Cache{Store: boltStor}
+		boltStore := &BoltStorage{}
+		boltStore.Cleanup()
+		store = &Cache{Store: boltStore}
 	} else {
 		store = &Cache{Store: &MongoStorage{}}
 	}

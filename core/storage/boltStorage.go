@@ -268,7 +268,7 @@ func (store *BoltStorage) RetrieveUpdatedObjects(orgID string, objectType string
 }
 
 // RetrieveObjects returns the list of all the objects that need to be sent to the destination
-func (store *BoltStorage) RetrieveObjects(orgID string, destType string, destID string) ([]common.MetaData, common.SyncServiceError) {
+func (store *BoltStorage) RetrieveObjects(orgID string, destType string, destID string, resend int) ([]common.MetaData, common.SyncServiceError) {
 	result := make([]common.MetaData, 0)
 	function := func(object boltObject) {
 		if orgID == object.Meta.DestOrgID && !object.Meta.Inactive &&
@@ -567,6 +567,14 @@ func (store *BoltStorage) StoreDestination(destination common.Destination) commo
 func (store *BoltStorage) DeleteDestination(orgID string, destType string, destID string) common.SyncServiceError {
 	return nil
 }
+
+// UpdateDestinationLastPingTime updates the last ping time for the destination
+func (store *BoltStorage) UpdateDestinationLastPingTime(destination common.Destination) common.SyncServiceError {
+	return nil
+}
+
+// RemoveInactiveDestinations removes destinations that haven't sent ping since the provided timestamp
+func (store *BoltStorage) RemoveInactiveDestinations(lastTimestamp time.Time) {}
 
 // RetrieveDestination retrieves a destination
 func (store *BoltStorage) RetrieveDestination(orgID string, destType string, destID string) (*common.Destination, common.SyncServiceError) {

@@ -25,9 +25,9 @@ func TestNotificationHandler(t *testing.T) {
 	//Store = &storage.InMemoryStorage{}
 	dir, _ := os.Getwd()
 	common.Configuration.PersistenceRootPath = dir + "/persist"
-	boltStor := &storage.BoltStorage{}
-	boltStor.Cleanup()
-	Store = boltStor
+	boltStore := &storage.BoltStorage{}
+	boltStore.Cleanup()
+	Store = boltStore
 	if err := Store.Init(); err != nil {
 		t.Errorf("Failed to initialize storage driver. Error: %s\n", err.Error())
 	}
@@ -480,5 +480,155 @@ func TestNotificationHandler(t *testing.T) {
 
 	if err := Store.DeleteNotificationRecords("", "", "", "", ""); err != nil {
 		t.Errorf("Failed to delete notifications. Error: %s", err.Error())
+	}
+}
+
+func TestPing(t *testing.T) {
+	common.Configuration.NodeType = common.CSS
+	Store = &storage.MongoStorage{}
+	if err := Store.Init(); err != nil {
+		t.Errorf("Failed to initialize storage driver. Error: %s\n", err.Error())
+	}
+	defer Store.Stop()
+
+	Comm = &TestComm{}
+	if err := Comm.StartCommunication(); err != nil {
+		t.Errorf("Failed to start MQTT communication. Error: %s", err.Error())
+	}
+
+	tests := []struct {
+		metaData common.MetaData
+		status   string
+		data     []byte
+	}{
+		{common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "pingorg",
+			DestID: "dev1", DestType: "device", OriginID: "123", OriginType: "type2"},
+			common.ReadyToSend, []byte("hello")},
+		{common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "pingorg",
+			DestID: "dev1", DestType: "type2", OriginID: "123", OriginType: "type2"},
+			common.ReadyToSend, []byte("hello")},
+		{common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "pingorg",
+			DestID: "dev1", DestType: "device", OriginID: "123", OriginType: "type2"},
+			common.NotReadyToSend, nil},
+	}
+
+	for _, test := range tests {
+		if err := Store.StoreObject(test.metaData, test.data, test.status); err != nil {
+			t.Errorf("StoreObject failed. Error: %s", err.Error())
+		}
+	}
+
+	dest := common.Destination{DestOrgID: "pingorg", DestType: "device", DestID: "dev1",
+		Communication: common.MQTTProtocol}
+	if err := Store.DeleteDestination(dest.DestOrgID, dest.DestType, dest.DestID); err != nil {
+		t.Errorf("DeleteDestination failed. Error: %s", err.Error())
+	}
+
+	if new, err := handlePing(dest, false); err != nil {
+		t.Errorf("handlePing failed. Error: %s", err.Error())
+	} else if !new {
+		t.Errorf("handlePing returned false for a new destination")
+	} else {
+		notification, err := Store.RetrieveNotificationRecord(tests[0].metaData.DestOrgID, tests[0].metaData.ObjectType,
+			tests[0].metaData.ObjectID, tests[0].metaData.DestType, tests[0].metaData.DestID)
+		if err != nil && !storage.IsNotFound(err) {
+			t.Errorf("An error occurred in notification fetch (objectID = %s). Error: %s", tests[0].metaData.ObjectID, err.Error())
+		} else {
+			if notification == nil {
+				t.Errorf("No notification record (objectID = %s)", tests[0].metaData.ObjectID)
+			} else if notification.Status != common.Update {
+				t.Errorf("Wrong notification status: %s instead of update (objectID = %s)", notification.Status,
+					tests[0].metaData.ObjectID)
+			}
+		}
+
+		notification, err = Store.RetrieveNotificationRecord(tests[1].metaData.DestOrgID, tests[1].metaData.ObjectType,
+			tests[1].metaData.ObjectID, tests[1].metaData.DestType, tests[1].metaData.DestID)
+		if err == nil || notification != nil {
+			t.Errorf("Created notification for object with another destination")
+		}
+
+		notification, err = Store.RetrieveNotificationRecord(tests[2].metaData.DestOrgID, tests[2].metaData.ObjectType,
+			tests[2].metaData.ObjectID, tests[2].metaData.DestType, tests[2].metaData.DestID)
+		if err == nil || notification != nil {
+			t.Errorf("Created notification for NotReadyToSend object")
+		}
+
+		storedDests, err := Store.GetObjectDestinationsList(tests[0].metaData.DestOrgID, tests[0].metaData.ObjectType,
+			tests[0].metaData.ObjectID)
+		if err != nil {
+			t.Errorf("GetObjectDestinationsList failed. Error: %s", err.Error())
+		} else if len(storedDests) != 1 {
+			t.Errorf("GetObjectDestinationsList returned %d destinations instead of 1.", len(storedDests))
+		} else {
+			if storedDests[0].Destination != dest {
+				t.Errorf("GetObjectDestinationsList returned incorrect destination.")
+			}
+			if storedDests[0].Status != common.Delivering {
+				t.Errorf("GetObjectDestinationsList returned destination in a wrong status: %s instead of delivering.",
+					storedDests[0].Status)
+			}
+		}
+	}
+
+	if err := Store.DeleteNotificationRecords(tests[0].metaData.DestOrgID, tests[0].metaData.ObjectType,
+		tests[0].metaData.ObjectID, tests[0].metaData.DestType, tests[0].metaData.DestID); err != nil {
+		t.Errorf("DeleteNotificationRecords failed. Error: %s", err.Error())
+	}
+	if err := Store.UpdateObjectDeliveryStatus(common.Delivered, "", tests[0].metaData.DestOrgID, tests[0].metaData.ObjectType,
+		tests[0].metaData.ObjectID, tests[0].metaData.DestType, tests[0].metaData.DestID); err != nil {
+		t.Errorf("UpdateObjectDeliveryStatus failed. Error: %s", err.Error())
+	}
+
+	// Send ping from a registered ESS
+	if new, err := handlePing(dest, true); err != nil {
+		t.Errorf("handlePing failed. Error: %s", err.Error())
+	} else if new {
+		t.Errorf("handlePing returned true for a registered destination")
+	} else {
+		notification, err := Store.RetrieveNotificationRecord(tests[0].metaData.DestOrgID, tests[0].metaData.ObjectType,
+			tests[0].metaData.ObjectID, tests[0].metaData.DestType, tests[0].metaData.DestID)
+		if err == nil || notification != nil {
+			t.Errorf("Created notification for existing destination")
+		}
+	}
+
+	if err := Store.DeleteDestination(dest.DestOrgID, dest.DestType, dest.DestID); err != nil {
+		t.Errorf("DeleteDestination failed. Error: %s", err.Error())
+	}
+	// Destination is not registered but there is a destination in the object in delivered status
+	if new, err := handlePing(dest, true); err != nil {
+		t.Errorf("handlePing failed. Error: %s", err.Error())
+	} else if !new {
+		t.Errorf("handlePing returned false for a new destination")
+	} else {
+		notification, err := Store.RetrieveNotificationRecord(tests[0].metaData.DestOrgID, tests[0].metaData.ObjectType,
+			tests[0].metaData.ObjectID, tests[0].metaData.DestType, tests[0].metaData.DestID)
+		if err == nil || notification != nil {
+			t.Errorf("Created notification for delivered object for persistent destination")
+		}
+	}
+
+	if err := Store.DeleteDestination(dest.DestOrgID, dest.DestType, dest.DestID); err != nil {
+		t.Errorf("DeleteDestination failed. Error: %s", err.Error())
+	}
+	// Destination is not registered but there is a destination in the object in delivered status
+	if new, err := handlePing(dest, false); err != nil {
+		t.Errorf("handlePing failed. Error: %s", err.Error())
+	} else if !new {
+		t.Errorf("handlePing returned false for a new destination")
+	} else {
+		notification, err := Store.RetrieveNotificationRecord(tests[0].metaData.DestOrgID, tests[0].metaData.ObjectType,
+			tests[0].metaData.ObjectID, tests[0].metaData.DestType, tests[0].metaData.DestID)
+		if err != nil && !storage.IsNotFound(err) {
+			t.Errorf("An error occurred in notification fetch (objectID = %s). Error: %s", tests[0].metaData.ObjectID, err.Error())
+		} else {
+			if notification == nil {
+				t.Errorf("No notification record (objectID = %s)", tests[0].metaData.ObjectID)
+			} else if notification.Status != common.Update {
+				t.Errorf("Wrong notification status: %s instead of update (objectID = %s)", notification.Status,
+					tests[0].metaData.ObjectID)
+			}
+		}
 	}
 }

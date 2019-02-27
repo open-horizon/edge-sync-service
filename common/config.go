@@ -25,6 +25,7 @@ const (
 	ListeningSecurely   = "secure"
 	ListeningUnsecurely = "unsecure"
 	ListeningUnix       = "unix"
+	ListeningSecureUnix = "secure-unix"
 )
 
 // Protocol definitions
@@ -62,14 +63,15 @@ type Config struct {
 	OrgID string `config:"OrgId" env:"ORG_ID"`
 
 	// ListeningType specifies whether or the server is
-	// listening securely, unsecurely, both securely and unsecurely, or using Unix sockets
-	// Possible values are secure, unsecure, both, unix.
-	// unix can only be specified if the NodeType is ESS.
+	// listening securely, unsecurely, both securely and unsecurely, using Unix sockets,
+	// or using Unix sockets securely.
+	// Possible values are secure, unsecure, both, unix, secure-unix.
+	// unix and secure-unix can only be specified if the NodeType is ESS.
 	// Defaults to unsecure on a CSS and secure on an ESS
 	ListeningType string `env:"LISTENING_TYPE"`
 
 	// ListeningAddress specifies the address to listen on
-	// If the ListeningType is unix, this property specifies the socket file to be used.
+	// If the ListeningType is unix or secure-unix, this property specifies the socket file to be used.
 	// The file will be erased and recreated, if it already exists. The filename is relative
 	// to the PersistenceRootPath configuration property if it doesn't start with a slash (/).
 	ListeningAddress string `env:"LISTENING_ADDRESS"`
@@ -229,6 +231,15 @@ type Config struct {
 	// Other notifications are resent with frequency equal to ResendInterval*6
 	ResendInterval int16 `env:"RESEND_INTERVAL"`
 
+	// ESSPingInterval specifies the frequency in hours of ping messages that ESS sends to CSS
+	ESSPingInterval int16 `env:"ESS_PING_INTERVAL"`
+
+	// RemoveESSRegistrationTime specifies the time period in days after which the CSS
+	// removes an inactive ESS. Any pending records and operations for the ESS are removed.
+	// CSS only parameter, ignored on ESS
+	// A value of zero means ESSs are never removed
+	RemoveESSRegistrationTime int16 `env:"REMOVE_ESS_REGISTRATION_TIME"`
+
 	// Maximum size of data that can be sent in one message
 	MaxDataChunkSize int `env:"MAX_DATA_CHUNK_SIZE"`
 
@@ -371,8 +382,9 @@ func ValidateConfig() error {
 		}
 	} else if Configuration.ListeningType != ListeningBoth &&
 		Configuration.ListeningType != ListeningSecurely && Configuration.ListeningType != ListeningUnsecurely &&
-		Configuration.ListeningType != ListeningUnix {
-		return &configError{fmt.Sprintf("ListeningType must be %s, %s, %s, or %s", ListeningBoth, ListeningSecurely, ListeningUnsecurely, ListeningUnix)}
+		Configuration.ListeningType != ListeningUnix && Configuration.ListeningType != ListeningSecureUnix {
+		return &configError{fmt.Sprintf("ListeningType must be %s, %s, %s, %s, or %s",
+			ListeningBoth, ListeningSecurely, ListeningUnsecurely, ListeningUnix, ListeningSecureUnix)}
 	}
 
 	if (Configuration.ListeningType == ListeningUnsecurely || Configuration.ListeningType == ListeningBoth) &&
@@ -393,7 +405,7 @@ func ValidateConfig() error {
 			return &configError{"Have requested secure API serving, but no server private key has been specified."}
 		}
 	}
-	if Configuration.ListeningType == ListeningUnix {
+	if Configuration.ListeningType == ListeningUnix || Configuration.ListeningType == ListeningSecureUnix {
 		if Configuration.NodeType != ESS {
 			return &configError{"Only an ESS can listen via Unix Sockets"}
 		}
@@ -605,6 +617,8 @@ func init() {
 	Configuration.LogTraceDestination = "file"
 	Configuration.LogTraceMaintenanceInterval = 60
 	Configuration.ResendInterval = 5
+	Configuration.ESSPingInterval = 1
+	Configuration.RemoveESSRegistrationTime = 30
 	Configuration.MaxDataChunkSize = 120 * 1024
 	Configuration.MaxInflightChunks = 1
 	Configuration.MongoAddressCsv = "localhost:27017"

@@ -301,7 +301,7 @@ func (store *InMemoryStorage) RetrieveUpdatedObjects(orgID string, objectType st
 }
 
 // RetrieveObjects returns the list of all the objects that need to be sent to the destination
-func (store *InMemoryStorage) RetrieveObjects(orgID string, destType string, destID string) ([]common.MetaData, common.SyncServiceError) {
+func (store *InMemoryStorage) RetrieveObjects(orgID string, destType string, destID string, resend int) ([]common.MetaData, common.SyncServiceError) {
 	store.lock()
 	defer store.unLock()
 
@@ -563,6 +563,14 @@ func (store *InMemoryStorage) StoreDestination(destination common.Destination) c
 func (store *InMemoryStorage) DeleteDestination(orgID string, destType string, destID string) common.SyncServiceError {
 	return nil
 }
+
+// UpdateDestinationLastPingTime updates the last ping time for the destination
+func (store *InMemoryStorage) UpdateDestinationLastPingTime(destination common.Destination) common.SyncServiceError {
+	return nil
+}
+
+// RemoveInactiveDestinations removes destinations that haven't sent ping since the provided timestamp
+func (store *InMemoryStorage) RemoveInactiveDestinations(lastTimestamp time.Time) {}
 
 // RetrieveDestination retrieves a destination
 func (store *InMemoryStorage) RetrieveDestination(orgID string, destType string, destID string) (*common.Destination, common.SyncServiceError) {

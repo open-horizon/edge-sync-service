@@ -68,7 +68,7 @@
           "text/plain"
         ],
         "summary": "List all objects that are in use by the destination.",
-        "operationId": "handleDestinations",
+        "operationId": "handleDestinationObjects",
         "parameters": [
           {
             "type": "string",
@@ -118,6 +118,60 @@
       }
     },
     "/api/v1/objects/{orgID}/{objectType}": {
+      "get": {
+        "description": "Get the list of objects of the specified object type that have pending (unconsumed) updates.\nAn application would typically invoke this API periodically to check for updates (an alternative is to use a webhook).",
+        "produces": [
+          "application/json",
+          "text/plain"
+        ],
+        "summary": "Get updated objects.",
+        "operationId": "handleListUpdatedObjects",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the updated objects to return. Present only when working with a CSS, removed from the path when working with an ESS",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object type of the updated objects to return",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "boolean",
+            "description": "Whether or not to include the objects that have been marked as received by the application",
+            "name": "received",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated objects response",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/MetaData"
+              }
+            }
+          },
+          "404": {
+            "description": "No updated objects found",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve the updated objects",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "put": {
         "description": "Register or delete a webhook for the specified object type.\nA webhook is used to process notifications on updates for objects of the specified object type.",
         "consumes": [
@@ -719,62 +773,6 @@
         }
       }
     },
-    "/api/v1/objects/{orgID}/{objectType}?received=bool": {
-      "get": {
-        "description": "Get the list of objects of the specified object type that have pending (unconsumed) updates.\nAn application would typically invoke this API periodically to check for updates (an alternative is to use a webhook).",
-        "produces": [
-          "application/json",
-          "text/plain"
-        ],
-        "summary": "Get updated objects.",
-        "operationId": "handleListUpdatedObjects",
-        "parameters": [
-          {
-            "type": "string",
-            "description": "The orgID of the updated objects to return. Present only when working with a CSS, removed from the path when working with an ESS",
-            "name": "orgID",
-            "in": "path",
-            "required": true
-          },
-          {
-            "type": "string",
-            "description": "The object type of the updated objects to return",
-            "name": "objectType",
-            "in": "path",
-            "required": true
-          },
-          {
-            "type": "boolean",
-            "description": "Whether or not to include the objects that have been marked as received by the application",
-            "name": "received",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Updated objects response",
-            "schema": {
-              "type": "array",
-              "items": {
-                "$ref": "#/definitions/MetaData"
-              }
-            }
-          },
-          "404": {
-            "description": "No updated objects found",
-            "schema": {
-              "type": "string"
-            }
-          },
-          "500": {
-            "description": "Failed to retrieve the updated objects",
-            "schema": {
-              "type": "string"
-            }
-          }
-        }
-      }
-    },
     "/api/v1/organizations": {
       "get": {
         "description": "Get the list of existing organizations. Relevant to CSS only.",
@@ -855,7 +853,7 @@
           "text/plain"
         ],
         "summary": "Delete organization.",
-        "operationId": "handleOrganizations",
+        "operationId": "handleDeleteOrganization",
         "parameters": [
           {
             "type": "string",

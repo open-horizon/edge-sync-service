@@ -439,9 +439,9 @@ func testAPIServerSetup(nodeType string) string {
 		//communications.Store = &storage.InMemoryStorage{}
 		dir, _ := os.Getwd()
 		common.Configuration.PersistenceRootPath = dir + "/persist"
-		boltStor := &storage.BoltStorage{}
-		boltStor.Cleanup()
-		communications.Store = boltStor
+		boltStore := &storage.BoltStorage{}
+		boltStore.Cleanup()
+		communications.Store = boltStore
 	}
 	store = communications.Store
 	if err := store.Init(); err != nil {

@@ -44,7 +44,8 @@ func main() {
 	var host string
 	var port uint16
 	var message string
-	if strings.ToLower(*serverProtocol) != "unix" {
+	lowerCaseServerProtocol := strings.ToLower(*serverProtocol)
+	if lowerCaseServerProtocol != "unix" && lowerCaseServerProtocol != "secure-unix" {
 		host, port, message = parseHostAndPort(*serverAddress)
 		if message != "" {
 			fmt.Println(message)

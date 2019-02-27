@@ -32,6 +32,9 @@ type Communicator interface {
 	// RegisterAck sends a registration acknowledgement message from the CSS
 	RegisterAck(destination common.Destination) common.SyncServiceError
 
+	// SendPing sends a ping message from ESS to CSS
+	SendPing() common.SyncServiceError
+
 	// GetData requests data to be sent from the CSS to the ESS or from the ESS to the CSS
 	GetData(metaData common.MetaData, offset int64) common.SyncServiceError
 
