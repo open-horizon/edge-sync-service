@@ -386,7 +386,7 @@ func testLoadObjects(testObjects []httpTestObjectInfo, t *testing.T) {
 		metaData := testObject.metaData
 
 		// Delete the object first
-		if err := Store.DeleteStoredObject(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID); err != nil {
+		if err := DeleteStoredObject(metaData); err != nil {
 			t.Errorf("Failed to delete object (objectID = %s). Error: %s\n",
 				metaData.ObjectID, err.Error())
 		}

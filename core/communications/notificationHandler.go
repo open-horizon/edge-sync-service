@@ -275,7 +275,7 @@ func handleObjectConsumed(orgID string, objectType string, objectID string, dest
 
 	// ESS: delete the object
 	if common.Configuration.NodeType == common.ESS {
-		if err = Store.DeleteStoredObject(orgID, objectType, objectID); err != nil && log.IsLogging(logger.ERROR) {
+		if err = DeleteStoredObject(*metaData); err != nil && log.IsLogging(logger.ERROR) {
 			log.Error("Error in handleObjectConsumed: failed to delete stored object. Error: %s\n", err)
 		}
 		err = Store.DeleteNotificationRecords(orgID, objectType, objectID, "", "")
@@ -336,9 +336,12 @@ func handleAckConsumed(orgID string, objectType string, objectID string, destTyp
 
 	// ESS: delete the object
 	if common.Configuration.NodeType == common.ESS {
-		err = Store.DeleteStoredObject(orgID, objectType, objectID)
-		if err != nil && log.IsLogging(logger.ERROR) {
-			log.Error("Error in handleAckConsumed: failed to delete stored object. Error: %s\n", err)
+		metaData, err := Store.RetrieveObject(orgID, objectType, objectID)
+		if err == nil {
+			err = DeleteStoredObject(*metaData)
+			if err != nil && log.IsLogging(logger.ERROR) {
+				log.Error("Error in handleAckConsumed: failed to delete stored object. Error: %s\n", err)
+			}
 		}
 		err = Store.DeleteNotificationRecords(orgID, objectType, objectID, "", "")
 		if err != nil && log.IsLogging(logger.ERROR) {
@@ -454,7 +457,7 @@ func handleDelete(metaData common.MetaData) common.SyncServiceError {
 		}
 	} else {
 		// Object exists, remove its data
-		err = Store.DeleteStoredData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+		err = DeleteStoredData(metaData)
 		if err != nil && trace.IsLogging(logger.TRACE) {
 			trace.Trace("Error in handleDelete: %s \n", err)
 		}
@@ -486,7 +489,7 @@ func handleAckDelete(orgID string, objectType string, objectID string, destType 
 
 	notification, err := Store.RetrieveNotificationRecord(orgID, objectType, objectID, destType, destID)
 	if err != nil || notification == nil {
-		return &notificationHandlerError{"Error in handleAckConsumed: no notification to update."}
+		return &notificationHandlerError{"Error in handleAckDelete: no notification to update."}
 	}
 	if notification.InstanceID != instanceID || (notification.Status != common.Delete && notification.Status != common.DeletePending) {
 		// This notification doesn't match the existing notification record, ignore
@@ -505,7 +508,11 @@ func handleAckDelete(orgID string, objectType string, objectID string, destType 
 	}
 
 	// Delete the object
-	return Store.DeleteStoredObject(orgID, objectType, objectID)
+	metaData, err := Store.RetrieveObject(orgID, objectType, objectID)
+	if err == nil {
+		return DeleteStoredObject(*metaData)
+	}
+	return &notificationHandlerError{fmt.Sprintf("Error in handleAckDelete: failed to find object. Error: %s\n", err)}
 }
 
 // Handle a notification that an object was deleted by the other side
@@ -567,10 +574,11 @@ func handleAckObjectDeleted(orgID string, objectType string, objectID string, de
 	}
 
 	// Delete the object
-	if err = Store.DeleteStoredObject(orgID, objectType, objectID); err != nil && log.IsLogging(logger.ERROR) {
-		log.Error("Error in objectDeleted: failed to delete stored object. Error: %s\n", err)
+	metaData, err := Store.RetrieveObject(orgID, objectType, objectID)
+	if err == nil {
+		return DeleteStoredObject(*metaData)
 	}
-	return nil
+	return &notificationHandlerError{fmt.Sprintf("Error in handleAckObjectDeleted: failed to find object. Error: %s\n", err)}
 }
 
 func handleResendRequest(dest common.Destination) common.SyncServiceError {
@@ -1335,4 +1343,31 @@ func getOffsetsForResendFromScratch(notification common.Notification, metaData c
 		}
 	}
 	return offsets
+}
+
+// DeleteStoredObject calls the storage to delete the object and its data
+func DeleteStoredObject(metaData common.MetaData) common.SyncServiceError {
+	if err := Store.DeleteStoredObject(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID); err != nil {
+		return err
+	}
+
+	if common.Configuration.NodeType == common.ESS && metaData.DestinationDataURI != "" {
+		if err := dataURI.DeleteStoredData(metaData.DestinationDataURI); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// DeleteStoredData calls the storage to delete the object's data
+func DeleteStoredData(metaData common.MetaData) common.SyncServiceError {
+	if common.Configuration.NodeType == common.ESS && metaData.DestinationDataURI != "" {
+		if err := dataURI.DeleteStoredData(metaData.DestinationDataURI); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	return Store.DeleteStoredData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 }

@@ -84,11 +84,12 @@ func (communication *HTTP) StartCommunication() common.SyncServiceError {
 }
 
 func (communication *HTTP) startPolling() {
+	configuredInterval := int(common.Configuration.HTTPPollingInterval) * 1000
 	go func() {
 		keepRunning := true
 		initialPoll := true
-		interval := uint16(1)
-		communication.httpPollTimer = time.NewTimer(time.Second * time.Duration(interval))
+		interval := 1000
+		communication.httpPollTimer = time.NewTimer(time.Millisecond * time.Duration(interval))
 		for keepRunning {
 			select {
 			case <-communication.httpPollTimer.C:
@@ -97,13 +98,13 @@ func (communication *HTTP) startPolling() {
 					update = true
 				}
 				if initialPoll || update {
-					interval = common.Configuration.HTTPPollingInterval / 10
+					interval = configuredInterval / 10
 					update = false
 					initialPoll = false
-				} else if interval < common.Configuration.HTTPPollingInterval {
-					interval += common.Configuration.HTTPPollingInterval / 10
+				} else if interval < configuredInterval {
+					interval += configuredInterval / 10
 				}
-				communication.httpPollTimer = time.NewTimer(time.Second * time.Duration(interval))
+				communication.httpPollTimer = time.NewTimer(time.Millisecond * time.Duration(interval))
 
 			case <-communication.httpPollStopChannel:
 				keepRunning = false
