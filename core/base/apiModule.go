@@ -358,10 +358,10 @@ func deleteObject(orgID string, objectType string, objectID string) common.SyncS
 			return &common.InvalidRequest{Message: "Can't delete object on the receiving side for ESS"}
 		}
 		// CSS removes them without notifying the other side
-		return store.DeleteStoredObject(orgID, objectType, objectID)
+		return communications.DeleteStoredObject(*metaData)
 	}
 
-	if err := store.DeleteStoredData(orgID, objectType, objectID); err != nil {
+	if err := communications.DeleteStoredData(*metaData); err != nil {
 		return err
 	}
 

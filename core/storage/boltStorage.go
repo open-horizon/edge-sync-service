@@ -445,6 +445,9 @@ func (store *BoltStorage) ActivateObject(orgID string, objectType string, object
 
 // DeleteStoredObject deletes the object
 func (store *BoltStorage) DeleteStoredObject(orgID string, objectType string, objectID string) common.SyncServiceError {
+	if err := store.DeleteStoredData(orgID, objectType, objectID); err != nil {
+		return nil
+	}
 	id := createObjectCollectionID(orgID, objectType, objectID)
 	err := store.db.Update(func(tx *bolt.Tx) error {
 		err := tx.Bucket(objectsBucket).Delete([]byte(id))
