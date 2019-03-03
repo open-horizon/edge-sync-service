@@ -159,16 +159,25 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 
 	var session *mgo.Session
 	var err error
+	if trace.IsLogging(logger.INFO) {
+		trace.Info("Connecting to mongo...")
+	}
 	for connectTime := 0; connectTime < common.Configuration.DatabaseConnectTimeout; connectTime += 10 {
 		session, err = mgo.DialWithInfo(store.dialInfo)
 		if err == nil {
 			break
+		}
+		if connectTime == 0 && trace.IsLogging(logger.ERROR) {
+			trace.Error("Failed to dial mgo. Error: " + err.Error())
 		}
 		if strings.HasPrefix(err.Error(), "unauthorized") ||
 			strings.HasPrefix(err.Error(), "not authorized") ||
 			strings.HasPrefix(err.Error(), "auth fail") ||
 			strings.HasPrefix(err.Error(), "Authentication failed") {
 			break
+		}
+		if connectTime == 0 && trace.IsLogging(logger.ERROR) {
+			trace.Error("Retrying to connect to mongo")
 		}
 	}
 	if session == nil {
