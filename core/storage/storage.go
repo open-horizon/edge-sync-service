@@ -27,6 +27,9 @@ type Storage interface {
 	// Stop the store
 	Stop()
 
+	// PerformMaintenance performs store's maintenance
+	PerformMaintenance()
+
 	// Store an object
 	StoreObject(metaData common.MetaData, data []byte, status string) common.SyncServiceError
 
@@ -65,6 +68,9 @@ type Storage interface {
 
 	// Return the list of all the objects that need to be sent to the destination
 	RetrieveObjects(orgID string, destType string, destID string, resend int) ([]common.MetaData, common.SyncServiceError)
+
+	// RetrieveConsumedObjects returns all the consumed objects originated from this node
+	RetrieveConsumedObjects() ([]common.ConsumedObject, common.SyncServiceError)
 
 	// Return the object meta data with the specified parameters
 	RetrieveObject(orgID string, objectType string, objectID string) (*common.MetaData, common.SyncServiceError)

@@ -89,6 +89,7 @@ func SetUnsubcribeCallback(callback func() common.SyncServiceError) {
 func startLeadershipPeriodicUpdate() {
 	leaderTicker = time.NewTicker(time.Second * time.Duration(common.Configuration.LeadershipTimeout) / 5)
 	go func() {
+		common.GoRoutineStarted()
 		keepRunning := true
 		for keepRunning {
 			select {
@@ -155,6 +156,7 @@ func startLeadershipPeriodicUpdate() {
 			}
 		}
 		leaderTicker = nil
+		common.GoRoutineEnded()
 	}()
 }
 

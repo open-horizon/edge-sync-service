@@ -47,20 +47,24 @@ type publishMessageFunc func(orgID string, destType string, destID string, dataJ
 
 // MQTT is the struct for MQTT based communications between a CSS and an ESS
 type MQTT struct {
-	clients        []clientInfo
-	orgToClient    map[string]*clientInfo
-	isLeader       bool
-	topics         map[string]byte
-	topic          string
-	leaderTopic    string
-	isCheckingDB   bool
-	parallelParams parallelMQTTParams
-	commandQ       []chan *messageHandlerInfo
-	dataQ          chan *messageHandlerInfo
-	lastTimestamp  time.Time
-	publishMessage publishMessageFunc
-	serverURIs     [][]string
-	lock           sync.RWMutex
+	clients                 []clientInfo
+	orgToClient             map[string]*clientInfo
+	isLeader                bool
+	topics                  map[string]byte
+	topic                   string
+	leaderTopic             string
+	isCheckingDB            bool
+	checkStopChannel        chan int
+	checkForUpdatesTicker   *time.Ticker
+	checkUpdatesStopChannel chan int
+	parallelParams          parallelMQTTParams
+	commandQ                []chan *messageHandlerInfo
+	dataQ                   chan *messageHandlerInfo
+	queueStopChannel        chan int
+	lastTimestamp           time.Time
+	publishMessage          publishMessageFunc
+	serverURIs              [][]string
+	lock                    sync.RWMutex
 }
 
 type context struct {
@@ -92,14 +96,20 @@ type messageHandlerInfo struct {
 	payload        []byte
 }
 
-func serveMQTTQueue(c chan *messageHandlerInfo) {
+func (communication *MQTT) serveMQTTQueue(c chan *messageHandlerInfo) {
+	common.GoRoutineStarted()
 	var messageInfo *messageHandlerInfo
-	for {
+	keepRunning := true
+	for keepRunning {
 		select {
 		case messageInfo = <-c:
 			processMessage(messageInfo)
+		case <-communication.queueStopChannel:
+			keepRunning = false
 		}
 	}
+
+	common.GoRoutineEnded()
 }
 
 func (context *context) messageHandler(client mqtt.Client, msg mqtt.Message) {
@@ -736,14 +746,16 @@ func (communication *MQTT) StartCommunication() common.SyncServiceError {
 		communication.parallelParams.isParallelMQTTOn = false
 	}
 	if communication.parallelParams.isParallelMQTTOn {
+		communication.queueStopChannel = make(chan int,
+			communication.parallelParams.numCommandMQTTGoRoutines+communication.parallelParams.numDataMQTTGoRoutines)
 		communication.commandQ = make([]chan *messageHandlerInfo, communication.parallelParams.numCommandMQTTGoRoutines)
 		for i := 0; i < communication.parallelParams.numCommandMQTTGoRoutines; i++ {
 			communication.commandQ[i] = make(chan *messageHandlerInfo, communication.parallelParams.commandMQTTQueueSize)
-			go serveMQTTQueue(communication.commandQ[i])
+			go communication.serveMQTTQueue(communication.commandQ[i])
 		}
 		communication.dataQ = make(chan *messageHandlerInfo, communication.parallelParams.dataMQTTQueueSize)
 		for i := 0; i < communication.parallelParams.numDataMQTTGoRoutines; i++ {
-			go serveMQTTQueue(communication.dataQ)
+			go communication.serveMQTTQueue(communication.dataQ)
 		}
 	}
 
@@ -775,6 +787,18 @@ func (communication *MQTT) StartCommunication() common.SyncServiceError {
 
 // StopCommunication stops communications
 func (communication *MQTT) StopCommunication() common.SyncServiceError {
+	if communication.isCheckingDB {
+		communication.checkStopChannel <- 1
+	}
+	if communication.checkForUpdatesTicker != nil {
+		communication.checkForUpdatesTicker.Stop()
+		communication.checkUpdatesStopChannel <- 1
+	}
+
+	for i := 0; i < communication.parallelParams.numCommandMQTTGoRoutines+communication.parallelParams.numDataMQTTGoRoutines; i++ {
+		communication.queueStopChannel <- 1
+	}
+
 	for _, info := range communication.clients {
 		info.client.Disconnect(0)
 		if trace.IsLogging(logger.INFO) {
@@ -1178,6 +1202,7 @@ func (communication *MQTT) checkDatabaseConnection() {
 	ticker := time.NewTicker(time.Second * 5)
 	keepChecking := true
 	go func() {
+		common.GoRoutineStarted()
 		for keepChecking {
 			select {
 			case <-ticker.C:
@@ -1201,8 +1226,13 @@ func (communication *MQTT) checkDatabaseConnection() {
 						communication.isCheckingDB = false
 					}
 				}
+			case <-communication.checkStopChannel:
+				keepChecking = false
+				ticker.Stop()
 			}
 		}
+		ticker = nil
+		common.GoRoutineEnded()
 	}()
 }
 
@@ -1310,11 +1340,13 @@ func (communication *MQTT) DeleteOrganization(orgID string) common.SyncServiceEr
 }
 
 func (communication *MQTT) checkForUpdates() {
-	ticker := time.NewTicker(time.Second * 30)
+	communication.checkForUpdatesTicker = time.NewTicker(time.Second * 30)
 	go func() {
-		for {
+		common.GoRoutineStarted()
+		keepChecking := true
+		for keepChecking {
 			select {
-			case <-ticker.C:
+			case <-communication.checkForUpdatesTicker.C:
 				lastTimestamp, err := Store.RetrieveTimeOnServer()
 				if err != nil {
 					message := fmt.Sprintf("Failed to retrieve time on server. Error: %s\n", err.Error())
@@ -1373,6 +1405,12 @@ func (communication *MQTT) checkForUpdates() {
 					}
 				}
 				communication.lastTimestamp = lastTimestamp
+
+			case <-communication.checkUpdatesStopChannel:
+				keepChecking = false
+
+				communication.checkForUpdatesTicker = nil
+				common.GoRoutineEnded()
 			}
 		}
 	}()

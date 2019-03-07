@@ -32,6 +32,7 @@ type inMemoryObject struct {
 	status             string
 	remainingConsumers int
 	remainingReceivers int
+	consumedTimestamp  time.Time
 }
 
 // Init initializes the InMemory store
@@ -71,6 +72,9 @@ func (store *InMemoryStorage) Stop() {
 	// This empty implementation insures that it implements the storage interface
 }
 
+// PerformMaintenance performs store's maintenance
+func (store *InMemoryStorage) PerformMaintenance() {}
+
 // StoreObject stores an object
 func (store *InMemoryStorage) StoreObject(metaData common.MetaData, data []byte, status string) common.SyncServiceError {
 	store.lock()
@@ -101,7 +105,8 @@ func (store *InMemoryStorage) StoreObject(metaData common.MetaData, data []byte,
 		if metaData.NoData {
 			data = nil
 		}
-		store.objects[id] = inMemoryObject{metaData, data, status, metaData.ExpectedConsumers, metaData.ExpectedConsumers}
+		store.objects[id] = inMemoryObject{meta: metaData, data: data, status: status,
+			remainingConsumers: metaData.ExpectedConsumers, remainingReceivers: metaData.ExpectedConsumers}
 	}
 	return nil
 }
@@ -187,6 +192,9 @@ func (store *InMemoryStorage) UpdateObjectStatus(orgID string, objectType string
 	id := createObjectCollectionID(orgID, objectType, objectID)
 	if object, ok := store.objects[id]; ok {
 		object.status = status
+		if status == common.ConsumedByDest {
+			object.consumedTimestamp = time.Now()
+		}
 		store.objects[id] = object
 		return nil
 	}
@@ -310,6 +318,20 @@ func (store *InMemoryStorage) RetrieveObjects(orgID string, destType string, des
 		if !obj.meta.Inactive && obj.status == common.ReadyToSend &&
 			(obj.meta.DestType == "" || obj.meta.DestType == destType) && (obj.meta.DestID == "" || obj.meta.DestID == destID) {
 			result = append(result, obj.meta)
+		}
+	}
+	return result, nil
+}
+
+// RetrieveConsumedObjects returns all the consumed objects originated from this node
+func (store *InMemoryStorage) RetrieveConsumedObjects() ([]common.ConsumedObject, common.SyncServiceError) {
+	store.lock()
+	defer store.unLock()
+
+	result := make([]common.ConsumedObject, 0)
+	for _, obj := range store.objects {
+		if obj.status == common.ConsumedByDest {
+			result = append(result, common.ConsumedObject{MetaData: obj.meta, Timestamp: obj.consumedTimestamp})
 		}
 	}
 	return result, nil

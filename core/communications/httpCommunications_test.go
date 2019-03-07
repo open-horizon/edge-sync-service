@@ -279,7 +279,7 @@ func TestEssHTTPComm(t *testing.T) {
 		{common.Consumed, common.MetaData{ObjectID: "3", ObjectType: "type2", DestOrgID: "myorg000", NoData: true, InstanceID: 1}},
 		{common.Deleted, common.MetaData{ObjectID: "4", ObjectType: "type2", DestOrgID: "myorg000", NoData: true, InstanceID: 1, Deleted: true}},
 	}
-	statusAfterPoll := []string{common.CompletelyReceived, common.ObjDeleted, "", common.ObjDeleted}
+	statusAfterPoll := []string{common.CompletelyReceived, common.ObjDeleted, common.ConsumedByDest, common.ObjDeleted}
 
 	metaData := ctx.pollPayload[2].MetaData
 	Store.StoreObject(metaData, []byte("1234567890abcdefghijkl"), common.ReadyToSend)

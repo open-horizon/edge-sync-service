@@ -43,6 +43,7 @@ func Start() {
 	cacheFlushStopChannel = make(chan int, 1)
 	cacheFlushTicker = time.NewTicker(2 * authenticationCacheDuration)
 	go func() {
+		common.GoRoutineStarted()
 		keepRunning := true
 		for keepRunning {
 			select {
@@ -54,6 +55,7 @@ func Start() {
 			}
 		}
 		cacheFlushTicker = nil
+		common.GoRoutineEnded()
 	}()
 }
 

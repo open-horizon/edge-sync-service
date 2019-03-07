@@ -31,7 +31,6 @@ type MongoStorage struct {
 	session      *mgo.Session
 	dialInfo     *mgo.DialInfo
 	openFiles    map[string]*fileHandle
-	ticker       *time.Ticker
 	connected    bool
 	lockChannel  chan int
 	mapLock      chan int
@@ -216,16 +215,6 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 
 	store.openFiles = make(map[string]*fileHandle)
 
-	store.ticker = time.NewTicker(time.Second * time.Duration(common.Configuration.StorageMaintenanceInterval))
-	go func() {
-		for {
-			select {
-			case <-store.ticker.C:
-				store.checkObjects()
-			}
-		}
-	}()
-
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Successfully initialized mongo driver")
 	}
@@ -241,7 +230,11 @@ func (store *MongoStorage) Stop() {
 		}
 	}
 	store.session.Close()
-	store.ticker.Stop()
+}
+
+// PerformMaintenance performs store's maintenance
+func (store *MongoStorage) PerformMaintenance() {
+	store.checkObjects()
 }
 
 // GetObjectsToActivate returns inactive objects that are ready to be activated
@@ -615,6 +608,12 @@ OUTER:
 		return metaDatas, nil
 	}
 	return nil, &Error{fmt.Sprintf("Failed to update object's destinations.")}
+}
+
+// RetrieveConsumedObjects returns all the consumed objects originated from this node
+// ESS only API
+func (store *MongoStorage) RetrieveConsumedObjects() ([]common.ConsumedObject, common.SyncServiceError) {
+	return nil, nil
 }
 
 // RetrieveObject returns the object meta data with the specified parameters

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"sync"
 	"time"
 
@@ -273,11 +274,30 @@ func handleObjectConsumed(orgID string, objectType string, objectID string, dest
 		return &notificationHandlerError{"Failed to find stored object. Error: " + err.Error()}
 	}
 
-	// ESS: delete the object
 	if common.Configuration.NodeType == common.ESS {
-		if err = DeleteStoredObject(*metaData); err != nil && log.IsLogging(logger.ERROR) {
-			log.Error("Error in handleObjectConsumed: failed to delete stored object. Error: %s\n", err)
+		// On ESS we keep consumed objects up to ESSConsumedObjectsKept, and then we remove the oldest
+		// one. We keep consumed objects (meta data only) for reporting.
+		if err := Store.UpdateObjectStatus(orgID, objectType, objectID, common.ConsumedByDest); err != nil {
+			return err
 		}
+		consumedObjects, err := Store.RetrieveConsumedObjects()
+		if err != nil {
+			log.Error("Error in handleObjectConsumed: failed to retriev consumed objects. Error: %s\n", err)
+		} else {
+			if len(consumedObjects) > common.Configuration.ESSConsumedObjectsKept {
+				sort.Slice(consumedObjects, func(i, j int) bool {
+					return consumedObjects[i].Timestamp.Before(consumedObjects[j].Timestamp)
+				})
+				if err = DeleteStoredObject(consumedObjects[0].MetaData); err != nil && log.IsLogging(logger.ERROR) {
+					log.Error("Error in handleObjectConsumed: failed to delete stored object. Error: %s\n", err)
+				}
+			}
+		}
+
+		if err := DeleteStoredData(*metaData); err != nil && trace.IsLogging(logger.TRACE) {
+			trace.Trace("Error in handleDelete: %s \n", err)
+		}
+
 		err = Store.DeleteNotificationRecords(orgID, objectType, objectID, "", "")
 		if err != nil && log.IsLogging(logger.ERROR) {
 			log.Error("Error in handleObjectConsumed: failed to delete notification records. Error: %s\n", err)

@@ -250,7 +250,7 @@ func testStorageObjectActivation(storageType string, t *testing.T) {
 	common.Configuration.StorageMaintenanceInterval = 1
 
 	activationTime1 := time.Now().Add(time.Second * 1).Format(time.RFC3339)
-	activationTime2 := time.Now().Add(time.Second * 2).Format(time.RFC3339)
+	activationTime2 := time.Now().Add(time.Second * 3).Format(time.RFC3339)
 
 	tests := []struct {
 		metaData common.MetaData
@@ -283,7 +283,7 @@ func testStorageObjectActivation(storageType string, t *testing.T) {
 		t.Errorf("GetObjectsToActivate returned objects.\n")
 	}
 	select {
-	case <-time.After(1 * time.Second):
+	case <-time.After(2 * time.Second):
 		objectsToActivate, statuses, err := store.GetObjectsToActivate()
 		if err != nil {
 			t.Errorf("GetObjectsToActivate failed. Error: %s\n", err.Error())
@@ -296,7 +296,7 @@ func testStorageObjectActivation(storageType string, t *testing.T) {
 		}
 	}
 	select {
-	case <-time.After(2 * time.Second):
+	case <-time.After(4 * time.Second):
 		objectsToActivate, statuses, err := store.GetObjectsToActivate()
 		if err != nil {
 			t.Errorf("GetObjectsToActivate failed. Error: %s\n", err.Error())

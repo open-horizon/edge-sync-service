@@ -86,6 +86,7 @@ func (communication *HTTP) StartCommunication() common.SyncServiceError {
 func (communication *HTTP) startPolling() {
 	configuredInterval := int(common.Configuration.HTTPPollingInterval) * 1000
 	go func() {
+		common.GoRoutineStarted()
 		keepRunning := true
 		initialPoll := true
 		interval := 1000
@@ -111,6 +112,7 @@ func (communication *HTTP) startPolling() {
 			}
 		}
 		communication.httpPollTimer = nil
+		common.GoRoutineEnded()
 	}()
 }
 

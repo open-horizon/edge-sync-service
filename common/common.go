@@ -3,6 +3,7 @@ package common
 import (
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -316,6 +317,12 @@ type MessagingGroup struct {
 	GroupName string
 }
 
+// ConsumedObject contains consumed object's meta data and its timestamp
+type ConsumedObject struct {
+	MetaData  MetaData
+	Timestamp time.Time
+}
+
 // Object status
 const (
 	NotReadyToSend     = "notReady"           // The object is not ready to be sent to the other side
@@ -325,6 +332,7 @@ const (
 	ObjConsumed        = "objconsumed"        // The object was consumed by the app
 	ObjDeleted         = "objdeleted"         // The object was deleted by the other side
 	ObjReceived        = "objreceived"        // The object was received by the app
+	ConsumedByDest     = "consumedByDest"     // The object was consumed by the other side
 )
 
 // Notification status and type
@@ -493,4 +501,55 @@ func CreateError(err error, message string) SyncServiceError {
 	default:
 		return &InternalError{message + err.Error()}
 	}
+}
+
+var goRoutinesCounter int
+var routinesLock sync.RWMutex
+var waitingOnBlockChannel bool
+var blockChannel chan int
+
+// ResetGoRoutineCounter sets the go routines counter to 0
+func ResetGoRoutineCounter() {
+	routinesLock.Lock()
+	goRoutinesCounter = 0
+	routinesLock.Unlock()
+	blockChannel = make(chan int, 1)
+}
+
+// GoRoutineStarted increments the go routines counter
+func GoRoutineStarted() {
+	routinesLock.Lock()
+	goRoutinesCounter++
+	routinesLock.Unlock()
+}
+
+// GoRoutineEnded decrements the go routines counter
+func GoRoutineEnded() {
+	routinesLock.Lock()
+	goRoutinesCounter--
+	if waitingOnBlockChannel && goRoutinesCounter <= 0 {
+		blockChannel <- 1
+	}
+	routinesLock.Unlock()
+}
+
+// BlockUntilNoRunningGoRoutines blocks the current "thread"
+func BlockUntilNoRunningGoRoutines() {
+	routinesLock.RLock()
+	if goRoutinesCounter <= 0 {
+		routinesLock.RUnlock()
+		return
+	}
+
+	waitingOnBlockChannel = true
+	routinesLock.RUnlock()
+
+	timer := time.NewTimer(time.Duration(Configuration.ShutdownQuiesceTime) * time.Second)
+	select {
+	case <-blockChannel:
+	case <-timer.C:
+	}
+	timer.Stop()
+
+	waitingOnBlockChannel = false
 }

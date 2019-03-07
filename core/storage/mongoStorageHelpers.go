@@ -431,6 +431,9 @@ func (store *MongoStorage) withCollectionHelper(collectionName string, function 
 }
 
 func (store *MongoStorage) reconnect(timeout bool) bool {
+	common.GoRoutineStarted()
+	defer common.GoRoutineEnded()
+
 	if !store.connected && timeout {
 		return false
 	}

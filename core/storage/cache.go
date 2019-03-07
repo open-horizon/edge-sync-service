@@ -50,6 +50,11 @@ func (store *Cache) Stop() {
 	store.Store.Stop()
 }
 
+// PerformMaintenance performs store's maintenance
+func (store *Cache) PerformMaintenance() {
+	store.Store.PerformMaintenance()
+}
+
 // StoreObject stores an object
 func (store *Cache) StoreObject(metaData common.MetaData, data []byte, status string) common.SyncServiceError {
 	return store.Store.StoreObject(metaData, data, status)
@@ -115,6 +120,11 @@ func (store *Cache) RetrieveUpdatedObjects(orgID string, objectType string, rece
 // RetrieveObjects returns the list of all the objects that need to be sent to the destination
 func (store *Cache) RetrieveObjects(orgID string, destType string, destID string, resend int) ([]common.MetaData, common.SyncServiceError) {
 	return store.Store.RetrieveObjects(orgID, destType, destID, resend)
+}
+
+// RetrieveConsumedObjects returns all the consumed objects originated from this node
+func (store *Cache) RetrieveConsumedObjects() ([]common.ConsumedObject, common.SyncServiceError) {
+	return store.Store.RetrieveConsumedObjects()
 }
 
 // RetrieveObject returns the object meta data with the specified parameters

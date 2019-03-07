@@ -65,7 +65,7 @@ func sendNotifications(topic string, metaData common.MetaData, destinations []co
 		// Send a notification message via the communication module to each destination
 		if err := Comm.SendNotificationMessage(topic, metaData.DestType, metaData.DestID, metaData.InstanceID,
 			&metaData); err != nil {
-			sendError = err
+			sendError = &Error{err.Error()}
 		}
 	}
 	return sendError
@@ -87,7 +87,10 @@ func SendObjectStatus(metaData common.MetaData, status string) common.SyncServic
 		return err
 	}
 
-	return Comm.SendNotificationMessage(status, metaData.OriginType, metaData.OriginID, metaData.InstanceID, &metaData)
+	if err := Comm.SendNotificationMessage(status, metaData.OriginType, metaData.OriginID, metaData.InstanceID, &metaData); err != nil {
+		return &Error{err.Error()}
+	}
+	return nil
 }
 
 func resendNotificationsForDestination(dest common.Destination, resendReceivedObjects bool) common.SyncServiceError {
