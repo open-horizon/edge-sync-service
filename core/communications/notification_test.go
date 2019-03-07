@@ -143,11 +143,14 @@ func TestActivateObjects(t *testing.T) {
 	}
 
 	ActivateObjects()
-	objects, err = Store.RetrieveObjects("notmyorg", "device", "dev1", common.ResendAll)
-	if err != nil {
-		t.Errorf("RetrieveObjects failed. Error: %s\n", err.Error())
-	} else if len(objects) != 2 {
-		t.Errorf("RetrieveObjects returned %d objects instead of 2\n", len(objects))
+	select {
+	case <-time.After(1 * time.Second):
+		objects, err = Store.RetrieveObjects("notmyorg", "device", "dev1", common.ResendAll)
+		if err != nil {
+			t.Errorf("RetrieveObjects failed. Error: %s\n", err.Error())
+		} else if len(objects) != 2 {
+			t.Errorf("RetrieveObjects returned %d objects instead of 2\n", len(objects))
+		}
 	}
 
 	select {

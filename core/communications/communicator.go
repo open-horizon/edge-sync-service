@@ -71,8 +71,6 @@ var Comm Communicator
 
 // SendErrorResponse common code to send HTTP error codes
 func SendErrorResponse(writer http.ResponseWriter, err error, message string, statusCode int) {
-	writer.Header().Add("Content-Type", "Text/Plain")
-
 	if statusCode == 0 {
 		switch err.(type) {
 		case *common.InvalidRequest:
@@ -81,16 +79,24 @@ func SendErrorResponse(writer http.ResponseWriter, err error, message string, st
 			statusCode = http.StatusInternalServerError
 		case *storage.NotConnected:
 			statusCode = http.StatusServiceUnavailable
+		case *Error:
+			// Don't return an error if it's a communication error
+			statusCode = http.StatusNoContent
+			message = ""
+			err = nil
 		default:
 			statusCode = http.StatusInternalServerError
 		}
 	}
 	writer.WriteHeader(statusCode)
 
-	buffer := bytes.NewBufferString(message)
-	if err != nil {
-		buffer.WriteString(err.Error())
+	if message != "" || err != nil {
+		writer.Header().Add("Content-Type", "Text/Plain")
+		buffer := bytes.NewBufferString(message)
+		if err != nil {
+			buffer.WriteString(err.Error())
+		}
+		buffer.WriteString("\n")
+		writer.Write(buffer.Bytes())
 	}
-	buffer.WriteString("\n")
-	writer.Write(buffer.Bytes())
 }

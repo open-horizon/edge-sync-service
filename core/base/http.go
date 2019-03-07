@@ -86,6 +86,8 @@ func startHTTPServer(ipAddress string, registerHandlers bool, swaggerFile string
 }
 
 func startHTTPServerHelper(secure bool, listener net.Listener) {
+	common.GoRoutineStarted()
+
 	var err error
 	var cert tls.Certificate
 	if secure {
@@ -140,6 +142,7 @@ func startHTTPServerHelper(secure bool, listener net.Listener) {
 		if log.IsLogging(logger.TRACE) {
 			log.Trace(err.Error())
 		}
+		common.GoRoutineEnded()
 	} else {
 		if log.IsLogging(logger.FATAL) {
 			log.Fatal(err.Error())

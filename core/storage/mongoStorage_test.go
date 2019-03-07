@@ -60,6 +60,8 @@ func TestMongoStorageObjectExpiration(t *testing.T) {
 
 	select {
 	case <-time.After(2 * time.Second):
+		store.PerformMaintenance()
+
 		objects, err = store.RetrieveObjects(tests[0].metaData.DestOrgID, tests[0].metaData.DestType, tests[0].metaData.DestID, common.ResendAll)
 		if err != nil {
 			t.Errorf("RetrieveObjects failed. Error: %s\n", err.Error())
@@ -70,6 +72,8 @@ func TestMongoStorageObjectExpiration(t *testing.T) {
 
 	select {
 	case <-time.After(4 * time.Second):
+		store.PerformMaintenance()
+
 		objects, err = store.RetrieveObjects(tests[0].metaData.DestOrgID, tests[0].metaData.DestType, tests[0].metaData.DestID, common.ResendAll)
 		if err != nil {
 			t.Errorf("RetrieveObjects failed. Error: %s\n", err.Error())

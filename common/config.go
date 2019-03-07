@@ -292,8 +292,17 @@ type Config struct {
 	// The default value is false, i.e. in memory storage.
 	ESSPersistentStorage bool `env:"ESS_PERSISTENT_STORAGE"`
 
+	// ESSConsumedObjectsKept specifies the number of objects sent by the ESS and consumed by the CSS
+	// that are kept by the ESS for reporting
+	// The default value is 1000
+	ESSConsumedObjectsKept int `env:"ESS_CONSUMED_OBJECTS_KEPT"`
+
 	// MessagingGroupCacheExpiration specifies the expiration time in minutes of organization to messaging group mapping cache
 	MessagingGroupCacheExpiration int16 `env:"MESSAGING_GROUP_CACHE_EXPIRATION"`
+
+	// ShutdownQuiesceTime specifies the maximum time in seconds that the Sync Service will wait for internal tasks to end while shuting down
+	// The default values is 60 seconds
+	ShutdownQuiesceTime int `env:"SHUTDOWN_QUIESCE_TIME"`
 }
 
 // Configuration contains the read in configuration
@@ -638,4 +647,6 @@ func init() {
 	Configuration.HTTPCSSUseSSL = false
 	Configuration.HTTPCSSCACertificate = ""
 	Configuration.MessagingGroupCacheExpiration = 60
+	Configuration.ShutdownQuiesceTime = 60
+	Configuration.ESSConsumedObjectsKept = 1000
 }

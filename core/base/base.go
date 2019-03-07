@@ -19,11 +19,14 @@ import (
 var store storage.Storage
 var communication communications.Communicator
 
-var resendTicker *time.Ticker
+var resendTimer *time.Timer
 var resendStopChannel chan int
 
-var activateTicker *time.Ticker
+var activateTimer *time.Timer
 var activateStopChannel chan int
+
+var maintenanceTimer *time.Timer
+var maintenanceStopChannel chan int
 
 var pingTicker *time.Ticker
 var pingStopChannel chan int
@@ -41,12 +44,17 @@ func init() {
 	blockChannel = make(chan int, 1)
 	resendStopChannel = make(chan int, 1)
 	activateStopChannel = make(chan int, 1)
+	maintenanceStopChannel = make(chan int, 1)
+	pingStopChannel = make(chan int, 1)
+	removeESSStopChannel = make(chan int, 1)
 }
 
 // Start starts up the synnc service
 func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 	startStopLock.Lock()
 	defer startStopLock.Unlock()
+
+	common.ResetGoRoutineCounter()
 
 	if started {
 		return &common.SetupError{Message: "An attempt was made to start the Sync Service after it was already started"}
@@ -127,39 +135,63 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 
 	common.ResendAcked = true
 
-	resendTicker = time.NewTicker(time.Second * time.Duration(common.Configuration.ResendInterval))
 	go func() {
+		common.GoRoutineStarted()
 		keepRunning := true
 		for keepRunning {
+			resendTimer = time.NewTimer(time.Second * time.Duration(common.Configuration.ResendInterval))
 			select {
-			case <-resendTicker.C:
+			case <-resendTimer.C:
 				communications.ResendNotifications()
 
 			case <-resendStopChannel:
 				keepRunning = false
 			}
 		}
-		resendTicker = nil
+		resendTimer = nil
+		common.GoRoutineEnded()
 	}()
 
-	activateTicker = time.NewTicker(time.Second * time.Duration(common.Configuration.ObjectActivationInterval))
 	go func() {
+		common.GoRoutineStarted()
 		keepRunning := true
 		for keepRunning {
+			activateTimer = time.NewTimer(time.Second * time.Duration(common.Configuration.ObjectActivationInterval))
 			select {
-			case <-activateTicker.C:
+			case <-activateTimer.C:
 				communications.ActivateObjects()
 
 			case <-activateStopChannel:
 				keepRunning = false
 			}
 		}
-		activateTicker = nil
+		activateTimer = nil
+		common.GoRoutineEnded()
 	}()
+
+	if common.Configuration.NodeType == common.CSS {
+		go func() {
+			common.GoRoutineStarted()
+			keepRunning := true
+			for keepRunning {
+				maintenanceTimer = time.NewTimer(time.Second * time.Duration(common.Configuration.StorageMaintenanceInterval))
+				select {
+				case <-maintenanceTimer.C:
+					store.PerformMaintenance()
+
+				case <-maintenanceStopChannel:
+					keepRunning = false
+				}
+			}
+			maintenanceTimer = nil
+			common.GoRoutineEnded()
+		}()
+	}
 
 	if common.Configuration.NodeType == common.ESS {
 		pingTicker = time.NewTicker(time.Hour * time.Duration(common.Configuration.ESSPingInterval))
 		go func() {
+			common.GoRoutineStarted()
 			keepRunning := true
 			for keepRunning {
 				select {
@@ -171,6 +203,7 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 				}
 			}
 			pingTicker = nil
+			common.GoRoutineEnded()
 		}()
 	}
 
@@ -178,6 +211,7 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 		removeESSTicker = time.NewTicker(time.Hour * 24 * time.Duration(common.Configuration.RemoveESSRegistrationTime))
 		lastTimestamp := time.Now()
 		go func() {
+			common.GoRoutineStarted()
 			keepRunning := true
 			for keepRunning {
 				select {
@@ -192,6 +226,7 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 				}
 			}
 			removeESSTicker = nil
+			common.GoRoutineEnded()
 		}()
 	}
 
@@ -227,13 +262,17 @@ func Stop(quiesceTime int) {
 
 	security.Stop()
 
-	if resendTicker != nil {
-		resendTicker.Stop()
+	if resendTimer != nil {
+		resendTimer.Stop()
 		resendStopChannel <- 1
 	}
-	if activateTicker != nil {
-		activateTicker.Stop()
+	if activateTimer != nil {
+		activateTimer.Stop()
 		activateStopChannel <- 1
+	}
+	if maintenanceTimer != nil {
+		maintenanceTimer.Stop()
+		maintenanceStopChannel <- 1
 	}
 	if pingTicker != nil {
 		pingTicker.Stop()
@@ -244,13 +283,9 @@ func Stop(quiesceTime int) {
 		removeESSStopChannel <- 1
 	}
 
-	timer := time.NewTimer(time.Duration(2) * time.Second)
-	<-timer.C
+	common.BlockUntilNoRunningGoRoutines()
 
 	store.Stop()
-
-	timer = time.NewTimer(time.Duration(2) * time.Second)
-	<-timer.C
 
 	if waitingOnBlockChannel {
 		blockChannel <- 1

@@ -29,6 +29,7 @@ type boltObject struct {
 	RemainingConsumers int             `json:"remaining-consumers"`
 	RemainingReceivers int             `json:"remaining-receivers"`
 	DataPath           string          `json:"data-path"`
+	ConsumedTimestamp  time.Time       `json:"consumed-timestamp"`
 }
 
 var (
@@ -109,6 +110,9 @@ func (store *BoltStorage) Stop() {
 	store.db.Close()
 }
 
+// PerformMaintenance performs store's maintenance
+func (store *BoltStorage) PerformMaintenance() {}
+
 // Cleanup erase the on disk Bolt database
 func (store *BoltStorage) Cleanup() {
 	os.Remove(common.Configuration.PersistenceRootPath + "/sync/db/sync.db")
@@ -142,7 +146,8 @@ func (store *BoltStorage) StoreObject(metaData common.MetaData, data []byte, sta
 			return err
 		}
 	}
-	object := boltObject{metaData, status, metaData.ExpectedConsumers, metaData.ExpectedConsumers, dataPath}
+	object := boltObject{Meta: metaData, Status: status, RemainingConsumers: metaData.ExpectedConsumers,
+		RemainingReceivers: metaData.ExpectedConsumers, DataPath: dataPath}
 	encoded, err := json.Marshal(object)
 	if err != nil {
 		return err
@@ -284,6 +289,20 @@ func (store *BoltStorage) RetrieveObjects(orgID string, destType string, destID 
 	return result, nil
 }
 
+// RetrieveConsumedObjects returns all the consumed objects originated from this node
+func (store *BoltStorage) RetrieveConsumedObjects() ([]common.ConsumedObject, common.SyncServiceError) {
+	result := make([]common.ConsumedObject, 0)
+	function := func(object boltObject) {
+		if object.Status == common.ConsumedByDest {
+			result = append(result, common.ConsumedObject{MetaData: object.Meta, Timestamp: object.ConsumedTimestamp})
+		}
+	}
+	if err := store.retrieveObjectsHelper(function); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 // GetObjectsToActivate returns inactive objects that are ready to be activated
 func (store *BoltStorage) GetObjectsToActivate() ([]common.MetaData, []string, common.SyncServiceError) {
 	currentTime := time.Now().Format(time.RFC3339)
@@ -326,6 +345,9 @@ func (store *BoltStorage) AppendObjectData(orgID string, objectType string, obje
 func (store *BoltStorage) UpdateObjectStatus(orgID string, objectType string, objectID string, status string) common.SyncServiceError {
 	function := func(object boltObject) (boltObject, common.SyncServiceError) {
 		object.Status = status
+		if status == common.ConsumedByDest {
+			object.ConsumedTimestamp = time.Now()
+		}
 		return object, nil
 	}
 	return store.updateObjectHelper(orgID, objectType, objectID, function)
@@ -417,11 +439,6 @@ func (store *BoltStorage) ReadObjectData(orgID string, objectType string, object
 	}
 	err = store.viewObjectHelper(orgID, objectType, objectID, function)
 	return
-}
-
-// MarkObjectConsumed marks the object as consumed (CSS only)
-func (store *BoltStorage) MarkObjectConsumed(orgID string, objectType string, objectID string) common.SyncServiceError {
-	return nil
 }
 
 // MarkObjectDeleted marks the object as deleted
