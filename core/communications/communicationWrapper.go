@@ -76,22 +76,22 @@ func (communication *Wrapper) SendNotificationMessage(notificationTopic string, 
 	return comm.SendNotificationMessage(notificationTopic, destType, destID, instanceID, metaData)
 }
 
-// SendFeedbackMessage sends a feedback message from the ESS to the CSS
-func (communication *Wrapper) SendFeedbackMessage(code int, retryInterval int32, reason string, metaData *common.MetaData) common.SyncServiceError {
+// SendFeedbackMessage sends a feedback message from the ESS to the CSS or from the CSS to the ESS
+func (communication *Wrapper) SendFeedbackMessage(code int, retryInterval int32, reason string, metaData *common.MetaData, sendToOrigin bool) common.SyncServiceError {
 	comm, err := communication.selectCommunicator(common.Configuration.CommunicationProtocol, "", "", "")
 	if err != nil {
 		return err
 	}
-	return comm.SendFeedbackMessage(code, retryInterval, reason, metaData)
+	return comm.SendFeedbackMessage(code, retryInterval, reason, metaData, sendToOrigin)
 }
 
-// SendErrorMessage sends an error message from the ESS to the CSS
-func (communication *Wrapper) SendErrorMessage(err common.SyncServiceError, metaData *common.MetaData) common.SyncServiceError {
+// SendErrorMessage sends an error message from the ESS to the CSS or from the CSS to the ESS
+func (communication *Wrapper) SendErrorMessage(err common.SyncServiceError, metaData *common.MetaData, sendToOrigin bool) common.SyncServiceError {
 	comm, err := communication.selectCommunicator(common.Configuration.CommunicationProtocol, "", "", "")
 	if err != nil {
 		return err
 	}
-	return comm.SendErrorMessage(err, metaData)
+	return comm.SendErrorMessage(err, metaData, sendToOrigin)
 }
 
 // Register sends a registration message to be sent by an ESS
@@ -110,6 +110,33 @@ func (communication *Wrapper) RegisterAck(destination common.Destination) common
 		return err
 	}
 	return comm.RegisterAck(destination)
+}
+
+// RegisterAsNew send a notification from a CSS to a ESS that the ESS has to send a registerNew message in order
+// to register
+func (communication *Wrapper) RegisterAsNew(destination common.Destination) common.SyncServiceError {
+	comm, err := communication.selectCommunicator(destination.Communication, "", "", "")
+	if err != nil {
+		return err
+	}
+	return comm.RegisterAsNew(destination)
+}
+
+// RegisterNew sends a new registration message to be sent by an ESS
+func (communication *Wrapper) RegisterNew() common.SyncServiceError {
+	comm, err := communication.selectCommunicator(common.Configuration.CommunicationProtocol, "", "", "")
+	if err != nil {
+		return err
+	}
+	return comm.RegisterNew()
+}
+
+// HandleRegAck handles a registration acknowledgement message from the CSS
+func (communication *Wrapper) HandleRegAck() {
+	comm, err := communication.selectCommunicator(common.Configuration.CommunicationProtocol, "", "", "")
+	if err == nil {
+		comm.HandleRegAck()
+	}
 }
 
 // SendPing sends a ping message from ESS to CSS

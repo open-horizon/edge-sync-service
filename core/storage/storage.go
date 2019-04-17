@@ -1,11 +1,13 @@
 package storage
 
 import (
+	"fmt"
 	"io"
 	"strings"
 	"time"
 
 	"github.com/open-horizon/edge-sync-service/common"
+	"github.com/open-horizon/edge-sync-service/core/dataURI"
 )
 
 const (
@@ -94,13 +96,17 @@ type Storage interface {
 	ActivateObject(orgID string, objectType string, objectID string) common.SyncServiceError
 
 	// GetObjectsToActivate returns inactive objects that are ready to be activated
-	GetObjectsToActivate() ([]common.MetaData, []string, common.SyncServiceError)
+	GetObjectsToActivate() ([]common.MetaData, common.SyncServiceError)
 
 	// Delete the object
 	DeleteStoredObject(orgID string, objectType string, objectID string) common.SyncServiceError
 
 	// Delete the object's data
 	DeleteStoredData(orgID string, objectType string, objectID string) common.SyncServiceError
+
+	// CleanObjects removes the objects received from the other side.
+	// For persistant storage only partially recieved objects are removed.
+	CleanObjects() common.SyncServiceError
 
 	// Get destinations that the object has to be sent to
 	GetObjectDestinations(metaData common.MetaData) ([]common.Destination, common.SyncServiceError)
@@ -233,6 +239,9 @@ type Storage interface {
 
 	// IsConnected returns false if the storage cannont be reached, and true otherwise
 	IsConnected() bool
+
+	// IsPersistent returns true if the storage is persistent, and false otherwise
+	IsPersistent() bool
 }
 
 // Error is the error used in the storage layer
@@ -333,9 +342,10 @@ func createDestinationCollectionID(orgID string, destType string, destID string)
 	return strBuilder.String()
 }
 
-func resendNotification(notification common.Notification) bool {
+func resendNotification(notification common.Notification, retrieveReceived bool) bool {
 	s := notification.Status
-	return (s == common.Update || s == common.Consumed || s == common.Getdata || s == common.Delete || s == common.Deleted || s == common.Received)
+	return (s == common.Update || s == common.Consumed || s == common.Getdata || s == common.Delete || s == common.Deleted || s == common.Received ||
+		(retrieveReceived && (s == common.Data || s == common.ReceivedByDestination)))
 }
 
 func ensureArrayCapacity(data []byte, newCapacity int64) []byte {
@@ -357,4 +367,64 @@ func createDataPath(prefix string, metaData common.MetaData) string {
 	strBuilder.WriteByte('-')
 	strBuilder.WriteString(metaData.ObjectID)
 	return strBuilder.String()
+}
+
+func createDestinations(store Storage, metaData common.MetaData) ([]common.StoreDestinationStatus, common.SyncServiceError) {
+	dests := make([]common.StoreDestinationStatus, 0)
+	if metaData.DestID != "" {
+		// We check that destType is not empty in updateObject()
+		if dest, err := store.RetrieveDestination(metaData.DestOrgID, metaData.DestType, metaData.DestID); err == nil && dest != nil {
+			dests = append(dests, common.StoreDestinationStatus{Destination: *dest, Status: common.Pending})
+		}
+	} else {
+		if len(metaData.DestinationsList) == 0 {
+			// Either broadcast or destType without destID
+			if destinations, err := store.RetrieveDestinations(metaData.DestOrgID, metaData.DestType); err == nil {
+				for _, dest := range destinations {
+					dests = append(dests, common.StoreDestinationStatus{Destination: dest, Status: common.Pending})
+				}
+			}
+		} else {
+			for _, d := range metaData.DestinationsList {
+				parts := strings.Split(d, ":")
+				if len(parts) == 2 {
+					if dest, err := store.RetrieveDestination(metaData.DestOrgID, parts[0], parts[1]); err == nil {
+						dests = append(dests, common.StoreDestinationStatus{Destination: *dest, Status: common.Pending})
+					} else {
+						return nil, &Error{fmt.Sprintf("Failed to find destination %s:%s", parts[0], parts[1])}
+					}
+				} else {
+					return nil, &Error{fmt.Sprintf("Invalid destination %s", d)}
+				}
+			}
+		}
+	}
+	return dests, nil
+}
+
+// DeleteStoredObject calls the storage to delete the object and its data
+func DeleteStoredObject(store Storage, metaData common.MetaData) common.SyncServiceError {
+	if err := store.DeleteStoredObject(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID); err != nil {
+		return err
+	}
+
+	if common.Configuration.NodeType == common.ESS && metaData.DestinationDataURI != "" {
+		if err := dataURI.DeleteStoredData(metaData.DestinationDataURI); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// DeleteStoredData calls the storage to delete the object's data
+func DeleteStoredData(store Storage, metaData common.MetaData) common.SyncServiceError {
+	if common.Configuration.NodeType == common.ESS && metaData.DestinationDataURI != "" {
+		if err := dataURI.DeleteStoredData(metaData.DestinationDataURI); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	return store.DeleteStoredData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 }

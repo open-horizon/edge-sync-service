@@ -7,19 +7,20 @@ import (
 )
 
 func TestInMemoryStorageObjects(t *testing.T) {
-	testStorageObjects(inMemory, t)
+	testStorageObjects(common.InMemory, t)
 }
 
 func TestInMemoryStorageObjectActivation(t *testing.T) {
-	testStorageObjectActivation(inMemory, t)
+	testStorageObjectActivation(common.InMemory, t)
 }
 
 func TestInMemoryStorageObjectData(t *testing.T) {
-	testStorageObjectData(inMemory, t)
+	common.Configuration.NodeType = common.ESS
+	testStorageObjectData(common.InMemory, t)
 }
 
 func TestInMemoryStorageNotifications(t *testing.T) {
-	testStorageNotifications(inMemory, t)
+	testStorageNotifications(common.InMemory, t)
 }
 
 func TestInMemoryStorageDestinations(t *testing.T) {
@@ -168,5 +169,5 @@ func TestInMemoryCacheStorageDestinations(t *testing.T) {
 }
 
 func TestInMemoryStorageWebhooks(t *testing.T) {
-	testStorageWebhooks(inMemory, t)
+	testStorageWebhooks(common.InMemory, t)
 }

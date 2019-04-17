@@ -21,7 +21,9 @@ The user application is also assumed to have an edge part and a cloud part.
 The application interacts with the sync service (CSS and ESS) using REST calls.
 Communication between the CSS and ESS nodes can be over MQTT or HTTP. 
 The sync service is designed to work with the Watson IoT Platform and perform all communication through it.
-Direct direct communication over HTTP/HTTPS or over an MQTT broker is also supported. 
+Direct communication over HTTP/HTTPS or over an MQTT broker is also supported. 
+
+![Figure](./component-overview.png)
 
 The application provides the CSS/ESS an object that includes metadata, which defines the properties of the object, and optionally also binary data. 
 The object's metadata includes the destinations for the object. The sync service supports flexibly addressing which allows an object to be sent from the CSS to:
@@ -36,7 +38,7 @@ Once the application is done processing the object it can mark it as consumed. T
 
 ### Sync service main features 
 The following is a list of the main features provided by the sync service:
-1. The sync service handles all communication aspects between cloud and edge  
+1. The Sync Service handles all communication aspects between cloud and edge  
     - Communication failures, edge nodes unavailable, limit on maximal message size, download resume, persistence accross restarts, and more.
 2. Simple flexible control over objects
     - Create/Update/Read/Delete operations, version, persistence, expiration, activation time, delete on delivery, and more.
@@ -47,6 +49,8 @@ The following is a list of the main features provided by the sync service:
     - Provides an indication of the delivery status of an object for each of its destinations. 
 6. Tracking of edge nodes
     - Allows users to view edge nodes
+7. A security model that enables the control over who can create/update/read/delete which objects and to what edge nodes these objects can be sent to.
+    - See the section [Security](#security)
 
 
 ## Development
@@ -152,6 +156,55 @@ Where *&lt;host&gt;* and *&lt;port&gt;* are the host and port your edge-sync-ser
 
 ### Samples
 
-#### Send files
-
 [Sending and receiving files](./samples/send-receive-files/README.md)
+
+## Security
+The Sync Service provides a secure infrastructure on which to synchronize objects from the cloud to the edge and from the edge to the cloud. It does this by typically requiring authentication and authorization to perform all tasks. Both objects and edge nodes, refered to as destinations, are protected when authentication is required.
+
+### Sync Service Authentication
+
+When authentication is required, all applications accessing the Sync Service via the Sync Service's RESTful API are required to provide an app key and app secret pair on all RESTful API calls.
+
+  - Each client SDK has an appropriate language dependent API call to set the app key and app secret for use by the client "handle" when making the RESTful API calls to the Sync Service server the client handle is connecting to.
+  - If one is not using one of the client SDKs and instead is making the RESTful API calls by one self, the app key and app secret must be sent as the username and password in a Basic Authorization header with each call.
+
+Edge Sync Service instances are also typically required to identify themselves when communicating with a Cloud Sync Service instance.
+
+The exact form of the app key and app secret pair is dependent on how the Sync Service instance one is communicating with has been configured. The app key and app secret pair are used to determine and validate the user's identity. The user's identity includes their username, the organization they are part of, and the type of user they are. A user can be an organization admin, a regular user, or an edge node.
+
+It should be noted that one can set up the Sync Service to not require authentication at all.
+The default setup, while requiring authentication, makes most users organization admins.
+Such a setup should **not** be used in a production setting.
+
+### Sync Service Authorization
+
+The Sync Service protects objects by limiting access to object types. In addition it protects edge nodes by limiting access to destination types.
+
+#### Application Authorization
+
+In order for an application to create, read, update, or delete an object in the Sync Service, it must have access to the object type of the object in question. The application does this by:
+
+1. Having authenticated with a user identity that is an organization admin in the object's organization.
+2. Having authenticated as a regular user, who's username is on an access control list for the object type in question.
+3. The access control list for the object type in question has been marked publically accessible.
+
+In addition for an application to create an object on a Cloud Sync Service, it must have access to all of the destination types mentioned in the object's metadata. The application does this by:
+
+1. Having authenticated with a user identity that is an organization admin in the object's organization.
+2. Having authenticated as a regular user, who's username is on access control lists for the destination types in question.
+3. The access control lists for the destination types in question have been marked publically accessible.
+
+#### Edge Node Authorization
+
+Sync Service instances running on Edge Nodes identify themselves when they communicate with Cloud Sync Service instances. This is done to prevent an Edge Sync Service instance from masquerading as some other destination.
+The user identity used for an Edge Sync Service instance can be any one of the user identity types supported by the Sync Service. In particular, if the user identity is of:
+
+1. An edge node, the identity must match the destination type and destination ID of the Edge Sync Service instance.
+2. An organization admin, it must be an admin of the organization the edge node is part of.
+3. A regular user, that user's username must be on an access control list for the destination type of the Edge Sync Service instance.
+
+### Access Control Lists
+
+Access control lists (ACLs) are used by the Sync Service to grant regular users both read and write access to object types and destination types within an organization. Users who are organization admins can add and remove users from ACLs. An ACL is automatically created when the first user's username is added to the ACL in question. An ACL is automatically deleted when the last user's username is removed from the ACL in question. Adding a username of asterisk (*) to an ACL allows any and all authenticated users within the organization access to object type or destination type in question.
+
+ACLs are maintained using the appropriate Sync Service RESTful APIs. All of the Sync Service client SDKs provide language dependent APIs for these RESTful APIs.

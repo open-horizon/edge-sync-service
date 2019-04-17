@@ -31,56 +31,73 @@ func startHTTPServer(ipAddress string, registerHandlers bool, swaggerFile string
 		fmt.Sprintf("%s:%d", common.Configuration.ListeningAddress,
 			common.Configuration.UnsecureListeningPort)
 
-	if registerHandlers {
-		setupAPIServer()
+	// When running embedded in app, there is no API serving nor swagger serving
+	if common.ServingAPIs {
+		if registerHandlers {
+			setupAPIServer()
+		}
+
+		if common.Configuration.ListeningType == common.ListeningSecurely {
+			setupSwaggerServing(swaggerFile, true, ipAddress, common.Configuration.SecureListeningPort)
+		} else if common.Configuration.ListeningType != common.ListeningUnix &&
+			common.Configuration.ListeningType != common.ListeningSecureUnix {
+			setupSwaggerServing(swaggerFile, false, ipAddress, common.Configuration.UnsecureListeningPort)
+		}
 	}
 
-	if common.Configuration.ListeningType == common.ListeningSecurely {
-		setupSwaggerServing(swaggerFile, true, ipAddress, common.Configuration.SecureListeningPort)
-	} else if common.Configuration.ListeningType != common.ListeningUnix &&
-		common.Configuration.ListeningType != common.ListeningSecureUnix {
-		setupSwaggerServing(swaggerFile, false, ipAddress, common.Configuration.UnsecureListeningPort)
-	}
+	// An embedded CSS needs to Serve the SPI stuff if it allows ESSs to connect via HTTP
+	if common.ServingAPIs || (common.Configuration.NodeType == common.CSS &&
+		common.Configuration.CommunicationProtocol != common.MQTTProtocol &&
+		common.Configuration.CommunicationProtocol != common.WIoTP) {
+		if common.Configuration.ListeningType == common.ListeningSecurely ||
+			common.Configuration.ListeningType == common.ListeningBoth ||
+			common.Configuration.ListeningType == common.ListeningSecureUnix {
+			err := setupServerTLSConfig()
+			if err != nil {
+				return &common.SetupError{Message: fmt.Sprintf("Failed to setup TLS. Error: %s", err)}
+			}
+		}
 
-	if common.Configuration.ListeningType == common.ListeningBoth {
-		listener, err := net.Listen("tcp", unsecureHTTPServer.Addr)
-		if err != nil {
-			return &common.SetupError{Message: fmt.Sprintf("Failed to listen on %s. Error: %s", unsecureHTTPServer.Addr, err)}
+		if common.Configuration.ListeningType == common.ListeningBoth {
+			listener, err := net.Listen("tcp", unsecureHTTPServer.Addr)
+			if err != nil {
+				return &common.SetupError{Message: fmt.Sprintf("Failed to listen on %s. Error: %s", unsecureHTTPServer.Addr, err)}
+			}
+			go startHTTPServerHelper(false, listener)
 		}
-		go startHTTPServerHelper(false, listener)
-	}
 
-	if common.Configuration.ListeningType == common.ListeningUnsecurely {
-		listener, err := net.Listen("tcp", unsecureHTTPServer.Addr)
-		if err != nil {
-			return &common.SetupError{Message: fmt.Sprintf("Failed to listen on %s. Error: %s", unsecureHTTPServer.Addr, err)}
-		}
-		go startHTTPServerHelper(false, listener)
-	} else if common.Configuration.ListeningType != common.ListeningUnix &&
-		common.Configuration.ListeningType != common.ListeningSecureUnix {
-		listener, err := net.Listen("tcp", secureHTTPServer.Addr)
-		if err != nil {
-			return &common.SetupError{Message: fmt.Sprintf("Failed to listen on %s. Error: %s", secureHTTPServer.Addr, err)}
-		}
-		go startHTTPServerHelper(true, listener)
-	} else {
-		var listener net.Listener
-		var socketFile string
-		if strings.HasPrefix(common.Configuration.ListeningAddress, "/") {
-			socketFile = common.Configuration.ListeningAddress
+		if common.Configuration.ListeningType == common.ListeningUnsecurely {
+			listener, err := net.Listen("tcp", unsecureHTTPServer.Addr)
+			if err != nil {
+				return &common.SetupError{Message: fmt.Sprintf("Failed to listen on %s. Error: %s", unsecureHTTPServer.Addr, err)}
+			}
+			go startHTTPServerHelper(false, listener)
+		} else if common.Configuration.ListeningType != common.ListeningUnix &&
+			common.Configuration.ListeningType != common.ListeningSecureUnix {
+			listener, err := net.Listen("tcp", secureHTTPServer.Addr)
+			if err != nil {
+				return &common.SetupError{Message: fmt.Sprintf("Failed to listen on %s. Error: %s", secureHTTPServer.Addr, err)}
+			}
+			go startHTTPServerHelper(true, listener)
 		} else {
-			socketFile = common.Configuration.PersistenceRootPath + common.Configuration.ListeningAddress
+			var listener net.Listener
+			var socketFile string
+			if strings.HasPrefix(common.Configuration.ListeningAddress, "/") {
+				socketFile = common.Configuration.ListeningAddress
+			} else {
+				socketFile = common.Configuration.PersistenceRootPath + common.Configuration.ListeningAddress
+			}
+			os.Remove(socketFile)
+			unixAddress, err := net.ResolveUnixAddr("unix", socketFile)
+			if err != nil {
+				return &common.SetupError{Message: fmt.Sprintf("Failed to setup Unix Socket listening. Error: %s", err)}
+			}
+			listener, err = net.ListenUnix("unix", unixAddress)
+			if err != nil {
+				return &common.SetupError{Message: fmt.Sprintf("Failed to setup Unix Socket listening. Error: %s", err)}
+			}
+			go startHTTPServerHelper(common.Configuration.ListeningType == common.ListeningSecureUnix, listener)
 		}
-		os.Remove(socketFile)
-		unixAddress, err := net.ResolveUnixAddr("unix", socketFile)
-		if err != nil {
-			return &common.SetupError{Message: fmt.Sprintf("Failed to setup Unix Socket listening. Error: %s", err)}
-		}
-		listener, err = net.ListenUnix("unix", unixAddress)
-		if err != nil {
-			return &common.SetupError{Message: fmt.Sprintf("Failed to setup Unix Socket listening. Error: %s", err)}
-		}
-		go startHTTPServerHelper(common.Configuration.ListeningType == common.ListeningSecureUnix, listener)
 	}
 	return nil
 }
@@ -89,43 +106,18 @@ func startHTTPServerHelper(secure bool, listener net.Listener) {
 	common.GoRoutineStarted()
 
 	var err error
-	var cert tls.Certificate
 	if secure {
-		var certFile, keyFile string
-		if strings.HasPrefix(common.Configuration.ServerCertificate, "/") {
-			certFile = common.Configuration.ServerCertificate
-		} else {
-			certFile = common.Configuration.PersistenceRootPath + common.Configuration.ServerCertificate
-		}
-		if strings.HasPrefix(common.Configuration.ServerKey, "/") {
-			keyFile = common.Configuration.ServerKey
-		} else {
-			keyFile = common.Configuration.PersistenceRootPath + common.Configuration.ServerKey
-		}
 
-		cert, err = tls.LoadX509KeyPair(certFile, keyFile)
-		if err != nil {
-			if _, ok := err.(*os.PathError); ok {
-				// The ServerCertificate and ServerKey are likely pem file contents
-				cert, err = tls.X509KeyPair([]byte(common.Configuration.ServerCertificate), []byte(common.Configuration.ServerKey))
+		if common.Configuration.ListeningType != common.ListeningSecureUnix {
+			if log.IsLogging(logger.INFO) {
+				log.Info("Listening on %d for HTTPS", common.Configuration.SecureListeningPort)
+			}
+		} else {
+			if log.IsLogging(logger.INFO) {
+				log.Info("Listening on %s for UNIX (securely)", listener.Addr().String())
 			}
 		}
-
-		if err == nil {
-			secureHTTPServer.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
-
-			if common.Configuration.ListeningType != common.ListeningSecureUnix {
-				if log.IsLogging(logger.INFO) {
-					log.Info("Listening on %d for HTTPS", common.Configuration.SecureListeningPort)
-				}
-			} else {
-				if log.IsLogging(logger.INFO) {
-					log.Info("Listening on %s for UNIX (securely)", listener.Addr().String())
-				}
-			}
-
-			err = secureHTTPServer.ServeTLS(listener, "", "")
-		}
+		err = secureHTTPServer.ServeTLS(listener, "", "")
 	} else {
 		if common.Configuration.ListeningType != common.ListeningUnix {
 			if log.IsLogging(logger.INFO) {
@@ -157,6 +149,33 @@ func stopHTTPServing() {
 	if len(common.Configuration.ServerCertificate) != 0 {
 		secureHTTPServer.Shutdown(context.Background())
 	}
+}
+
+func setupServerTLSConfig() error {
+	var certFile, keyFile string
+	if strings.HasPrefix(common.Configuration.ServerCertificate, "/") {
+		certFile = common.Configuration.ServerCertificate
+	} else {
+		certFile = common.Configuration.PersistenceRootPath + common.Configuration.ServerCertificate
+	}
+	if strings.HasPrefix(common.Configuration.ServerKey, "/") {
+		keyFile = common.Configuration.ServerKey
+	} else {
+		keyFile = common.Configuration.PersistenceRootPath + common.Configuration.ServerKey
+	}
+
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		if _, ok := err.(*os.PathError); ok {
+			// The ServerCertificate and ServerKey are likely pem file contents
+			cert, err = tls.X509KeyPair([]byte(common.Configuration.ServerCertificate), []byte(common.Configuration.ServerKey))
+		}
+	}
+
+	if err == nil {
+		secureHTTPServer.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
+	}
+	return err
 }
 
 func setupSwaggerServing(swaggerFile string, securely bool, ipAddress string, port uint16) {

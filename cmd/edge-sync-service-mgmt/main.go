@@ -26,6 +26,7 @@ const (
 )
 
 const (
+	codeVersionLabel     = "Code version"
 	destinationTypeLabel = "Destination type"
 	destinationIDLabel   = "Destination ID"
 	communicationsLabel  = "Communications protocol"
@@ -287,14 +288,14 @@ func showDestinations() {
 		}
 	}
 
-	fmt.Printf("%*s  |  %*s  |  %s\n", -destTypeLength, destinationTypeLabel, -destIDLength, destinationIDLabel,
-		communicationsLabel)
-	fmt.Printf("%s  |  %s  |  %s\n", strings.Repeat("-", destTypeLength), strings.Repeat("-", destIDLength),
-		strings.Repeat("-", len(communicationsLabel)))
+	fmt.Printf("%*s  |  %*s  |  %s  |  %s\n", -destTypeLength, destinationTypeLabel, -destIDLength, destinationIDLabel,
+		communicationsLabel, codeVersionLabel)
+	fmt.Printf("%s  |  %s  |  %s  |  %s\n", strings.Repeat("-", destTypeLength), strings.Repeat("-", destIDLength),
+		strings.Repeat("-", len(communicationsLabel)), strings.Repeat("-", len(codeVersionLabel)))
 
 	for _, dest := range destinations {
-		fmt.Printf("%*s  |  %*s  |  %s\n", -destTypeLength, dest.DestType, -destIDLength, dest.DestID,
-			dest.Communication)
+		fmt.Printf("%*s  |  %*s  |  %*s  |  %s\n", -destTypeLength, dest.DestType, -destIDLength, dest.DestID,
+			-len(communicationsLabel), dest.Communication, dest.CodeVersion)
 	}
 }
 

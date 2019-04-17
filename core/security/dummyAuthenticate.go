@@ -11,7 +11,7 @@ import (
 	"github.com/open-horizon/edge-utilities/logger/log"
 )
 
-const authFilename = "/sync/dummy-auth.json"
+const dummyAuthFilename = "/sync/dummy-auth.json"
 
 type authInfo struct {
 	RegularUsers []string `json:"regularUsers"`
@@ -26,7 +26,7 @@ type DummyAuthenticate struct {
 
 // Start initializes the DummyAuthenticate struct
 func (auth *DummyAuthenticate) Start() {
-	authFile, err := os.Open(common.Configuration.PersistenceRootPath + authFilename)
+	authFile, err := os.Open(common.Configuration.PersistenceRootPath + dummyAuthFilename)
 	if err != nil {
 		if log.IsLogging(logger.WARNING) {
 			log.Warning("Failed to open user file. Error: %s\n", err)

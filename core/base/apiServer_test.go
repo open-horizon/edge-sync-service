@@ -18,7 +18,12 @@ import (
 )
 
 func TestHandleDestinations(t *testing.T) {
-	if status := testAPIServerSetup(common.CSS); status != "" {
+	testHandleDestinations(common.Bolt, t)
+	testHandleDestinations(common.Mongo, t)
+}
+
+func testHandleDestinations(storageType string, t *testing.T) {
+	if status := testAPIServerSetup(common.CSS, storageType); status != "" {
 		t.Errorf(status)
 	}
 	defer communications.Store.Stop()
@@ -72,7 +77,12 @@ func TestHandleDestinations(t *testing.T) {
 }
 
 func TestHandleDestinationsInvalidCalls(t *testing.T) {
-	if status := testAPIServerSetup(common.CSS); status != "" {
+	testHandleDestinationsInvalidCalls(common.Mongo, t)
+	testHandleDestinationsInvalidCalls(common.Bolt, t)
+}
+
+func testHandleDestinationsInvalidCalls(storageType string, t *testing.T) {
+	if status := testAPIServerSetup(common.CSS, storageType); status != "" {
 		t.Errorf(status)
 	}
 	defer communications.Store.Stop()
@@ -101,7 +111,12 @@ func TestHandleDestinationsInvalidCalls(t *testing.T) {
 }
 
 func TestMisceleneousHandlers(t *testing.T) {
-	if status := testAPIServerSetup(common.ESS); status != "" {
+	testMisceleneousHandlers(common.Mongo, t)
+	testMisceleneousHandlers(common.Bolt, t)
+}
+
+func testMisceleneousHandlers(storageType string, t *testing.T) {
+	if status := testAPIServerSetup(common.ESS, storageType); status != "" {
 		t.Errorf(status)
 	}
 	defer communications.Store.Stop()
@@ -144,12 +159,14 @@ func TestMisceleneousHandlers(t *testing.T) {
 }
 
 func TestHandleObject(t *testing.T) {
-	testHandleObjectHelper(common.CSS, t)
-	testHandleObjectHelper(common.ESS, t)
+	testHandleObjectHelper(common.CSS, common.Mongo, t)
+	testHandleObjectHelper(common.CSS, common.Bolt, t)
+	testHandleObjectHelper(common.ESS, common.InMemory, t)
+	testHandleObjectHelper(common.ESS, common.Bolt, t)
 }
 
-func testHandleObjectHelper(nodeType string, t *testing.T) {
-	if status := testAPIServerSetup(nodeType); status != "" {
+func testHandleObjectHelper(nodeType string, storageType string, t *testing.T) {
+	if status := testAPIServerSetup(nodeType, storageType); status != "" {
 		t.Errorf(status)
 	}
 	defer communications.Store.Stop()
@@ -390,7 +407,12 @@ func testHandleObjectHelper(nodeType string, t *testing.T) {
 }
 
 func TestInvalidURLs(t *testing.T) {
-	if status := testAPIServerSetup(common.CSS); status != "" {
+	testInvalidURLs(common.Bolt, t)
+	testInvalidURLs(common.Mongo, t)
+}
+
+func testInvalidURLs(storageType string, t *testing.T) {
+	if status := testAPIServerSetup(common.CSS, storageType); status != "" {
 		t.Errorf(status)
 	}
 	defer communications.Store.Stop()
@@ -429,24 +451,37 @@ func TestInvalidURLs(t *testing.T) {
 	}
 }
 
-func testAPIServerSetup(nodeType string) string {
+func testAPIServerSetup(nodeType string, storageType string) string {
 	common.Running = true
 	time.Sleep(100 * time.Millisecond) // Wait a bit
 
-	if nodeType == common.CSS {
+	if storageType == "" {
+		if nodeType == common.CSS {
+			storageType = common.Mongo
+		} else {
+			storageType = common.Bolt
+		}
+	}
+	switch storageType {
+	case common.Mongo:
+		common.Configuration.MongoDbName = "d_test_db"
 		communications.Store = &storage.MongoStorage{}
-	} else {
-		//communications.Store = &storage.InMemoryStorage{}
+	case common.InMemory:
+		communications.Store = &storage.InMemoryStorage{}
+	case common.Bolt:
 		dir, _ := os.Getwd()
 		common.Configuration.PersistenceRootPath = dir + "/persist"
 		boltStore := &storage.BoltStorage{}
 		boltStore.Cleanup()
 		communications.Store = boltStore
 	}
+
 	store = communications.Store
 	if err := store.Init(); err != nil {
 		return fmt.Sprintf("Failed to initialize storage driver. Error: %s\n", err.Error())
 	}
+
+	common.InitObjectLocks()
 
 	security.SetAuthentication(&security.TestAuthenticate{})
 	security.Store = store

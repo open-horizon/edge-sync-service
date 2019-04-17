@@ -36,6 +36,20 @@ func (communication *TestComm) RegisterAck(destination common.Destination) commo
 	return nil
 }
 
+// HandleRegAck handles a registration acknowledgement message from the CSS
+func (communication *TestComm) HandleRegAck() {}
+
+// RegisterAsNew send a notification from a CSS to a ESS that the ESS has to send a registerNew message in order
+// to register
+func (communication *TestComm) RegisterAsNew(destination common.Destination) common.SyncServiceError {
+	return nil
+}
+
+// RegisterNew sends a new registration message to be sent by an ESS
+func (communication *TestComm) RegisterNew() common.SyncServiceError {
+	return nil
+}
+
 // SendPing sends a ping message from ESS to CSS
 func (communication *TestComm) SendPing() common.SyncServiceError {
 	return nil
@@ -72,12 +86,12 @@ func (communication *TestComm) DeleteOrganization(orgID string) common.SyncServi
 	return nil
 }
 
-// SendFeedbackMessage sends a feedback message from the ESS to the CSS
-func (communication *TestComm) SendFeedbackMessage(code int, retryInterval int32, reason string, metaData *common.MetaData) common.SyncServiceError {
+// SendFeedbackMessage sends a feedback message from the ESS to the CSS or from the CSS to the ESS
+func (communication *TestComm) SendFeedbackMessage(code int, retryInterval int32, reason string, metaData *common.MetaData, sendToOrigin bool) common.SyncServiceError {
 	return nil
 }
 
-// SendErrorMessage sends an error message from the ESS to the CSS
-func (communication *TestComm) SendErrorMessage(err common.SyncServiceError, metaData *common.MetaData) common.SyncServiceError {
+// SendErrorMessage sends an error message from the ESS to the CSS or from the CSS to the ESS
+func (communication *TestComm) SendErrorMessage(err common.SyncServiceError, metaData *common.MetaData, sendToOrigin bool) common.SyncServiceError {
 	return nil
 }

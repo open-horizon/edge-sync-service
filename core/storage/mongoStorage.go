@@ -238,7 +238,7 @@ func (store *MongoStorage) PerformMaintenance() {
 }
 
 // GetObjectsToActivate returns inactive objects that are ready to be activated
-func (store *MongoStorage) GetObjectsToActivate() ([]common.MetaData, []string, common.SyncServiceError) {
+func (store *MongoStorage) GetObjectsToActivate() ([]common.MetaData, common.SyncServiceError) {
 	currentTime := time.Now().Format(time.RFC3339)
 	query := bson.M{"$or": []bson.M{
 		bson.M{"status": common.NotReadyToSend},
@@ -247,19 +247,17 @@ func (store *MongoStorage) GetObjectsToActivate() ([]common.MetaData, []string, 
 		"$and": []bson.M{
 			bson.M{"metadata.activation-time": bson.M{"$ne": ""}},
 			bson.M{"metadata.activation-time": bson.M{"$lte": currentTime}}}}
-	selector := bson.M{"metadata": bson.ElementDocument, "status": bson.ElementString}
+	selector := bson.M{"metadata": bson.ElementDocument}
 	result := []object{}
 	if err := store.fetchAll(objects, query, selector, &result); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	metaDatas := make([]common.MetaData, len(result))
-	statuses := make([]string, len(result))
 	for i, r := range result {
 		metaDatas[i] = r.MetaData
-		statuses[i] = r.Status
 	}
-	return metaDatas, statuses, nil
+	return metaDatas, nil
 }
 
 // StoreObject stores an object
@@ -280,10 +278,22 @@ func (store *MongoStorage) StoreObject(metaData common.MetaData, data []byte, st
 		metaData.InstanceID = time.Now().UnixNano()
 
 		var err error
-		dests, err = store.createDestinations(metaData)
+		dests, err = createDestinations(store, metaData)
 		if err != nil {
 			return err
 		}
+	}
+
+	if metaData.MetaOnly {
+		if err := store.update(objects, bson.M{"_id": id},
+			bson.M{
+				"$set": bson.M{"metadata": metaData, "status": status, "destinations": dests,
+					"remaining-consumers": metaData.ExpectedConsumers, "remaining-receivers": metaData.ExpectedConsumers},
+				"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}}},
+		); err != nil {
+			return &Error{fmt.Sprintf("Failed to update object. Error: %s.", err)}
+		}
+		return nil
 	}
 
 	newObject := object{ID: id, MetaData: metaData, Status: status, RemainingConsumers: metaData.ExpectedConsumers,
@@ -437,7 +447,7 @@ func (store *MongoStorage) RetrieveObjectStatus(orgID string, objectType string,
 }
 
 // RetrieveObjectRemainingConsumers finds the object and returns the number remaining consumers that
-// haven't consumed the object yet (ESS only)
+// haven't consumed the object yet
 func (store *MongoStorage) RetrieveObjectRemainingConsumers(orgID string, objectType string, objectID string) (int, common.SyncServiceError) {
 	result := object{}
 	id := createObjectCollectionID(orgID, objectType, objectID)
@@ -683,6 +693,9 @@ func (store *MongoStorage) ReadObjectData(orgID string, objectType string, objec
 	id := createObjectCollectionID(orgID, objectType, objectID)
 	fileHandle, err := store.openFile(id)
 	if err != nil {
+		if err == mgo.ErrNotFound {
+			return nil, true, 0, &common.NotFound{}
+		}
 		return nil, true, 0, &Error{fmt.Sprintf("Failed to open file to read the data. Error: %s.", err)}
 	}
 
@@ -892,22 +905,7 @@ func (store *MongoStorage) ActivateObject(orgID string, objectType string, objec
 
 // DeleteStoredObject deletes the object
 func (store *MongoStorage) DeleteStoredObject(orgID string, objectType string, objectID string) common.SyncServiceError {
-	id := createObjectCollectionID(orgID, objectType, objectID)
-	if trace.IsLogging(logger.TRACE) {
-		trace.Trace("Deleting object %s\n", id)
-	}
-	if err := store.removeFile(id); err != nil {
-		if log.IsLogging(logger.ERROR) {
-			log.Error("Error in deleteStoredObject: failed to delete data file. Error: %s\n", err)
-		}
-	}
-	if err := store.removeAll(objects, bson.M{"_id": id}); err != nil {
-		if err == mgo.ErrNotFound {
-			return nil
-		}
-		return &Error{fmt.Sprintf("Failed to delete object. Error: %s.", err)}
-	}
-	return nil
+	return store.deleteObject(orgID, objectType, objectID, -1)
 }
 
 // DeleteStoredData deletes the object's data
@@ -922,6 +920,13 @@ func (store *MongoStorage) DeleteStoredData(orgID string, objectType string, obj
 		}
 		return err
 	}
+	return nil
+}
+
+// CleanObjects removes the objects received from the other side.
+// For persistant storage only partially recieved objects are removed.
+func (store *MongoStorage) CleanObjects() common.SyncServiceError {
+	// ESS only function
 	return nil
 }
 
@@ -1233,6 +1238,9 @@ func (store *MongoStorage) RetrieveNotificationRecord(orgID string, objectType s
 	id := createNotificationCollectionID(orgID, objectType, objectID, destType, destID)
 	result := notificationObject{}
 	if err := store.fetchOne(notifications, bson.M{"_id": id}, nil, &result); err != nil {
+		if err == mgo.ErrNotFound {
+			return nil, nil
+		}
 		return nil, &Error{fmt.Sprintf("Failed to fetch the notification. Error: %s.", err)}
 	}
 	return &result.Notification, nil
@@ -1277,7 +1285,7 @@ func (store *MongoStorage) RetrieveNotifications(orgID string, destType string, 
 					bson.M{"notification.status": common.Update},
 					bson.M{"notification.status": common.Received},
 					bson.M{"notification.status": common.Consumed},
-					bson.M{"notification.status": common.Data},
+					bson.M{"notification.status": common.Getdata},
 					bson.M{"notification.status": common.Delete},
 					bson.M{"notification.status": common.Deleted}}}}}
 	} else {
@@ -1604,4 +1612,9 @@ func (store *MongoStorage) RetrieveACL(aclType string, orgID string, key string)
 // RetrieveACLsInOrg retrieves the list of ACLs in an organization
 func (store *MongoStorage) RetrieveACLsInOrg(aclType string, orgID string) ([]string, common.SyncServiceError) {
 	return store.retrieveACLsInOrgHelper(acls, aclType, orgID)
+}
+
+// IsPersistent returns true if the storage is persistent, and false otherwise
+func (store *MongoStorage) IsPersistent() bool {
+	return true
 }

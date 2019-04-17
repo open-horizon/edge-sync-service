@@ -174,7 +174,7 @@ func handleDestinations(writer http.ResponseWriter, request *http.Request) {
 		//     description: Failed to retrieve the destinations
 		//     schema:
 		//       type: string
-		if dests, err := listDestinations(orgID); err != nil {
+		if dests, err := ListDestinations(orgID); err != nil {
 			communications.SendErrorResponse(writer, err, "Failed to fetch the list of destinations. Error: ", 0)
 		} else {
 			if len(dests) == 0 {
@@ -235,7 +235,7 @@ func handleDestinations(writer http.ResponseWriter, request *http.Request) {
 		//     description: Failed to retrieve the objects
 		//     schema:
 		//       type: string
-		if objects, err := getObjectsForDestination(orgID, parts[0], parts[1]); err != nil {
+		if objects, err := GetObjectsForDestination(orgID, parts[0], parts[1]); err != nil {
 			communications.SendErrorResponse(writer, err, "Failed to fetch the objects. Error: ", 0)
 		} else {
 			if len(objects) == 0 {
@@ -293,7 +293,7 @@ func handleResend(writer http.ResponseWriter, request *http.Request) {
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleResend\n")
 		}
-		if err := resendObjects(); err != nil {
+		if err := ResendObjects(); err != nil {
 			communications.SendErrorResponse(writer, err, "Failed to send resend objects request. Error: ", 0)
 		} else {
 			writer.WriteHeader(http.StatusNoContent)
@@ -471,7 +471,7 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 			writer.Write(unauthorizedBytes)
 			return
 		}
-		if metaData, err := getObject(orgID, objectType, objectID); err != nil {
+		if metaData, err := GetObject(orgID, objectType, objectID); err != nil {
 			communications.SendErrorResponse(writer, err, "", 0)
 		} else {
 			if metaData == nil {
@@ -534,7 +534,7 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 			writer.Write(unauthorizedBytes)
 			return
 		}
-		if err := deleteObject(orgID, objectType, objectID); err != nil {
+		if err := DeleteObject(orgID, objectType, objectID); err != nil {
 			communications.SendErrorResponse(writer, err, "Failed to delete the object. Error: ", 0)
 		} else {
 			writer.WriteHeader(http.StatusNoContent)
@@ -626,7 +626,7 @@ func handleObjectConsumed(orgID string, objectType string, objectID string, writ
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleObjects. Consumed %s %s\n", objectType, objectID)
 		}
-		if err := objectConsumed(orgID, objectType, objectID); err != nil {
+		if err := ObjectConsumed(orgID, objectType, objectID); err != nil {
 			communications.SendErrorResponse(writer, err, "Failed to mark the object as consumed. Error: ", 0)
 		} else {
 			writer.WriteHeader(http.StatusNoContent)
@@ -679,7 +679,7 @@ func handleObjectDeleted(orgID string, objectType string, objectID string, write
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleObjects. Deleted %s %s\n", objectType, objectID)
 		}
-		if err := objectDeleted(orgID, objectType, objectID); err != nil {
+		if err := ObjectDeleted(orgID, objectType, objectID); err != nil {
 			communications.SendErrorResponse(writer, err, "Failed to confirm object's deletion. Error: ", 0)
 		} else {
 			writer.WriteHeader(http.StatusNoContent)
@@ -732,7 +732,7 @@ func handleObjectReceived(orgID string, objectType string, objectID string, writ
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleObjects. Received %s %s\n", objectType, objectID)
 		}
-		if err := objectReceived(orgID, objectType, objectID); err != nil {
+		if err := ObjectReceived(orgID, objectType, objectID); err != nil {
 			communications.SendErrorResponse(writer, err, "Failed to mark the object as received. Error: ", 0)
 		} else {
 			writer.WriteHeader(http.StatusNoContent)
@@ -786,7 +786,7 @@ func handleActivateObject(orgID string, objectType string, objectID string, writ
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleObjects. Activate %s %s\n", objectType, objectID)
 		}
-		if err := activateObject(orgID, objectType, objectID); err != nil {
+		if err := ActivateObject(orgID, objectType, objectID); err != nil {
 			communications.SendErrorResponse(writer, err, "Failed to mark the object as active. Error: ", 0)
 		} else {
 			writer.WriteHeader(http.StatusNoContent)
@@ -846,7 +846,7 @@ func handleObjectStatus(orgID string, objectType string, objectID string, writer
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleObjects. Get status of %s %s\n", objectType, objectID)
 		}
-		if status, err := getObjectStatus(orgID, objectType, objectID); err != nil {
+		if status, err := GetObjectStatus(orgID, objectType, objectID); err != nil {
 			communications.SendErrorResponse(writer, err, "", 0)
 		} else {
 			if status == "" {
@@ -908,7 +908,7 @@ func handleObjectDestinations(orgID string, objectType string, objectID string, 
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleObjects. Get destinations of %s %s\n", objectType, objectID)
 		}
-		if dests, err := getObjectDestinationsStatus(orgID, objectType, objectID); err != nil {
+		if dests, err := GetObjectDestinationsStatus(orgID, objectType, objectID); err != nil {
 			communications.SendErrorResponse(writer, err, "", 0)
 		} else {
 			if dests == nil {
@@ -972,7 +972,7 @@ func handleObjectGetData(orgID string, objectType string, objectID string, write
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In handleObjects. Get data %s %s\n", objectType, objectID)
 	}
-	if dataReader, err := getObjectData(orgID, objectType, objectID); err != nil {
+	if dataReader, err := GetObjectData(orgID, objectType, objectID); err != nil {
 		communications.SendErrorResponse(writer, err, "", 0)
 	} else {
 		if dataReader == nil {
@@ -1046,7 +1046,7 @@ func handleObjectPutData(orgID string, objectType string, objectID string, write
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In handleObjects. Update data %s %s\n", objectType, objectID)
 	}
-	if found, err := putObjectData(orgID, objectType, objectID, request.Body); err == nil {
+	if found, err := PutObjectData(orgID, objectType, objectID, request.Body); err == nil {
 		if !found {
 			writer.WriteHeader(http.StatusNotFound)
 		} else {
@@ -1113,7 +1113,7 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 		writer.Write(unauthorizedBytes)
 		return
 	}
-	if metaData, err := listUpdatedObjects(orgID, objectType, received); err != nil {
+	if metaData, err := ListUpdatedObjects(orgID, objectType, received); err != nil {
 		communications.SendErrorResponse(writer, err, "Failed to fetch the list of updates. Error: ", 0)
 	} else {
 		if len(metaData) == 0 {
@@ -1191,12 +1191,12 @@ func handleWebhook(orgID string, objectType string, writer http.ResponseWriter, 
 			if trace.IsLogging(logger.DEBUG) {
 				trace.Debug("In handleObjects. Delete webhook %s\n", objectType)
 			}
-			hookErr = deleteWebhook(orgID, objectType, payload.URL)
+			hookErr = DeleteWebhook(orgID, objectType, payload.URL)
 		} else if strings.EqualFold(payload.Action, "register") {
 			if trace.IsLogging(logger.DEBUG) {
 				trace.Debug("In handleObjects. Register webhook %s\n", objectType)
 			}
-			hookErr = registerWebhook(orgID, objectType, payload.URL)
+			hookErr = RegisterWebhook(orgID, objectType, payload.URL)
 		}
 		if hookErr == nil {
 			writer.WriteHeader(http.StatusNoContent)
@@ -1264,7 +1264,7 @@ func handleUpdateObject(orgID string, objectType string, objectID string, writer
 			writer.Write(unauthorizedBytes)
 			return
 		}
-		if err := updateObject(orgID, objectType, objectID, payload.Meta, payload.Data); err == nil {
+		if err := UpdateObject(orgID, objectType, objectID, payload.Meta, payload.Data); err == nil {
 			writer.WriteHeader(http.StatusNoContent)
 		} else {
 			communications.SendErrorResponse(writer, err, "", 0)
@@ -1569,7 +1569,7 @@ func handleSecurity(writer http.ResponseWriter, request *http.Request) {
 //       type: string
 func handleACLDelete(aclType string, orgID string, parts []string, writer http.ResponseWriter) {
 	usernames := append(make([]string, 0), parts[1])
-	if err := removeUsersFromACL(aclType, orgID, parts[0], usernames); err == nil {
+	if err := RemoveUsersFromACL(aclType, orgID, parts[0], usernames); err == nil {
 		writer.WriteHeader(http.StatusNoContent)
 	} else {
 		communications.SendErrorResponse(writer, err, "", 0)
@@ -1627,7 +1627,7 @@ func handleACLGet(aclType string, orgID string, parts []string, writer http.Resp
 		//     schema:
 		//       type: string
 
-		results, err = retrieveACL(aclType, orgID, parts[0])
+		results, err = RetrieveACL(aclType, orgID, parts[0])
 		requestType = "usernames"
 	} else {
 		// Get all ACLs
@@ -1671,7 +1671,7 @@ func handleACLGet(aclType string, orgID string, parts []string, writer http.Resp
 		//       type: string
 
 		requestType = "ACLs"
-		results, err = retrieveACLsInOrg(aclType, orgID)
+		results, err = RetrieveACLsInOrg(aclType, orgID)
 	}
 
 	if err != nil {
@@ -1740,7 +1740,7 @@ func handleACLUpdate(request *http.Request, aclType string, orgID string, parts 
 		//     schema:
 		//       type: string
 		usernames := append(make([]string, 0), parts[1])
-		if err := addUsersToACL(aclType, orgID, parts[0], usernames); err == nil {
+		if err := AddUsersToACL(aclType, orgID, parts[0], usernames); err == nil {
 			writer.WriteHeader(http.StatusNoContent)
 		} else {
 			communications.SendErrorResponse(writer, err, "", 0)
@@ -1802,12 +1802,12 @@ func handleACLUpdate(request *http.Request, aclType string, orgID string, parts 
 				if trace.IsLogging(logger.DEBUG) {
 					trace.Debug("In handleSecurity. Bulk remove usernames %s\n", parts[0])
 				}
-				updateErr = removeUsersFromACL(aclType, orgID, parts[0], payload.Usernames)
+				updateErr = RemoveUsersFromACL(aclType, orgID, parts[0], payload.Usernames)
 			} else if strings.EqualFold(payload.Action, "add") {
 				if trace.IsLogging(logger.DEBUG) {
 					trace.Debug("In handleSecurity. Bulk add usernames %s\n", parts[0])
 				}
-				updateErr = addUsersToACL(aclType, orgID, parts[0], payload.Usernames)
+				updateErr = AddUsersToACL(aclType, orgID, parts[0], payload.Usernames)
 			} else {
 				communications.SendErrorResponse(writer, nil, fmt.Sprintf("Invalid action (%s) in payload.", payload.Action), http.StatusBadRequest)
 			}

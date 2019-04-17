@@ -28,7 +28,7 @@ const (
 )
 
 func setupCertificates() error {
-	if common.Configuration.NodeType == common.ESS {
+	if common.Configuration.NodeType == common.ESS && common.ServingAPIs {
 		_, err := tls.X509KeyPair([]byte(common.Configuration.ServerCertificate), []byte(common.Configuration.ServerKey))
 		if err == nil {
 			// common.Configuration.ServerCertificate) and common.Configuration.ServerKey are pem format strings

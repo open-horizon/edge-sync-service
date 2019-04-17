@@ -23,6 +23,7 @@ import (
 )
 
 const registerURL = "/spi/v1/register/"
+const registerNewURL = "/spi/v1/register-new/"
 const pingURL = "/spi/v1/ping/"
 const objectRequestURL = "/spi/v1/objects/"
 
@@ -51,6 +52,7 @@ type feedbackMessage struct {
 func (communication *HTTP) StartCommunication() common.SyncServiceError {
 	if common.Configuration.NodeType == common.CSS {
 		http.Handle(registerURL, http.StripPrefix(registerURL, http.HandlerFunc(communication.handleRegister)))
+		http.Handle(registerNewURL, http.StripPrefix(registerNewURL, http.HandlerFunc(communication.handleRegisterNew)))
 		http.Handle(pingURL, http.StripPrefix(pingURL, http.HandlerFunc(communication.handlePing)))
 		http.Handle(objectRequestURL, http.StripPrefix(objectRequestURL, http.HandlerFunc(communication.handleObjects)))
 	} else {
@@ -127,11 +129,11 @@ func (communication *HTTP) StopCommunication() common.SyncServiceError {
 	return nil
 }
 
-func (communication *HTTP) handleRegAck() {
+// HandleRegAck handles a registration acknowledgement message from the CSS
+func (communication *HTTP) HandleRegAck() {
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Received regack")
 	}
-	common.Registered = true
 	communication.httpPollStopChannel = make(chan int, 1)
 	communication.startPolling()
 }
@@ -149,20 +151,17 @@ func (communication *HTTP) createError(response *http.Response, action string) c
 }
 
 func (communication *HTTP) handleGetUpdates(writer http.ResponseWriter, request *http.Request) {
-	code, orgID, user := security.Authenticate(request)
-	if code != security.AuthEdgeNode {
+	ok, orgID, destType, destID := security.ValidateSPIRequestIdentity(request)
+	if !ok {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
 		return
 	}
 
-	parts := strings.Split(user, "/")
-	if len(parts) != 2 {
-		writer.WriteHeader(http.StatusBadRequest)
+	if ok := destinationExists(orgID, destType, destID); !ok {
+		writer.WriteHeader(http.StatusFailedDependency)
 		return
 	}
-	destType := parts[0]
-	destID := parts[1]
 
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In handleGetUpdates. orgID: %s destType: %s destID: %s\n", orgID, destType, destID)
@@ -244,6 +243,9 @@ func (communication *HTTP) SendNotificationMessage(notificationTopic string, des
 			return nil
 		}
 		// Create pending notification to be sent as a response to a GET request
+		lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+		common.ObjectLocks.Lock(lockIndex)
+		defer common.ObjectLocks.Unlock(lockIndex)
 		notification := common.Notification{ObjectID: metaData.ObjectID, ObjectType: metaData.ObjectType,
 			DestOrgID: metaData.DestOrgID, DestID: destID, DestType: destType, Status: status, InstanceID: instanceID}
 		return Store.UpdateNotificationRecord(notification)
@@ -267,8 +269,7 @@ func (communication *HTTP) SendNotificationMessage(notificationTopic string, des
 	} else {
 		request, err = http.NewRequest("PUT", url, nil)
 	}
-	username, password := security.KeyandSecretForURL(url)
-	request.SetBasicAuth(username, password)
+	security.AddIdentityToSPIRequest(request, url)
 
 	response, err := communication.httpClient.Do(request)
 	if err != nil {
@@ -301,6 +302,21 @@ func (communication *HTTP) SendNotificationMessage(notificationTopic string, des
 			return handleAckObjectReceived(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID)
 		}
 		return nil
+	} else if response.StatusCode == http.StatusConflict {
+		if trace.IsLogging(logger.TRACE) {
+			trace.Trace("A notification of type %s was ignored by the other side (object %s:%s, instance id = %d)\n", notificationTopic,
+				metaData.ObjectType, metaData.ObjectID, instanceID)
+		}
+		// We don't resend ignored notifications
+		switch notificationTopic {
+		case common.Deleted:
+			return handleAckObjectDeleted(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID)
+		case common.Consumed:
+			return handleAckConsumed(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID)
+		case common.Received:
+			return handleAckObjectReceived(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID)
+		}
+		return nil
 	}
 
 	return communication.createError(response, "send notification "+notificationTopic)
@@ -312,21 +328,17 @@ func (communication *HTTP) handleRegisterOrPing(url string, writer http.Response
 		return
 	}
 
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("Handling %s", url)
+	}
+
 	if request.Method == http.MethodPut {
-		code, orgID, user := security.Authenticate(request)
-		if code != security.AuthEdgeNode {
+		ok, orgID, destType, destID := security.ValidateSPIRequestIdentity(request)
+		if !ok {
 			writer.WriteHeader(http.StatusForbidden)
 			writer.Write(unauthorizedBytes)
 			return
 		}
-
-		parts := strings.Split(user, "/")
-		if len(parts) != 2 {
-			writer.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		destType := parts[0]
-		destID := parts[1]
 
 		persistentStorageString := request.URL.Query().Get("persistent-storage")
 		persistentStorage := false
@@ -339,14 +351,21 @@ func (communication *HTTP) handleRegisterOrPing(url string, writer http.Response
 			}
 		}
 		var err error
-		destination := common.Destination{DestOrgID: orgID, DestType: destType, DestID: destID, Communication: common.HTTPProtocol}
-		if url == registerURL {
+		destination := common.Destination{DestOrgID: orgID, DestType: destType, DestID: destID, Communication: common.HTTPProtocol,
+			// The version is 1.0 as the URL is /spi/v1/register...
+			CodeVersion: "1.0"}
+		switch url {
+		case registerURL:
 			err = handleRegistration(destination, persistentStorage)
-		} else {
-			_, err = handlePing(destination, persistentStorage)
+		case registerNewURL:
+			err = handleRegisterNew(destination, persistentStorage)
+		case pingURL:
+			err = handlePing(destination)
 		}
 		if err == nil {
 			writer.WriteHeader(http.StatusNoContent)
+		} else if isIgnoredByHandler(err) {
+			writer.WriteHeader(http.StatusNotFound)
 		} else {
 			if log.IsLogging(logger.ERROR) {
 				log.Error(err.Error())
@@ -362,6 +381,10 @@ func (communication *HTTP) handleRegister(writer http.ResponseWriter, request *h
 	communication.handleRegisterOrPing(registerURL, writer, request)
 }
 
+func (communication *HTTP) handleRegisterNew(writer http.ResponseWriter, request *http.Request) {
+	communication.handleRegisterOrPing(registerNewURL, writer, request)
+}
+
 func (communication *HTTP) handlePing(writer http.ResponseWriter, request *http.Request) {
 	communication.handleRegisterOrPing(pingURL, writer, request)
 }
@@ -374,22 +397,28 @@ func (communication *HTTP) registerOrPing(url string) common.SyncServiceError {
 	requestURL := buildRegisterOrPingURL(url, common.Configuration.OrgID, common.Configuration.DestinationType, common.Configuration.DestinationID)
 	request, err := http.NewRequest("PUT", requestURL, nil)
 	q := request.URL.Query() // Get a copy of the query values.
-	q.Add("persistent-storage", strconv.FormatBool(common.Configuration.ESSPersistentStorage))
+	q.Add("persistent-storage", strconv.FormatBool(Store.IsPersistent()))
 	request.URL.RawQuery = q.Encode() // Encode and assign back to the original query.
-	username, password := security.KeyandSecretForURL(requestURL)
-	request.SetBasicAuth(username, password)
+
+	security.AddIdentityToSPIRequest(request, requestURL)
 
 	response, err := communication.httpClient.Do(request)
 	if err != nil {
 		return &Error{"Failed to send HTTP request to register/ping. Error: " + err.Error()}
 	}
 	defer response.Body.Close()
+
 	if response.StatusCode == http.StatusNoContent {
-		if url == registerURL {
-			communication.handleRegAck()
+		if url == registerURL || url == registerNewURL {
+			handleRegAck()
 		}
 		return nil
 	}
+	if response.StatusCode == http.StatusNotFound {
+		handleRegisterAsNew()
+		return nil
+	}
+
 	if log.IsLogging(logger.ERROR) {
 		log.Error("Failed to register/ping, received HTTP code %d %s", response.StatusCode, response.Status)
 	}
@@ -406,12 +435,23 @@ func (communication *HTTP) RegisterAck(destination common.Destination) common.Sy
 	return nil
 }
 
+// RegisterAsNew send a notification from a CSS to a ESS that the ESS has to send a registerNew message in order
+// to register
+func (communication *HTTP) RegisterAsNew(destination common.Destination) common.SyncServiceError {
+	return nil
+}
+
+// RegisterNew sends a new registration message to be sent by an ESS
+func (communication *HTTP) RegisterNew() common.SyncServiceError {
+	return communication.registerOrPing(registerNewURL)
+}
+
 // SendPing sends a ping message from ESS to CSS
 func (communication *HTTP) SendPing() common.SyncServiceError {
 	return communication.registerOrPing(pingURL)
 }
 
-// GetData requests data to be sent from the CSS to the ESS or from the ESS to the CSS
+// GetData requests data to be sent from the CSS to the ESS
 func (communication *HTTP) GetData(metaData common.MetaData, offset int64) common.SyncServiceError {
 	if common.Configuration.NodeType != common.ESS {
 		return nil
@@ -426,35 +466,51 @@ func (communication *HTTP) GetData(metaData common.MetaData, offset int64) commo
 	if err != nil {
 		return &Error{"Failed to create data request. Error: " + err.Error()}
 	}
-	username, password := security.KeyandSecretForURL(url)
-	request.SetBasicAuth(username, password)
+	security.AddIdentityToSPIRequest(request, url)
 
 	response, err := communication.httpClient.Do(request)
 	if err != nil {
 		return &Error{"Error in GetData: failed to get data. Error: " + err.Error()}
 	}
 	defer response.Body.Close()
+	if response.StatusCode == http.StatusNotFound {
+		return &common.NotFound{}
+	}
 	if response.StatusCode != http.StatusOK {
 		return &notificationHandlerError{"Error in GetData: failed to receive data from the other side"}
 	}
+
+	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+	common.ObjectLocks.Lock(lockIndex)
+
 	if metaData.DestinationDataURI != "" {
 		if _, err := dataURI.StoreData(metaData.DestinationDataURI, response.Body, 0); err != nil {
-			return &notificationHandlerError{fmt.Sprintf("Error in GetData: failed to store data in data URI. Error: %s", err)}
+			common.ObjectLocks.Unlock(lockIndex)
+			return err
 		}
 	} else {
 		found, err := Store.StoreObjectData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, response.Body)
 		if err != nil {
-			return &Error{"Failed to store object's data. Error: " + err.Error()}
+			common.ObjectLocks.Unlock(lockIndex)
+			return err
 		} else if !found {
+			common.ObjectLocks.Unlock(lockIndex)
 			return &Error{"Failed to store object's data."}
 		}
 	}
 	if err := Store.UpdateObjectStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, common.CompletelyReceived); err != nil {
+		common.ObjectLocks.Unlock(lockIndex)
 		return &Error{fmt.Sprintf("Error in GetData: %s\n", err)}
 	}
 
 	handleDataReceived(metaData)
-	if err := SendObjectStatus(metaData, common.Received); err != nil {
+
+	notificationsInfo, err := PrepareObjectStatusNotification(metaData, common.Received)
+	common.ObjectLocks.Unlock(lockIndex)
+	if err != nil {
+		return err
+	}
+	if err := SendNotifications(notificationsInfo); err != nil {
 		return err
 	}
 
@@ -481,8 +537,7 @@ func (communication *HTTP) Poll() bool {
 		}
 		return false
 	}
-	username, password := security.KeyandSecretForURL(urlString)
-	request.SetBasicAuth(username, password)
+	security.AddIdentityToSPIRequest(request, urlString)
 
 	response, err := communication.httpClient.Do(request)
 	if err != nil {
@@ -521,18 +576,21 @@ func (communication *HTTP) Poll() bool {
 	for _, message := range payload {
 		switch message.Type {
 		case common.Update:
-			if err = handleUpdate(message.MetaData, 1); err != nil {
+			if err = handleUpdate(message.MetaData, 1); err != nil && !isIgnoredByHandler(err) {
 				if log.IsLogging(logger.ERROR) {
 					log.Error("Failed to handle update. Error: %s\n", err)
 				}
-				if err = communication.SendErrorMessage(err, &message.MetaData); err != nil && log.IsLogging(logger.ERROR) {
+				if common.IsNotFound(err) {
+					deleteObjectInfo("", "", "", message.MetaData.OriginType, message.MetaData.OriginID,
+						&message.MetaData, true)
+				} else if err = communication.SendErrorMessage(err, &message.MetaData, true); err != nil && log.IsLogging(logger.ERROR) {
 					log.Error("Failed to send error message. Error: %s\n", err)
 				}
 			}
 		case common.Consumed:
 			err = handleObjectConsumed(message.MetaData.DestOrgID, message.MetaData.ObjectType,
 				message.MetaData.ObjectID, message.MetaData.DestType, message.MetaData.DestID, message.MetaData.InstanceID)
-			if err != nil && log.IsLogging(logger.ERROR) {
+			if err != nil && !isIgnoredByHandler(err) && log.IsLogging(logger.ERROR) {
 				log.Error("Failed to handle object consumed. Error: %s\n", err)
 			}
 		case common.Delete:
@@ -540,13 +598,13 @@ func (communication *HTTP) Poll() bool {
 				log.Error("Failed to handle object delete. Error: %s\n", err)
 			}
 		case common.Deleted:
-			if err = handleObjectDeleted(message.MetaData); err != nil && log.IsLogging(logger.ERROR) {
+			if err = handleObjectDeleted(message.MetaData); err != nil && !isIgnoredByHandler(err) && log.IsLogging(logger.ERROR) {
 				log.Error("Failed to handle object deleted. Error: %s\n", err)
 			}
 		case common.Received:
 			err = handleObjectReceived(message.MetaData.DestOrgID, message.MetaData.ObjectType,
 				message.MetaData.ObjectID, message.MetaData.DestType, message.MetaData.DestID, message.MetaData.InstanceID)
-			if err != nil && log.IsLogging(logger.ERROR) {
+			if err != nil && !isIgnoredByHandler(err) && log.IsLogging(logger.ERROR) {
 				log.Error("Failed to handle object received. Error: %s\n", err)
 			}
 		default:
@@ -571,27 +629,19 @@ func (communication *HTTP) extract(writer http.ResponseWriter, request *http.Req
 	var err error
 	ok = false
 
-	code, orgID, user := security.Authenticate(request)
-	if code != security.AuthEdgeNode {
+	authenticated, orgID, destType, destID := security.ValidateSPIRequestIdentity(request)
+	if !authenticated {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
 		return
 	}
-
-	parts := strings.Split(user, "/")
-	if len(parts) != 2 {
-		writer.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	destType = parts[0]
-	destID = parts[1]
 
 	if len(request.URL.Path) == 0 {
 		writer.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	parts = strings.Split(request.URL.Path, "/")
+	parts := strings.Split(request.URL.Path, "/")
 	index := len(parts) - 1
 	if len(parts) == 2 {
 		orgID = parts[0]
@@ -631,11 +681,16 @@ func (communication *HTTP) handleObjects(writer http.ResponseWriter, request *ht
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleObjects: PUT request: %s", action)
 		}
-		if (action != common.Update && action != common.Data && action != common.Delete && action != common.Deleted) &&
-			(destType == "" || destID == "") {
+		if destType == "" || destID == "" {
 			writer.WriteHeader(http.StatusBadRequest)
 			return
 		}
+
+		if ok := destinationExists(orgID, destType, destID); !ok {
+			writer.WriteHeader(http.StatusFailedDependency)
+			return
+		}
+
 		var err error
 		switch action {
 		case common.Data:
@@ -692,7 +747,7 @@ func (communication *HTTP) handleObjects(writer http.ResponseWriter, request *ht
 		if err == nil {
 			writer.WriteHeader(http.StatusNoContent)
 		} else {
-			if log.IsLogging(logger.ERROR) {
+			if log.IsLogging(logger.ERROR) && !isIgnoredByHandler(err) {
 				log.Error(err.Error())
 			}
 			SendErrorResponse(writer, err, "", 0)
@@ -718,27 +773,46 @@ func (communication *HTTP) handleObjects(writer http.ResponseWriter, request *ht
 
 func (communication *HTTP) handlePutData(orgID string, objectType string, objectID string,
 	request *http.Request) common.SyncServiceError {
+	lockIndex := common.HashStrings(orgID, objectType, objectID)
+	common.ObjectLocks.Lock(lockIndex)
+
 	if found, err := Store.StoreObjectData(orgID, objectType, objectID, request.Body); err != nil {
+		common.ObjectLocks.Unlock(lockIndex)
 		return err
 	} else if !found {
+		common.ObjectLocks.Unlock(lockIndex)
 		return &common.InvalidRequest{Message: "Failed to find object to set data"}
 	}
 	if err := Store.UpdateObjectStatus(orgID, objectType, objectID, common.CompletelyReceived); err != nil {
+		common.ObjectLocks.Unlock(lockIndex)
 		return err
 	}
 
 	if metaData, err := Store.RetrieveObject(orgID, objectType, objectID); err == nil && metaData != nil {
 		handleDataReceived(*metaData)
-		if err := SendObjectStatus(*metaData, common.Received); err != nil {
+		notificationsInfo, err := PrepareObjectStatusNotification(*metaData, common.Received)
+		common.ObjectLocks.Unlock(lockIndex)
+		if err != nil {
 			return err
 		}
+		if err := SendNotifications(notificationsInfo); err != nil {
+			return err
+		}
+
 		callWebhooks(metaData)
+	} else {
+		common.ObjectLocks.Unlock(lockIndex)
+		return &common.InvalidRequest{Message: "Failed to find object to set data"}
 	}
 	return nil
 }
 
 func (communication *HTTP) handleGetData(orgID string, objectType string, objectID string,
 	destType string, destID string, instanceID int64, writer http.ResponseWriter, request *http.Request) {
+	lockIndex := common.HashStrings(orgID, objectType, objectID)
+	common.ObjectLocks.Lock(lockIndex)
+	defer common.ObjectLocks.Unlock(lockIndex)
+
 	if dataReader, err := Store.RetrieveObjectData(orgID, objectType, objectID); err != nil {
 		SendErrorResponse(writer, err, "", 0)
 	} else {
@@ -761,6 +835,10 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 }
 
 func (communication *HTTP) pushData(metaData *common.MetaData) common.SyncServiceError {
+	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+	common.ObjectLocks.RLock(lockIndex)
+	defer common.ObjectLocks.RUnlock(lockIndex)
+
 	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, common.Data)
 
 	var dataReader io.Reader
@@ -771,7 +849,7 @@ func (communication *HTTP) pushData(metaData *common.MetaData) common.SyncServic
 		dataReader, err = Store.RetrieveObjectData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 	}
 	if err != nil {
-		return &Error{"Failed to push data. Error: " + err.Error()}
+		return err
 	}
 	defer Store.CloseDataReader(dataReader)
 
@@ -779,8 +857,7 @@ func (communication *HTTP) pushData(metaData *common.MetaData) common.SyncServic
 	if err != nil {
 		return &Error{"Failed to read data. Error: " + err.Error()}
 	}
-	username, password := security.KeyandSecretForURL(url)
-	request.SetBasicAuth(username, password)
+	security.AddIdentityToSPIRequest(request, url)
 
 	response, err := communication.httpClient.Do(request)
 	if err != nil {
@@ -803,8 +880,7 @@ func (communication *HTTP) ResendObjects() common.SyncServiceError {
 
 	url := buildResendURL(common.Configuration.OrgID)
 	request, err := http.NewRequest("PUT", url, nil)
-	username, password := security.KeyandSecretForURL(url)
-	request.SetBasicAuth(username, password)
+	security.AddIdentityToSPIRequest(request, url)
 
 	response, err := communication.httpClient.Do(request)
 	if err != nil {
@@ -848,23 +924,16 @@ func (communication *HTTP) DeleteOrganization(orgID string) common.SyncServiceEr
 	return nil
 }
 
-// SendFeedbackMessage sends a feedback message from the ESS to the CSS
-func (communication *HTTP) SendFeedbackMessage(code int, retryInterval int32, reason string, metaData *common.MetaData) common.SyncServiceError {
+// SendFeedbackMessage sends a feedback message from the ESS to the CSS or from the CSS to the ESS
+func (communication *HTTP) SendFeedbackMessage(code int, retryInterval int32, reason string, metaData *common.MetaData, sendToOrigin bool) common.SyncServiceError {
 	if common.Configuration.NodeType != common.ESS {
+		// In HTTP the CSS sends feedback in HTTP response
 		return nil
-	}
-
-	notification := common.Notification{ObjectID: metaData.ObjectID, ObjectType: metaData.ObjectType,
-		DestOrgID: metaData.DestOrgID, DestID: metaData.OriginID, DestType: metaData.OriginType,
-		Status: common.Feedback, InstanceID: metaData.InstanceID}
-	if err := Store.UpdateNotificationRecord(notification); err != nil {
-		return err
 	}
 
 	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, common.Feedback)
 
 	var request *http.Request
-	var err error
 
 	body, err := json.MarshalIndent(feedbackMessage{code, retryInterval, reason}, "", "  ")
 	if err != nil {
@@ -874,8 +943,7 @@ func (communication *HTTP) SendFeedbackMessage(code int, retryInterval int32, re
 	request, err = http.NewRequest("PUT", url, bytes.NewReader(body))
 	request.ContentLength = int64(len(body))
 
-	username, password := security.KeyandSecretForURL(url)
-	request.SetBasicAuth(username, password)
+	security.AddIdentityToSPIRequest(request, url)
 
 	response, err := communication.httpClient.Do(request)
 	if err != nil {
@@ -883,19 +951,20 @@ func (communication *HTTP) SendFeedbackMessage(code int, retryInterval int32, re
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusNoContent {
-		return handleAckFeedback(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID, metaData.InstanceID)
+		return nil
 	}
 
 	return communication.createError(response, "send feedback")
 }
 
-// SendErrorMessage sends an error message from the ESS to the CSS
-func (communication *HTTP) SendErrorMessage(err common.SyncServiceError, metaData *common.MetaData) common.SyncServiceError {
+// SendErrorMessage sends an error message from the ESS to the CSS or from the CSS to the ESS
+func (communication *HTTP) SendErrorMessage(err common.SyncServiceError, metaData *common.MetaData, sendToOrigin bool) common.SyncServiceError {
 	if common.Configuration.NodeType != common.ESS {
+		// In HTTP the CSS sends error message in HTTP response
 		return nil
 	}
 	code, retryInterval, reason := common.CreateFeedback(err)
-	return communication.SendFeedbackMessage(code, retryInterval, reason, metaData)
+	return communication.SendFeedbackMessage(code, retryInterval, reason, metaData, sendToOrigin)
 }
 
 func buildObjectURL(orgID string, objectType string, objectID string, instanceID int64, topic string) string {

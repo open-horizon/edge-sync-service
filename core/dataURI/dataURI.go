@@ -102,6 +102,9 @@ func GetData(uri string) (io.Reader, common.SyncServiceError) {
 
 	file, err := os.Open(dataURI.Path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, &common.NotFound{}
+		}
 		return nil, common.CreateError(err, fmt.Sprintf("Failed to open file %s to read data. Error: ", dataURI.Path))
 	}
 	return file, nil
@@ -121,6 +124,9 @@ func GetDataChunk(uri string, size int, offset int64) ([]byte, bool, int, common
 
 	file, err := os.Open(dataURI.Path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, true, 0, &common.NotFound{}
+		}
 		return nil, true, 0, common.CreateError(err, fmt.Sprintf("Failed to open file %s to read data. Error: ", dataURI.Path))
 	}
 	defer file.Close()

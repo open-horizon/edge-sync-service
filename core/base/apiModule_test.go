@@ -3,6 +3,7 @@ package base
 import (
 	"bytes"
 	"math"
+	"os"
 	"testing"
 
 	"github.com/open-horizon/edge-sync-service/common"
@@ -11,6 +12,22 @@ import (
 )
 
 func TestObjectAPI(t *testing.T) {
+	common.Configuration.MongoDbName = "d_test_db"
+	store = &storage.MongoStorage{}
+	testObjectAPI(store, t)
+
+	dir, _ := os.Getwd()
+	common.Configuration.PersistenceRootPath = dir + "/persist"
+	boltStore := &storage.BoltStorage{}
+	boltStore.Cleanup()
+	store = boltStore
+	testObjectAPI(store, t)
+}
+
+func testObjectAPI(store storage.Storage, t *testing.T) {
+	communications.Store = store
+	common.InitObjectLocks()
+
 	dests := []string{"device:dev1", "device2:dev", "device2:dev1"}
 
 	invalidObjects := []struct {
@@ -61,13 +78,13 @@ func TestObjectAPI(t *testing.T) {
 			"updateObject didn't check that autoDelete is set for object without destinations list or dest ID"},
 	}
 
-	communications.Store = &storage.MongoStorage{}
-	store = communications.Store
 	if err := store.Init(); err != nil {
 		t.Errorf("Failed to initialize storage driver. Error: %s\n", err.Error())
 	}
+	defer store.Stop()
+
 	for _, row := range invalidObjects {
-		err := updateObject(row.orgID, row.objectType, row.objectID, row.metaData, nil)
+		err := UpdateObject(row.orgID, row.objectType, row.objectID, row.metaData, nil)
 		if err == nil {
 			t.Errorf(row.message)
 		}
@@ -128,7 +145,7 @@ func TestObjectAPI(t *testing.T) {
 
 	for _, row := range validObjects {
 		// Update object
-		err := updateObject(row.orgID, row.objectType, row.objectID, row.metaData, row.data)
+		err := UpdateObject(row.orgID, row.objectType, row.objectID, row.metaData, row.data)
 		if err != nil {
 			t.Errorf("updateObject failed to update (objectID = %s). Error: %s", row.objectID, err.Error())
 		}
@@ -214,7 +231,7 @@ func TestObjectAPI(t *testing.T) {
 
 		// Check other object APIs
 		// Get status
-		storedStatus, err := getObjectStatus(row.orgID, row.objectType, row.objectID)
+		storedStatus, err := GetObjectStatus(row.orgID, row.objectType, row.objectID)
 		if err != nil {
 			t.Errorf("Failed to get object's status (objectID = %s). Error: %s", row.objectID, err.Error())
 		}
@@ -224,7 +241,7 @@ func TestObjectAPI(t *testing.T) {
 
 		// Get data
 		if !metaData.MetaOnly {
-			storedDataReader, err := getObjectData(row.orgID, row.objectType, row.objectID)
+			storedDataReader, err := GetObjectData(row.orgID, row.objectType, row.objectID)
 			if err != nil {
 				if storage.IsNotFound(err) {
 					if row.data != nil && !row.metaData.NoData {
@@ -259,7 +276,7 @@ func TestObjectAPI(t *testing.T) {
 		instance := metaData.InstanceID
 
 		if row.newData != nil {
-			ok, err := putObjectData(row.orgID, row.objectType, row.objectID, bytes.NewReader(row.newData))
+			ok, err := PutObjectData(row.orgID, row.objectType, row.objectID, bytes.NewReader(row.newData))
 			if err != nil {
 				if !row.metaData.NoData {
 					t.Errorf("Failed to update object's data (objectID = %s). Error: %s", row.objectID, err.Error())
@@ -272,7 +289,7 @@ func TestObjectAPI(t *testing.T) {
 						t.Errorf("Failed to update object's data (objectID = %s): object not found", row.objectID)
 					} else {
 						// Data was updated
-						storedStatus, err := getObjectStatus(row.orgID, row.objectType, row.objectID)
+						storedStatus, err := GetObjectStatus(row.orgID, row.objectType, row.objectID)
 						if err != nil {
 							t.Errorf("Failed to get object's status (objectID = %s). Error: %s", row.objectID, err.Error())
 						}
@@ -309,6 +326,8 @@ func TestObjectAPI(t *testing.T) {
 											notification.InstanceID, instance, row.objectID)
 									}
 								}
+							} else if metaData.Inactive && notification != nil {
+								t.Errorf("Found a notification record after data update with an inactive object (objectID = %s)", row.objectID)
 							}
 						}
 					}
@@ -317,17 +336,17 @@ func TestObjectAPI(t *testing.T) {
 		}
 
 		// Mark consumed (should fail)
-		if err := objectConsumed(row.orgID, row.objectType, row.objectID); err == nil {
+		if err := ObjectConsumed(row.orgID, row.objectType, row.objectID); err == nil {
 			t.Errorf("objectConsumed marked the sender's object as consumed  (objectID = %s)", row.objectID)
 		}
 
 		// Mark deleted (should fail)
-		if err := objectDeleted(row.orgID, row.objectType, row.objectID); err == nil {
+		if err := ObjectDeleted(row.orgID, row.objectType, row.objectID); err == nil {
 			t.Errorf("objectDeleted marked the sender's object as deleted  (objectID = %s)", row.objectID)
 		}
 
 		// Activate
-		if err := activateObject(row.orgID, row.objectType, row.objectID); err != nil {
+		if err := ActivateObject(row.orgID, row.objectType, row.objectID); err != nil {
 			t.Errorf("Failed to activate object (objectID = %s). Error: %s", row.objectID, err.Error())
 		} else {
 			if destination.DestID == metaData.DestID {
@@ -351,17 +370,17 @@ func TestObjectAPI(t *testing.T) {
 		}
 
 		// Destinations list for the object
-		if dests, err := getObjectDestinationsStatus(row.orgID, row.objectType, row.objectID); err != nil {
+		if dests, err := GetObjectDestinationsStatus(row.orgID, row.objectType, row.objectID); err != nil {
 			t.Errorf("Error in getObjectDestinationsStatus (objectID = %s). Error: %s", row.objectID, err.Error())
 		} else if len(dests) != row.expectedDestNumber {
 			t.Errorf("Wrong number of destinations: %d instead of %d (objectID = %s).", len(dests), row.expectedDestNumber, row.objectID)
 		}
 
 		// Delete
-		if err := deleteObject(row.orgID, row.objectType, row.objectID); err != nil {
+		if err := DeleteObject(row.orgID, row.objectType, row.objectID); err != nil {
 			t.Errorf("Failed to delete object (objectID = %s). Error: %s", row.objectID, err.Error())
 		} else {
-			if storedStatus, err := getObjectStatus(row.orgID, row.objectType, row.objectID); err != nil {
+			if storedStatus, err := GetObjectStatus(row.orgID, row.objectType, row.objectID); err != nil {
 				t.Errorf("Error in getObjectStatus (objectID = %s). Error: %s", row.objectID, err.Error())
 			} else if storedStatus != common.ObjDeleted {
 				t.Errorf("Deleted object is not marked as deleted (objectID = %s)", row.objectID)

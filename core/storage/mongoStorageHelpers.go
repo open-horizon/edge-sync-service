@@ -31,51 +31,60 @@ func (store *MongoStorage) checkObjects() {
 	}
 
 	currentTime := time.Now().Format(time.RFC3339)
-	query := bson.M{"$and": []bson.M{
-		bson.M{"metadata.expiration": bson.M{"$ne": ""}},
-		bson.M{"metadata.expiration": bson.M{"$lte": currentTime}}}}
-	if err := store.removeAll(objects, query); err != nil {
+	query := bson.M{
+		"$and": []bson.M{
+			bson.M{"metadata.expiration": bson.M{"$ne": ""}},
+			bson.M{"metadata.expiration": bson.M{"$lte": currentTime}},
+			bson.M{"$or": []bson.M{
+				bson.M{"status": common.NotReadyToSend},
+				bson.M{"status": common.ReadyToSend}}}},
+	}
+
+	selector := bson.M{"metadata": bson.ElementDocument, "last-update": bson.ElementTimestamp}
+	result := []object{}
+	if err := store.fetchAll(objects, query, selector, &result); err != nil {
 		if err != mgo.ErrNotFound && log.IsLogging(logger.ERROR) {
 			log.Error("Error in mongoStorage.checkObjects: failed to remove expired objects. Error: %s\n", err)
 		}
-	} else {
-		if trace.IsLogging(logger.TRACE) {
-			trace.Trace("Removing expired objects")
+		return
+	}
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("Removing expired objects")
+	}
+
+	for _, object := range result {
+		err := store.deleteObject(object.MetaData.DestOrgID, object.MetaData.ObjectType, object.MetaData.ObjectID, object.LastUpdate)
+		if err == nil {
+			store.DeleteNotificationRecords(object.MetaData.DestOrgID, object.MetaData.ObjectType, object.MetaData.ObjectID, "", "")
+		} else if log.IsLogging(logger.ERROR) {
+			log.Error("Error in mongoStorage.checkObjects: failed to remove expired objects. Error: %s\n", err)
 		}
 	}
 }
 
-func (store *MongoStorage) createDestinations(metaData common.MetaData) ([]common.StoreDestinationStatus, common.SyncServiceError) {
-	dests := make([]common.StoreDestinationStatus, 0)
-	if metaData.DestID != "" {
-		// We check that destType is not empty in updateObject()
-		if dest, err := store.RetrieveDestination(metaData.DestOrgID, metaData.DestType, metaData.DestID); err == nil {
-			dests = append(dests, common.StoreDestinationStatus{Destination: *dest, Status: common.Pending})
+func (store *MongoStorage) deleteObject(orgID string, objectType string, objectID string, timestamp bson.MongoTimestamp) common.SyncServiceError {
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("Deleting object %s\n", id)
+	}
+
+	query := bson.M{"_id": id}
+	if timestamp != -1 {
+		query = bson.M{"_id": id, "last-update": timestamp}
+	}
+	if err := store.removeAll(objects, query); err != nil {
+		if err == mgo.ErrNotFound && timestamp != -1 {
+			return nil
 		}
-	} else {
-		if len(metaData.DestinationsList) == 0 {
-			// Either broadcast or destType without destID
-			if destinations, err := store.RetrieveDestinations(metaData.DestOrgID, metaData.DestType); err == nil {
-				for _, dest := range destinations {
-					dests = append(dests, common.StoreDestinationStatus{Destination: dest, Status: common.Pending})
-				}
-			}
-		} else {
-			for _, d := range metaData.DestinationsList {
-				parts := strings.Split(d, ":")
-				if len(parts) == 2 {
-					if dest, err := store.RetrieveDestination(metaData.DestOrgID, parts[0], parts[1]); err == nil {
-						dests = append(dests, common.StoreDestinationStatus{Destination: *dest, Status: common.Pending})
-					} else {
-						return nil, &Error{fmt.Sprintf("Failed to find destination %s:%s", parts[0], parts[1])}
-					}
-				} else {
-					return nil, &Error{fmt.Sprintf("Invalid destination %s", d)}
-				}
-			}
+		return &Error{fmt.Sprintf("Failed to delete object. Error: %s.", err)}
+	}
+
+	if err := store.removeFile(id); err != nil {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("Error in deleteStoredObject: failed to delete data file. Error: %s\n", err)
 		}
 	}
-	return dests, nil
+	return nil
 }
 
 func (store *MongoStorage) copyDataToFile(id string, dataReader io.Reader, isFirstChunk bool, isLastChunk bool) (fileHanlde *fileHandle,

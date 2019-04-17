@@ -37,6 +37,8 @@ func main() {
 	switch strings.ToLower(common.Configuration.AuthenticationHandler) {
 	case "dummy":
 		authenticationHandler = &security.DummyAuthenticate{}
+	case "preset":
+		authenticationHandler = &security.PresetAuthenticate{}
 	default:
 		fmt.Printf("Unknown Authentication handler identifier %s. Valid values are dummy.\n",
 			common.Configuration.AuthenticationHandler)

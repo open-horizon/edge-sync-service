@@ -68,12 +68,13 @@ func (store *InMemoryStorage) Init() common.SyncServiceError {
 
 // Stop stops the InMemory store
 func (store *InMemoryStorage) Stop() {
-	// The InMemory store doesn't to do anything at shutdown time.
+	// The InMemory store doesn't have to do anything at shutdown time.
 	// This empty implementation insures that it implements the storage interface
 }
 
 // PerformMaintenance performs store's maintenance
-func (store *InMemoryStorage) PerformMaintenance() {}
+func (store *InMemoryStorage) PerformMaintenance() {
+}
 
 // StoreObject stores an object
 func (store *InMemoryStorage) StoreObject(metaData common.MetaData, data []byte, status string) common.SyncServiceError {
@@ -90,6 +91,10 @@ func (store *InMemoryStorage) StoreObject(metaData common.MetaData, data []byte,
 
 	if metaData.MetaOnly {
 		if object, ok := store.objects[id]; ok {
+			if object.status == common.ConsumedByDest {
+				// On ESS we remove the data of consumed objects, therefore we can't accept "meta only" updates
+				return &Error{"Can't update only the meta data of consumed object"}
+			}
 			object.meta = metaData
 			object.status = status
 			object.remainingConsumers = metaData.ExpectedConsumers
@@ -202,7 +207,7 @@ func (store *InMemoryStorage) UpdateObjectStatus(orgID string, objectType string
 	return &NotFound{"Object not found"}
 }
 
-// UpdateObjectSourceDataURI pdates object's source data URI
+// UpdateObjectSourceDataURI updates object's source data URI
 func (store *InMemoryStorage) UpdateObjectSourceDataURI(orgID string, objectType string, objectID string, sourceDataURI string) common.SyncServiceError {
 	store.lock()
 	defer store.unLock()
@@ -316,7 +321,8 @@ func (store *InMemoryStorage) RetrieveObjects(orgID string, destType string, des
 	result := make([]common.MetaData, 0)
 	for _, obj := range store.objects {
 		if !obj.meta.Inactive && obj.status == common.ReadyToSend &&
-			(obj.meta.DestType == "" || obj.meta.DestType == destType) && (obj.meta.DestID == "" || obj.meta.DestID == destID) {
+			(obj.meta.DestType == "" || obj.meta.DestType == destType || destType == "") &&
+			(obj.meta.DestID == "" || obj.meta.DestID == destID || destID == "") {
 			result = append(result, obj.meta)
 		}
 	}
@@ -410,7 +416,7 @@ func (store *InMemoryStorage) ReadObjectData(orgID string, objectType string, ob
 		return b, eof, int(s), nil
 	}
 
-	return nil, true, 0, nil
+	return nil, true, 0, &common.NotFound{}
 }
 
 // MarkObjectDeleted marks the object as deleted
@@ -445,21 +451,19 @@ func (store *InMemoryStorage) ActivateObject(orgID string, objectType string, ob
 }
 
 // GetObjectsToActivate returns inactive objects that are ready to be activated
-func (store *InMemoryStorage) GetObjectsToActivate() ([]common.MetaData, []string, common.SyncServiceError) {
+func (store *InMemoryStorage) GetObjectsToActivate() ([]common.MetaData, common.SyncServiceError) {
 	store.lock()
 	defer store.unLock()
 
 	currentTime := time.Now().Format(time.RFC3339)
 	result := make([]common.MetaData, 0)
-	statuses := make([]string, 0)
 	for _, obj := range store.objects {
 		if (obj.status == common.NotReadyToSend || obj.status == common.ReadyToSend) &&
-			obj.meta.Inactive && obj.meta.ActivationTime <= currentTime {
+			obj.meta.Inactive && obj.meta.ActivationTime != "" && obj.meta.ActivationTime <= currentTime {
 			result = append(result, obj.meta)
-			statuses = append(statuses, obj.status)
 		}
 	}
-	return result, statuses, nil
+	return result, nil
 }
 
 // DeleteStoredObject deletes the object
@@ -485,6 +489,21 @@ func (store *InMemoryStorage) DeleteStoredData(orgID string, objectType string, 
 	}
 
 	return notFound
+}
+
+// CleanObjects removes the objects received from the other side.
+// For persistant storage only partially recieved objects are removed.
+func (store *InMemoryStorage) CleanObjects() common.SyncServiceError {
+	store.lock()
+	defer store.unLock()
+
+	for _, obj := range store.objects {
+		if obj.status == common.PartiallyReceived || obj.status == common.CompletelyReceived {
+			id := createObjectCollectionID(obj.meta.DestOrgID, obj.meta.ObjectType, obj.meta.ObjectID)
+			delete(store.objects, id)
+		}
+	}
+	return nil
 }
 
 // GetObjectDestinations gets destinations that the object has to be sent to
@@ -647,7 +666,7 @@ func (store *InMemoryStorage) RetrieveNotificationRecord(orgID string, objectTyp
 		return &notification, nil
 	}
 
-	return nil, notFound
+	return nil, nil
 }
 
 // DeleteNotificationRecords deletes notification records to an object
@@ -669,7 +688,7 @@ func (store *InMemoryStorage) DeleteNotificationRecords(orgID string, objectType
 		}
 	} else {
 		for id, notification := range store.notifications {
-			if notification.DestType == destType && notification.DestID == destID {
+			if (notification.DestType == destType || destType == "") && (notification.DestID == destID || destID == "") {
 				delete(store.notifications, id)
 			}
 		}
@@ -686,14 +705,14 @@ func (store *InMemoryStorage) RetrieveNotifications(orgID string, destType strin
 	result := make([]common.Notification, 0)
 	if destID != "" && destType != "" {
 		for _, notification := range store.notifications {
-			if notification.DestType == destType && notification.DestID == destID && resendNotification(notification) {
+			if notification.DestType == destType && notification.DestID == destID && resendNotification(notification, false) {
 				result = append(result, notification)
 			}
 		}
 	} else {
 		currentTime := time.Now().Unix()
 		for _, notification := range store.notifications {
-			if resendNotification(notification) {
+			if resendNotification(notification, false) {
 				if notification.ResendTime <= currentTime || notification.Status == common.Getdata {
 					result = append(result, notification)
 				}
@@ -842,12 +861,13 @@ func (store *InMemoryStorage) readPersistedTimebase(path string) int64 {
 		return 0
 	}
 	var (
-		magicValue  uint32
-		version     uint32
-		fieldCount  uint32
-		fieldType   uint32
-		fieldLength uint32
-		timebase    int64
+		magicValue   uint32
+		versionMajor uint32
+		versionMinor uint32
+		fieldCount   uint32
+		fieldType    uint32
+		fieldLength  uint32
+		timebase     int64
 	)
 
 	if err = binary.Read(data, binary.BigEndian, &magicValue); err != nil {
@@ -857,11 +877,19 @@ func (store *InMemoryStorage) readPersistedTimebase(path string) int64 {
 		return 0
 	}
 
-	if err = binary.Read(data, binary.BigEndian, &version); err != nil {
+	if err = binary.Read(data, binary.BigEndian, &versionMajor); err != nil {
 		return 0
 	}
 
-	if version != common.Version {
+	if versionMajor != common.Version.Major {
+		return 0
+	}
+
+	if err = binary.Read(data, binary.BigEndian, &versionMinor); err != nil {
+		return 0
+	}
+
+	if versionMinor != common.Version.Minor {
 		return 0
 	}
 
@@ -897,14 +925,19 @@ func (store *InMemoryStorage) writePersistedTimebase(path string, timebase int64
 	message := new(bytes.Buffer)
 
 	// magic
-	var value uint32 = common.Magic
+	var value = common.Magic
 	err := binary.Write(message, binary.BigEndian, value)
 	if err != nil {
 		return err
 	}
 
 	// version
-	value = common.Version
+	value = common.Version.Major
+	err = binary.Write(message, binary.BigEndian, value)
+	if err != nil {
+		return err
+	}
+	value = common.Version.Minor
 	err = binary.Write(message, binary.BigEndian, value)
 	if err != nil {
 		return err
@@ -938,4 +971,9 @@ func (store *InMemoryStorage) writePersistedTimebase(path string, timebase int64
 
 	_, err = dataURI.StoreData("file://"+path, message, 0)
 	return err
+}
+
+// IsPersistent returns true if the storage is persistent, and false otherwise
+func (store *InMemoryStorage) IsPersistent() bool {
+	return false
 }

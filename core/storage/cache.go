@@ -163,7 +163,7 @@ func (store *Cache) ActivateObject(orgID string, objectType string, objectID str
 }
 
 // GetObjectsToActivate returns inactive objects that are ready to be activated
-func (store *Cache) GetObjectsToActivate() ([]common.MetaData, []string, common.SyncServiceError) {
+func (store *Cache) GetObjectsToActivate() ([]common.MetaData, common.SyncServiceError) {
 	return store.Store.GetObjectsToActivate()
 }
 
@@ -175,6 +175,12 @@ func (store *Cache) DeleteStoredObject(orgID string, objectType string, objectID
 // DeleteStoredData deletes the object's data
 func (store *Cache) DeleteStoredData(orgID string, objectType string, objectID string) common.SyncServiceError {
 	return store.Store.DeleteStoredData(orgID, objectType, objectID)
+}
+
+// CleanObjects removes the objects received from the other side.
+// For persistant storage only partially recieved objects are removed.
+func (store *Cache) CleanObjects() common.SyncServiceError {
+	return store.Store.CleanObjects()
 }
 
 // GetObjectDestinations gets destinations that the object has to be sent to
@@ -454,4 +460,9 @@ func (store *Cache) RetrieveACL(aclType string, orgID string, key string) ([]str
 // RetrieveACLsInOrg retrieves the list of ACLs in an organization
 func (store *Cache) RetrieveACLsInOrg(aclType string, orgID string) ([]string, common.SyncServiceError) {
 	return store.Store.RetrieveACLsInOrg(aclType, orgID)
+}
+
+// IsPersistent returns true if the storage is persistent, and false otherwise
+func (store *Cache) IsPersistent() bool {
+	return store.Store.IsPersistent()
 }
