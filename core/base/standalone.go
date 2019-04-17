@@ -15,15 +15,18 @@ import (
 
 var help bool
 
-var configFile string
+// ConfigFile configuration file name loaded by command line argument
+var ConfigFile string
 
 var swaggerFile string
 
 var ipAddress string
 
 func init() {
-	flag.BoolVar(&help, "h", false, "Display usage information.")
-	flag.StringVar(&configFile, "c", "/etc/edge-sync-service/sync.conf", "Specify the configuration file to use")
+	if flag.CommandLine.Lookup("h") == nil {
+		flag.BoolVar(&help, "h", false, "Display usage information.")
+	}
+	flag.StringVar(&ConfigFile, "c", "/etc/edge-sync-service/sync.conf", "Specify the configuration file to use")
 	flag.StringVar(&swaggerFile, "swagger", "", "Name of the file with the generated swagger document for the Edge sync service APIs")
 }
 
@@ -31,9 +34,9 @@ func init() {
 func ConfigStandaloneSyncService() {
 	flag.Parse()
 
-	err := common.Load(configFile)
+	err := common.Load(ConfigFile)
 	if err != nil {
-		fmt.Printf("Failed to load the configuration file (%s). Error: %s\n", configFile, err)
+		fmt.Printf("Failed to load the configuration file (%s). Error: %s\n", ConfigFile, err)
 		os.Exit(99)
 	}
 
@@ -59,12 +62,21 @@ func ConfigStandaloneSyncService() {
 
 // StandaloneSyncService runs a standalone Sync Service
 func StandaloneSyncService(auth security.Authentication) {
-	logFileSize, err :=
-		logger.AdjustMaxLogfileSize(common.Configuration.LogTraceFileSizeKB, common.DefaultLogTraceFileSize,
-			common.Configuration.LogRootPath)
-	if err != nil {
-		fmt.Printf("WARNING: Unable to get disk statistics for the path %s. Error: %s\n",
-			common.Configuration.LogRootPath, err)
+	destinations, entries := log.ParseDestinationsList(common.Configuration.LogTraceDestination)
+	if !entries {
+		destinations[logger.FILE] = true
+	}
+
+	var logFileSize = common.DefaultLogTraceFileSize
+	var err error
+	if destinations[logger.FILE] {
+		logFileSize, err =
+			logger.AdjustMaxLogfileSize(common.Configuration.LogTraceFileSizeKB, common.DefaultLogTraceFileSize,
+				common.Configuration.LogRootPath)
+		if err != nil {
+			fmt.Printf("WARNING: Unable to get disk statistics for the path %s. Error: %s\n",
+				common.Configuration.LogRootPath, err)
+		}
 	}
 
 	parameters := logger.Parameters{RootPath: common.Configuration.LogRootPath, FileName: common.Configuration.LogFileName,
@@ -79,12 +91,14 @@ func StandaloneSyncService(auth security.Authentication) {
 	}
 	defer log.Stop()
 
-	logFileSize, err =
-		logger.AdjustMaxLogfileSize(common.Configuration.LogTraceFileSizeKB, common.DefaultLogTraceFileSize,
-			common.Configuration.TraceRootPath)
-	if err != nil {
-		fmt.Printf("WARNING: Unable to get disk statistics for the path %s. Error: %s\n",
-			common.Configuration.TraceRootPath, err)
+	if destinations[logger.FILE] {
+		logFileSize, err =
+			logger.AdjustMaxLogfileSize(common.Configuration.LogTraceFileSizeKB, common.DefaultLogTraceFileSize,
+				common.Configuration.TraceRootPath)
+		if err != nil {
+			fmt.Printf("WARNING: Unable to get disk statistics for the path %s. Error: %s\n",
+				common.Configuration.TraceRootPath, err)
+		}
 	}
 
 	parameters.RootPath = common.Configuration.TraceRootPath
@@ -107,6 +121,7 @@ func StandaloneSyncService(auth security.Authentication) {
 			log.Fatal(err.Error())
 		}
 	} else {
+		log.Info("The Sync Service has started")
 		BlockUntilShutdown()
 	}
 }

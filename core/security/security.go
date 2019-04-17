@@ -23,10 +23,24 @@ type authenticationCacheElement struct {
 	expiration time.Time
 }
 
-const authenticationCacheDuration = 15 * time.Minute
+type destinationACLCacheElement struct {
+	users      []string
+	expiration time.Time
+}
+
+// SPIRequestIdentityHeader is the header used to send the identity in HTTP SPI requests
+// Should only be used here and in the httpCommunication tests
+const SPIRequestIdentityHeader = "X-Sync-Service-Dest"
+
+var spiRequestIdentity string
+
+const cacheDuration = 15 * time.Minute
 
 var authenticationCache map[string]authenticationCacheElement
 var authenticationCacheLock sync.RWMutex
+
+var destinationACLCache map[string]destinationACLCacheElement
+var destinationACLCacheLock sync.RWMutex
 
 var cacheFlushTicker *time.Ticker
 var cacheFlushStopChannel chan int
@@ -38,10 +52,16 @@ var Store storage.Storage
 func Start() {
 	authenticator.Start()
 
+	if common.Configuration.NodeType == common.ESS {
+		spiRequestIdentity = common.Configuration.OrgID + "/" +
+			common.Configuration.DestinationType + "/" + common.Configuration.DestinationID
+	}
+
 	authenticationCache = make(map[string]authenticationCacheElement)
+	destinationACLCache = make(map[string]destinationACLCacheElement)
 
 	cacheFlushStopChannel = make(chan int, 1)
-	cacheFlushTicker = time.NewTicker(2 * authenticationCacheDuration)
+	cacheFlushTicker = time.NewTicker(2 * cacheDuration)
 	go func() {
 		common.GoRoutineStarted()
 		keepRunning := true
@@ -49,6 +69,7 @@ func Start() {
 			select {
 			case <-cacheFlushTicker.C:
 				flushAuthenticationCache()
+				flushDestinationACLCache()
 
 			case <-cacheFlushStopChannel:
 				keepRunning = false
@@ -95,7 +116,7 @@ func Authenticate(request *http.Request) (int, string, string) {
 	}
 	code, orgID, userID := authenticator.Authenticate(request)
 	if code != AuthFailed {
-		entry = authenticationCacheElement{appSecret, code, orgID, userID, now.Add(authenticationCacheDuration)}
+		entry = authenticationCacheElement{appSecret, code, orgID, userID, now.Add(cacheDuration)}
 		authenticationCacheLock.Lock()
 		authenticationCache[appKey] = entry
 		authenticationCacheLock.Unlock()
@@ -133,23 +154,17 @@ func CanUserCreateObject(request *http.Request, orgID string, metaData *common.M
 		return false
 	}
 
+	if common.Configuration.NodeType == common.ESS {
+		return true
+	}
+
 	destinationTypes := getDestinationTypes(metaData)
 	for _, destinationType := range destinationTypes {
-		usernames, err := Store.RetrieveACL(common.DestinationsACLType, orgID, destinationType)
-		if err != nil {
-			if log.IsLogging(logger.ERROR) {
-				log.Error("Failed to fetch ACL for %s %s. Error: %s", orgID, destinationType, err)
-			}
+		if !checkDestinationAccessByUser(userID, orgID, destinationType) {
 			return false
 		}
-
-		for _, username := range usernames {
-			if username == "*" || username == userID {
-				return true
-			}
-		}
 	}
-	return false
+	return true
 }
 
 // CanUserAccessObject checks if the user identified by the credentials in the supplied request,
@@ -177,6 +192,61 @@ func KeyandSecretForURL(url string) (string, string) {
 	return authenticator.KeyandSecretForURL(url)
 }
 
+// AddIdentityToSPIRequest Adds identity related stuff to SPI requests made by an ESS
+func AddIdentityToSPIRequest(request *http.Request, requestURL string) {
+	username, password := authenticator.KeyandSecretForURL(requestURL)
+	request.SetBasicAuth(username, password)
+
+	request.Header.Add(SPIRequestIdentityHeader, spiRequestIdentity)
+}
+
+// ValidateSPIRequestIdentity validates the identity sent in a SPI request by an ESS to a CSS
+// Returns true if the identity is ok for a SPI request, along with the orgID, destType, and
+// destID sent in the request.
+func ValidateSPIRequestIdentity(request *http.Request) (bool, string, string, string) {
+	var orgID string
+	var destType string
+	var destID string
+
+	identityParts := strings.Split(request.Header.Get(SPIRequestIdentityHeader), "/")
+	if len(identityParts) != 3 {
+		return false, "", "", ""
+	}
+
+	code, orgID, user := Authenticate(request)
+	switch code {
+	case AuthEdgeNode:
+		parts := strings.Split(user, "/")
+		if len(parts) != 2 {
+			return false, "", "", ""
+		}
+		if orgID != identityParts[0] || parts[0] != identityParts[1] || parts[1] != identityParts[2] {
+			return false, "", "", ""
+		}
+		destType = parts[0]
+		destID = parts[1]
+
+	case AuthAdmin:
+		if orgID != identityParts[0] {
+			return false, "", "", ""
+		}
+		destType = identityParts[1]
+		destID = identityParts[2]
+
+	case AuthUser:
+		if checkDestinationAccessByUser(user, orgID, identityParts[1]) {
+			destType = identityParts[1]
+			destID = identityParts[2]
+		} else {
+			return false, "", "", ""
+		}
+
+	default:
+		return false, "", "", ""
+	}
+	return true, orgID, destType, destID
+}
+
 func checkObjectAccessByUser(userID, orgID, objectType string) bool {
 	usernames, err := Store.RetrieveACL(common.ObjectsACLType, orgID, objectType)
 	if err != nil {
@@ -184,6 +254,41 @@ func checkObjectAccessByUser(userID, orgID, objectType string) bool {
 			log.Error("Failed to fetch ACL for %s %s. Error: %s", orgID, objectType, err)
 		}
 		return false
+	}
+
+	for _, username := range usernames {
+		if username == "*" || username == userID {
+			return true
+		}
+	}
+	return false
+}
+
+func checkDestinationAccessByUser(userID, orgID, destType string) bool {
+	cacheKey := orgID + ":" + destType
+	var usernames []string
+
+	destinationACLCacheLock.RLock()
+	entry, ok := destinationACLCache[cacheKey]
+	destinationACLCacheLock.RUnlock()
+
+	now := time.Now()
+	var err error
+	if ok && now.Before(entry.expiration) {
+		usernames = entry.users
+	} else {
+		usernames, err = Store.RetrieveACL(common.DestinationsACLType, orgID, destType)
+		if err != nil {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("Failed to fetch ACL for %s %s. Error: %s", orgID, destType, err)
+			}
+			return false
+		}
+
+		entry := destinationACLCacheElement{usernames, now.Add(cacheDuration)}
+		destinationACLCacheLock.Lock()
+		destinationACLCache[cacheKey] = entry
+		destinationACLCacheLock.Unlock()
 	}
 
 	for _, username := range usernames {
@@ -229,6 +334,19 @@ func flushAuthenticationCache() {
 	for cacheKey, entry := range authenticationCache {
 		if now.After(entry.expiration) {
 			delete(authenticationCache, cacheKey)
+		}
+	}
+}
+
+func flushDestinationACLCache() {
+	now := time.Now()
+
+	destinationACLCacheLock.Lock()
+	defer destinationACLCacheLock.Unlock()
+
+	for cacheKey, entry := range destinationACLCache {
+		if now.After(entry.expiration) {
+			delete(destinationACLCache, cacheKey)
 		}
 	}
 }

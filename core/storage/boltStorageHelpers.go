@@ -5,6 +5,7 @@ import (
 
 	bolt "github.com/etcd-io/bbolt"
 	"github.com/open-horizon/edge-sync-service/common"
+	"github.com/open-horizon/edge-sync-service/core/dataURI"
 )
 
 func (store *BoltStorage) retrieveObjectsHelper(retrieve func(boltObject)) common.SyncServiceError {
@@ -53,12 +54,111 @@ func (store *BoltStorage) updateObjectHelper(orgID string, objectType string, ob
 	return err
 }
 
+func (store *BoltStorage) updateObjectsHelper(update func(boltObject) (*boltObject, common.SyncServiceError)) common.SyncServiceError {
+	err := store.db.Update(func(tx *bolt.Tx) error {
+		cursor := tx.Bucket(objectsBucket).Cursor()
+
+		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+			var object boltObject
+			if err := json.Unmarshal(value, &object); err != nil {
+				return err
+			}
+			updatedObject, err := update(object)
+			if err != nil {
+				return err
+			}
+			if updatedObject == nil {
+				continue
+			}
+			encoded, err := json.Marshal(*updatedObject)
+			if err != nil {
+				return err
+			}
+			err = tx.Bucket(objectsBucket).Put(key, []byte(encoded))
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	return err
+}
+
+func (store *BoltStorage) deleteObjectsHelper(match func(boltObject) bool) common.SyncServiceError {
+	err := store.db.Update(func(tx *bolt.Tx) error {
+		cursor := tx.Bucket(objectsBucket).Cursor()
+
+		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+			var object boltObject
+			if err := json.Unmarshal(value, &object); err != nil {
+				return err
+			}
+			if match(object) {
+				if object.DataPath != "" {
+					if err := dataURI.DeleteStoredData(object.DataPath); err != nil {
+						return err
+					}
+					object.DataPath = ""
+				}
+				if err := tx.Bucket(objectsBucket).Delete(key); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+
+	return err
+}
+
+func (store *BoltStorage) deleteObjectsAndNotificationsHelper(match func(boltObject) bool) common.SyncServiceError {
+	err := store.db.Update(func(tx *bolt.Tx) error {
+		objectCursor := tx.Bucket(objectsBucket).Cursor()
+
+		for objectKey, objectValue := objectCursor.First(); objectKey != nil; objectKey, objectValue = objectCursor.Next() {
+			var object boltObject
+			if err := json.Unmarshal(objectValue, &object); err != nil {
+				return err
+			}
+			if match(object) {
+				if object.DataPath != "" {
+					if err := dataURI.DeleteStoredData(object.DataPath); err != nil {
+						return err
+					}
+					object.DataPath = ""
+				}
+				if err := tx.Bucket(objectsBucket).Delete(objectKey); err != nil {
+					return err
+				}
+
+				notifyCursor := tx.Bucket(notificationsBucket).Cursor()
+				for notifyKey, notifyValue := notifyCursor.First(); notifyKey != nil; notifyKey, notifyValue = notifyCursor.Next() {
+					var notification common.Notification
+					if err := json.Unmarshal(notifyValue, &notification); err != nil {
+						return err
+					}
+					if notification.DestOrgID == object.Meta.DestOrgID && notification.ObjectType == object.Meta.ObjectType &&
+						notification.ObjectID == object.Meta.ObjectID {
+						if err := tx.Bucket(notificationsBucket).Delete(notifyKey); err != nil {
+							return err
+						}
+					}
+				}
+			}
+		}
+		return nil
+	})
+
+	return err
+}
+
 func (store *BoltStorage) viewObjectHelper(orgID string, objectType string, objectID string, retrieve func(boltObject) common.SyncServiceError) common.SyncServiceError {
 	id := createObjectCollectionID(orgID, objectType, objectID)
 	err := store.db.View(func(tx *bolt.Tx) error {
 		encoded := tx.Bucket(objectsBucket).Get([]byte(id))
 		if encoded == nil {
-			return notFound
+			return &common.NotFound{}
 		}
 
 		var object boltObject
@@ -191,6 +291,173 @@ func (store *BoltStorage) viewNotificationHelper(orgID string, objectType string
 
 		return nil
 	})
+	return err
+}
+
+func (store *BoltStorage) retrieveDestinationsHelper(retrieve func(boltDestination)) common.SyncServiceError {
+	err := store.db.View(func(tx *bolt.Tx) error {
+		cursor := tx.Bucket(destinationsBucket).Cursor()
+
+		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+			var dest boltDestination
+			if err := json.Unmarshal(value, &dest); err != nil {
+				return err
+			}
+			retrieve(dest)
+		}
+		return nil
+	})
+
+	return err
+}
+
+func (store *BoltStorage) updateDestinationHelper(id string, update func(boltDestination) boltDestination) common.SyncServiceError {
+	err := store.db.Update(func(tx *bolt.Tx) error {
+		encoded := tx.Bucket(destinationsBucket).Get([]byte(id))
+		if encoded == nil {
+			return notFound
+		}
+
+		var err error
+		var dest boltDestination
+		if err = json.Unmarshal(encoded, &dest); err != nil {
+			return err
+		}
+
+		dest = update(dest)
+
+		encoded, err = json.Marshal(dest)
+		if err != nil {
+			return err
+		}
+		err = tx.Bucket(destinationsBucket).Put([]byte(id), []byte(encoded))
+		return err
+	})
+	return err
+}
+
+func (store *BoltStorage) deleteDestinationsHelper(match func(boltDestination) bool) common.SyncServiceError {
+	err := store.db.Update(func(tx *bolt.Tx) error {
+		cursor := tx.Bucket(destinationsBucket).Cursor()
+
+		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+			var dest boltDestination
+			if err := json.Unmarshal(value, &dest); err != nil {
+				return err
+			}
+			if match(dest) {
+				if err := tx.Bucket(destinationsBucket).Delete(key); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+
+	return err
+}
+
+func (store *BoltStorage) viewDestinationHelper(orgID string, destType string, destID string, retrieve func(boltDestination) common.SyncServiceError) common.SyncServiceError {
+	id := createDestinationCollectionID(orgID, destType, destID)
+	err := store.db.View(func(tx *bolt.Tx) error {
+		encoded := tx.Bucket(destinationsBucket).Get([]byte(id))
+		if encoded == nil {
+			return notFound
+		}
+
+		var dest boltDestination
+		if err := json.Unmarshal(encoded, &dest); err != nil {
+			return err
+		}
+
+		err := retrieve(dest)
+		return err
+	})
+	return err
+}
+
+func (store *BoltStorage) retrieveMessagingGroupHelper(retrieve func(boltMessagingGroup)) common.SyncServiceError {
+	err := store.db.View(func(tx *bolt.Tx) error {
+		cursor := tx.Bucket(messagingGroupsBucket).Cursor()
+
+		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+			var mg boltMessagingGroup
+			if err := json.Unmarshal(value, &mg); err != nil {
+				return err
+			}
+			retrieve(mg)
+		}
+		return nil
+	})
+
+	return err
+}
+
+func (store *BoltStorage) retrieveOrganizationsHelper(retrieve func(common.StoredOrganization)) common.SyncServiceError {
+	err := store.db.View(func(tx *bolt.Tx) error {
+		cursor := tx.Bucket(organizationsBucket).Cursor()
+
+		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+			var org common.StoredOrganization
+			if err := json.Unmarshal(value, &org); err != nil {
+				return err
+			}
+			retrieve(org)
+		}
+		return nil
+	})
+
+	return err
+}
+
+func (store *BoltStorage) updateACLHelper(aclType string, orgID string, key string, update func(acl boltACL) (*boltACL, bool)) common.SyncServiceError {
+	err := store.db.Update(func(tx *bolt.Tx) error {
+		id := orgID + ":" + aclType + ":" + key
+
+		encoded := tx.Bucket(aclBucket).Get([]byte(id))
+		var acl boltACL
+		var err error
+		if encoded != nil {
+			if err := json.Unmarshal(encoded, &acl); err != nil {
+				return err
+			}
+		} else {
+			acl = boltACL{make([]string, 0), orgID, aclType, key}
+		}
+
+		updatedACL, delete := update(acl)
+		if updatedACL == nil && !delete {
+			// No need to write back
+			return nil
+		}
+		if delete {
+			err = tx.Bucket(aclBucket).Delete([]byte(id))
+		} else {
+			encoded, err = json.Marshal(updatedACL)
+			if err != nil {
+				return err
+			}
+			err = tx.Bucket(aclBucket).Put([]byte(id), []byte(encoded))
+		}
+		return err
+	})
+	return err
+}
+
+func (store *BoltStorage) retrieveACLHelper(retrieve func(boltACL)) common.SyncServiceError {
+	err := store.db.View(func(tx *bolt.Tx) error {
+		cursor := tx.Bucket(aclBucket).Cursor()
+
+		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+			var acl boltACL
+			if err := json.Unmarshal(value, &acl); err != nil {
+				return err
+			}
+			retrieve(acl)
+		}
+		return nil
+	})
+
 	return err
 }
 

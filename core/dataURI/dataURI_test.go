@@ -173,5 +173,9 @@ func TestDataURI(t *testing.T) {
 				break
 			}
 		}
+
+		if err = DeleteStoredData(row.uri); err != nil {
+			t.Errorf("Failed to delete %s. Error: %s", row.uri, err)
+		}
 	}
 }

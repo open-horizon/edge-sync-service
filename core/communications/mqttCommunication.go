@@ -21,14 +21,16 @@ import (
 )
 
 type messagePayload struct {
-	Command           string             `json:"command"`
-	Meta              common.MetaData    `json:"meta,omitempty"`
-	Offset            int64              `json:"offset,omitempty"`
-	Destination       common.Destination `json:"destination,omitempty"`
-	PersistentStorage bool               `json:"persistent,omitempty"`
-	FeedbackCode      int                `json:"feedback-code,omitempty"`
-	RetryInterval     int32              `json:"retry,omitempty"`
-	Reason            string             `json:"reason,omitempty"`
+	Version            common.SyncServiceVersion `json:"version"`
+	Command            string                    `json:"command"`
+	Meta               common.MetaData           `json:"meta,omitempty"`
+	Offset             int64                     `json:"offset,omitempty"`
+	Destination        common.Destination        `json:"destination,omitempty"`
+	PersistentStorage  bool                      `json:"persistent,omitempty"`
+	FeedbackCode       int                       `json:"feedback-code,omitempty"`
+	FeedbackFromOrigin bool                      `json:"feedback-from-origin,omitempty"`
+	RetryInterval      int32                     `json:"retry,omitempty"`
+	Reason             string                    `json:"reason,omitempty"`
 }
 
 type brokerAddresses struct {
@@ -133,7 +135,7 @@ func (context *context) parallelMessageHandler(client mqtt.Client, msg mqtt.Mess
 	if command == common.Getdata || command == common.Data {
 		context.communicator.dataQ <- &messageInfo
 	} else if command == common.AckRegister {
-		context.communicator.handleRegAck()
+		handleRegAck()
 	} else if command == common.AckResend {
 		handleAckResend()
 	} else {
@@ -174,7 +176,14 @@ func parseMessage(msg mqtt.Message, messageInfo *messageHandlerInfo) bool {
 			}
 			return false
 		}
+		if messageInfo.messagePayload.Version != common.Version {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("Received message with unsupported version")
+			}
+			return false
+		}
 	}
+
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Incoming message: \nTopic: %s|%s\nMessage length: %d\n", msg.Topic(), messageInfo.messagePayload.Command, len(payload))
 	}
@@ -188,28 +197,48 @@ func processMessage(messageInfo *messageHandlerInfo) {
 	messagePayload := messageInfo.messagePayload
 	meta := &messagePayload.Meta
 
+	if common.Configuration.NodeType == common.CSS && messagePayload.Command != common.Data &&
+		messagePayload.Command != common.Register && messagePayload.Command != common.RegisterNew && messagePayload.Command != common.Ping {
+		destType := meta.OriginType
+		destID := meta.OriginID
+		destOrgID := meta.DestOrgID
+		if messagePayload.Command == common.Updated || messagePayload.Command == common.Consumed ||
+			messagePayload.Command == common.Received || messagePayload.Command == common.AckDelete ||
+			messagePayload.Command == common.Deleted || messagePayload.Command == common.Getdata ||
+			(messagePayload.Command == common.Feedback && !messagePayload.FeedbackFromOrigin) {
+			destType = meta.DestType
+			destID = meta.DestID
+		} else if messagePayload.Command == common.Resend {
+			destType = messagePayload.Destination.DestType
+			destID = messagePayload.Destination.DestID
+			destOrgID = messagePayload.Destination.DestOrgID
+		}
+		if ok := destinationExists(destOrgID, destType, destID); !ok {
+			return
+		}
+	}
+
 	var err error
 	switch messagePayload.Command {
 	case common.Register:
-		if err = context.communicator.storeMessagingGroup(context.client, messagePayload.Destination.DestOrgID); err == nil {
-			err = handleRegistration(messagePayload.Destination, messagePayload.PersistentStorage)
-		}
+		err = handleRegistration(messagePayload.Destination, messagePayload.PersistentStorage)
 	case common.AckRegister:
-		context.communicator.handleRegAck()
+		handleRegAck()
 	case common.Ping:
-		new, pingErr := handlePing(messagePayload.Destination, messagePayload.PersistentStorage)
-		if new && pingErr == nil {
-			err = context.communicator.storeMessagingGroup(context.client, messagePayload.Destination.DestOrgID)
-		} else {
-			err = pingErr
+		err = handlePing(messagePayload.Destination)
+	case common.RegisterNew:
+		if err = context.communicator.storeMessagingGroup(context.client, messagePayload.Destination.DestOrgID); err == nil {
+			err = handleRegisterNew(messagePayload.Destination, messagePayload.PersistentStorage)
 		}
+	case common.RegisterAsNew:
+		err = handleRegisterAsNew()
 	case common.Update:
-		if int64(messagePayload.Meta.ChunkSize) < messagePayload.Meta.ObjectSize && !leader.CheckIfLeader() {
+		if int64(meta.ChunkSize) < meta.ObjectSize && !leader.CheckIfLeader() {
 			err = &Error{"Non-leader received update message with chunked data, ignoring."}
 		} else {
-			err = handleUpdate(messagePayload.Meta, common.Configuration.MaxInflightChunks)
-			if err != nil {
-				context.communicator.SendErrorMessage(err, meta)
+			err = handleUpdate(*meta, common.Configuration.MaxInflightChunks)
+			if err != nil && !isIgnoredByHandler(err) {
+				context.communicator.SendErrorMessage(err, meta, true)
 			}
 		}
 	case common.Updated:
@@ -232,25 +261,32 @@ func processMessage(messageInfo *messageHandlerInfo) {
 		err = handleAckObjectDeleted(meta.DestOrgID, meta.ObjectType, meta.ObjectID, meta.OriginType, meta.OriginID, meta.InstanceID)
 	case common.Getdata:
 		err = handleGetData(messagePayload.Meta, messagePayload.Offset)
+		if err != nil && (isIgnoredByHandler(err) || common.IsNotFound(err)) {
+			context.communicator.SendErrorMessage(&common.NotFound{}, &messagePayload.Meta, false)
+		}
 	case common.Data:
 		meta, err = handleData(payload)
-		if meta != nil && err != nil {
-			context.communicator.SendErrorMessage(err, meta)
+		if meta != nil && err != nil && !isIgnoredByHandler(err) {
+			context.communicator.SendErrorMessage(err, meta, true)
 		}
 	case common.Resend:
 		err = handleResendRequest(messagePayload.Destination)
 	case common.AckResend:
 		err = handleAckResend()
 	case common.Feedback:
-		err = handleFeedback(meta.DestOrgID, meta.ObjectType, meta.ObjectID, meta.DestType, meta.DestID, meta.InstanceID, messagePayload.FeedbackCode,
+		destType := meta.DestType
+		destID := meta.DestID
+		if messagePayload.FeedbackFromOrigin {
+			destType = meta.OriginType
+			destID = meta.OriginID
+		}
+		err = handleFeedback(meta.DestOrgID, meta.ObjectType, meta.ObjectID, destType, destID, meta.InstanceID, messagePayload.FeedbackCode,
 			messagePayload.RetryInterval, messagePayload.Reason)
-	case common.AckFeedback:
-		err = handleAckFeedback(meta.DestOrgID, meta.ObjectType, meta.ObjectID, meta.OriginType, meta.OriginID, meta.InstanceID)
 	default:
 		err = &Error{"Received message that doesn't match any subscription."}
 	}
 
-	if err != nil {
+	if err != nil && !isIgnoredByHandler(err) {
 		if log.IsLogging(logger.ERROR) {
 			log.Error(err.Error())
 		}
@@ -970,7 +1006,7 @@ func (communication *MQTT) publishCSSOutsideWIoTP(orgID string, destType string,
 // SendNotificationMessage sends a notification message from the CSS to the ESS or from the ESS to the CSS
 func (communication *MQTT) SendNotificationMessage(notificationTopic string, destType string, destID string, instanceID int64,
 	metaData *common.MetaData) common.SyncServiceError {
-	messagePayload := &messagePayload{Command: notificationTopic, Meta: *metaData}
+	messagePayload := &messagePayload{Version: common.Version, Command: notificationTopic, Meta: *metaData}
 	messageJSON, err := json.Marshal(messagePayload)
 	if err != nil {
 		return &Error{"Failed to send notification. Error: " + err.Error()}
@@ -985,41 +1021,32 @@ func (communication *MQTT) SendNotificationMessage(notificationTopic string, des
 	return communication.publishMessage(metaData.DestOrgID, destType, destID, messageJSON, chunked)
 }
 
-// SendFeedbackMessage sends a feedback message from the ESS to the CSS
-func (communication *MQTT) SendFeedbackMessage(code int, retryInterval int32, reason string, metaData *common.MetaData) common.SyncServiceError {
-	if common.Configuration.NodeType != common.ESS {
-		return nil
-	}
-	messagePayload := &messagePayload{Command: common.Feedback, Meta: *metaData, FeedbackCode: code, RetryInterval: retryInterval, Reason: reason}
+// SendFeedbackMessage sends a feedback message from the ESS to the CSS or from the CSS to the ESS
+func (communication *MQTT) SendFeedbackMessage(code int, retryInterval int32, reason string, metaData *common.MetaData, sendToOrigin bool) common.SyncServiceError {
+	messagePayload := &messagePayload{Version: common.Version, Command: common.Feedback, Meta: *metaData, FeedbackCode: code,
+		FeedbackFromOrigin: !sendToOrigin, RetryInterval: retryInterval, Reason: reason}
 	messageJSON, err := json.Marshal(messagePayload)
 	if err != nil {
 		return &Error{"Failed to send notification. Error: " + err.Error()}
-	}
-
-	notification := common.Notification{ObjectID: metaData.ObjectID, ObjectType: metaData.ObjectType,
-		DestOrgID: metaData.DestOrgID, DestID: metaData.OriginID, DestType: metaData.OriginType,
-		Status: common.Feedback, InstanceID: metaData.InstanceID}
-
-	// Store the notification records in storage as part of the object
-	if err := Store.UpdateNotificationRecord(notification); err != nil {
-		return err
 	}
 
 	if log.IsLogging(logger.TRACE) {
 		log.Trace("Sending feedback notification")
 	}
 
-	return communication.publishMessage(metaData.DestOrgID, common.Configuration.DestinationType, common.Configuration.DestinationID,
-		messageJSON, false)
+	destType := metaData.DestType
+	destID := metaData.DestID
+	if sendToOrigin {
+		destType = metaData.OriginType
+		destID = metaData.OriginID
+	}
+	return communication.publishMessage(metaData.DestOrgID, destType, destID, messageJSON, false)
 }
 
-// SendErrorMessage sends an error message from the ESS to the CSS
-func (communication *MQTT) SendErrorMessage(err common.SyncServiceError, metaData *common.MetaData) common.SyncServiceError {
-	if common.Configuration.NodeType != common.ESS {
-		return nil
-	}
+// SendErrorMessage sends an error message from the ESS to the CSS or from the CSS to the ESS
+func (communication *MQTT) SendErrorMessage(err common.SyncServiceError, metaData *common.MetaData, sendToOrigin bool) common.SyncServiceError {
 	code, retryInterval, reason := common.CreateFeedback(err)
-	return communication.SendFeedbackMessage(code, retryInterval, reason, metaData)
+	return communication.SendFeedbackMessage(code, retryInterval, reason, metaData, sendToOrigin)
 }
 
 func (communication *MQTT) sendRegisterOrPing(command string) common.SyncServiceError {
@@ -1028,36 +1055,51 @@ func (communication *MQTT) sendRegisterOrPing(command string) common.SyncService
 	}
 	destination := common.Destination{
 		DestOrgID: common.Configuration.OrgID, DestType: common.Configuration.DestinationType, DestID: common.Configuration.DestinationID,
-		Communication: common.MQTTProtocol}
-	messagePayload := &messagePayload{Command: command, Destination: destination,
-		PersistentStorage: common.Configuration.ESSPersistentStorage}
+		Communication: common.MQTTProtocol, CodeVersion: common.VersionAsString()}
+	messagePayload := &messagePayload{Version: common.Version, Command: command, Destination: destination,
+		PersistentStorage: Store.IsPersistent()}
 	messageJSON, err := json.Marshal(messagePayload)
 	if err != nil {
 		return &Error{fmt.Sprintf("Failed to %s. Error: %s", command, err.Error())}
 	}
 	if log.IsLogging(logger.TRACE) {
-		log.Trace("Sending " + command)
+		log.Trace("Sending %s", command)
 	}
 	return communication.publishMessage(common.Configuration.OrgID, common.Configuration.DestinationType, common.Configuration.DestinationID,
 		messageJSON, false)
 }
 
-// Register sends a registration message to be sent by an ESS
+// Register sends a registration message to be sent by an ESS  or from the CSS to the ESS
 func (communication *MQTT) Register() common.SyncServiceError {
 	return communication.sendRegisterOrPing(common.Register)
 }
 
-// RegisterAck sends a registration acknowledgement message from the CSS
-func (communication *MQTT) RegisterAck(destination common.Destination) common.SyncServiceError {
-	messagePayload := &messagePayload{Command: common.AckRegister}
+func (communication *MQTT) sendNotificationWithDestination(command string, destination common.Destination) common.SyncServiceError {
+	messagePayload := &messagePayload{Version: common.Version, Command: command}
 	messageJSON, err := json.Marshal(messagePayload)
 	if err != nil {
-		return &Error{"Failed to send ack for register. Error: " + err.Error()}
+		return &Error{fmt.Sprintf("Failed to send %s. Error: %s", command, err.Error())}
 	}
 	if log.IsLogging(logger.TRACE) {
-		log.Trace("Sending regack")
+		log.Trace("Sending %s", command)
 	}
 	return communication.publishMessage(destination.DestOrgID, destination.DestType, destination.DestID, messageJSON, false)
+}
+
+// RegisterAck sends a registration acknowledgement message from the CSS
+func (communication *MQTT) RegisterAck(destination common.Destination) common.SyncServiceError {
+	return communication.sendNotificationWithDestination(common.AckRegister, destination)
+}
+
+// RegisterNew sends a new registration message to be sent by an ESS
+func (communication *MQTT) RegisterNew() common.SyncServiceError {
+	return communication.sendRegisterOrPing(common.RegisterNew)
+}
+
+// RegisterAsNew send a notification from a CSS to a ESS that the ESS has to send a registerNew message in order
+// to register
+func (communication *MQTT) RegisterAsNew(destination common.Destination) common.SyncServiceError {
+	return communication.sendNotificationWithDestination(common.RegisterAsNew, destination)
 }
 
 // SendPing sends a ping message from ESS to CSS
@@ -1067,7 +1109,7 @@ func (communication *MQTT) SendPing() common.SyncServiceError {
 
 // GetData requests data to be sent from the CSS to the ESS or from the ESS to the CSS
 func (communication *MQTT) GetData(metaData common.MetaData, offset int64) common.SyncServiceError {
-	messagePayload := &messagePayload{Command: common.Getdata, Meta: metaData, Offset: offset}
+	messagePayload := &messagePayload{Version: common.Version, Command: common.Getdata, Meta: metaData, Offset: offset}
 	messageJSON, err := json.Marshal(messagePayload)
 	if err != nil {
 		return &Error{"Failed to send get data notification. Error: " + err.Error()}
@@ -1096,7 +1138,7 @@ func (communication *MQTT) ResendObjects() common.SyncServiceError {
 	destination := common.Destination{
 		DestOrgID: common.Configuration.OrgID, DestType: common.Configuration.DestinationType, DestID: common.Configuration.DestinationID,
 		Communication: common.MQTTProtocol}
-	messagePayload := &messagePayload{Command: common.Resend, Destination: destination}
+	messagePayload := &messagePayload{Version: common.Version, Command: common.Resend, Destination: destination}
 	messageJSON, err := json.Marshal(messagePayload)
 	if err != nil {
 		return &Error{"Failed to send resend objects notification. Error: " + err.Error()}
@@ -1110,7 +1152,7 @@ func (communication *MQTT) ResendObjects() common.SyncServiceError {
 
 // SendAckResendObjects sends ack to resend objects request
 func (communication *MQTT) SendAckResendObjects(destination common.Destination) common.SyncServiceError {
-	messagePayload := &messagePayload{Command: common.AckResend, Destination: destination}
+	messagePayload := &messagePayload{Version: common.Version, Command: common.AckResend, Destination: destination}
 	messageJSON, err := json.Marshal(messagePayload)
 	if err != nil {
 		return &Error{"Failed to send ack resend objects notification. Error: " + err.Error()}
@@ -1416,6 +1458,5 @@ func (communication *MQTT) checkForUpdates() {
 	}()
 }
 
-func (communication *MQTT) handleRegAck() {
-	common.Registered = true
-}
+// HandleRegAck handles a registration acknowledgement message from the CSS
+func (communication *MQTT) HandleRegAck() {}

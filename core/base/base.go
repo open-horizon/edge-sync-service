@@ -40,6 +40,8 @@ var blockChannel chan int
 var startStopLock sync.Mutex
 var started bool
 
+var waitersForStartChannel chan chan int
+
 func init() {
 	blockChannel = make(chan int, 1)
 	resendStopChannel = make(chan int, 1)
@@ -47,6 +49,7 @@ func init() {
 	maintenanceStopChannel = make(chan int, 1)
 	pingStopChannel = make(chan int, 1)
 	removeESSStopChannel = make(chan int, 1)
+	waitersForStartChannel = make(chan chan int, 40)
 }
 
 // Start starts up the synnc service
@@ -63,7 +66,11 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 	var ipAddress string
 	var err error
 	if common.Configuration.ListeningType != common.ListeningUnix &&
-		common.Configuration.ListeningType != common.ListeningSecureUnix {
+		common.Configuration.ListeningType != common.ListeningSecureUnix &&
+		(common.ServingAPIs ||
+			(common.Configuration.NodeType == common.CSS &&
+				common.Configuration.CommunicationProtocol != common.MQTTProtocol &&
+				common.Configuration.CommunicationProtocol != common.WIoTP)) {
 		ipAddress, err = checkIPAddress(common.Configuration.ListeningAddress)
 		if err != nil {
 			return err
@@ -79,15 +86,20 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 	security.Start()
 
 	if common.Configuration.NodeType == common.CSS {
-		mongoStore := &storage.MongoStorage{}
+		var cssStore storage.Storage
+		if common.Configuration.StorageProvider == common.Mongo {
+			cssStore = &storage.MongoStorage{}
+		} else {
+			cssStore = &storage.BoltStorage{}
+		}
 		if common.Configuration.CommunicationProtocol == common.HybridMQTT ||
 			common.Configuration.CommunicationProtocol == common.HybridWIoTP {
-			store = &storage.Cache{Store: mongoStore}
+			store = &storage.Cache{Store: cssStore}
 		} else {
-			store = mongoStore
+			store = cssStore
 		}
 	} else {
-		if common.Configuration.ESSPersistentStorage {
+		if common.Configuration.StorageProvider == common.Bolt {
 			store = &storage.BoltStorage{}
 		} else {
 			store = &storage.InMemoryStorage{}
@@ -134,6 +146,8 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 	}
 
 	common.ResendAcked = true
+
+	common.InitObjectLocks()
 
 	go func() {
 		common.GoRoutineStarted()
@@ -234,6 +248,19 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 	if err == nil {
 		common.Running = true
 		started = true
+
+		keepOnGoing := true
+		for keepOnGoing {
+			select {
+			case channel := <-waitersForStartChannel:
+				select {
+				case channel <- 1:
+				default:
+				}
+			default:
+				keepOnGoing = false
+			}
+		}
 	}
 	return err
 }
@@ -298,6 +325,16 @@ func Stop(quiesceTime int) {
 func BlockUntilShutdown() {
 	waitingOnBlockChannel = true
 	_ = <-blockChannel
+}
+
+// AddWaiterForStartup adds another channel for someone waiting for the Sync Service to start
+func AddWaiterForStartup(channel chan int) error {
+	select {
+	case waitersForStartChannel <- channel:
+		return nil
+	default:
+		return &common.InternalError{Message: "Too many calls to wait for startup."}
+	}
 }
 
 func checkIPAddress(host string) (string, common.SyncServiceError) {

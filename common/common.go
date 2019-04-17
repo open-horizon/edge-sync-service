@@ -1,6 +1,7 @@
 package common
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -67,6 +68,24 @@ func (e *InternalError) Error() string {
 	return e.Message
 }
 
+// NotFound is the error returned if an object wasn't found
+type NotFound struct {
+	message string
+}
+
+func (e *NotFound) Error() string {
+	if e.message == "" {
+		return "Object was not found"
+	}
+	return e.message
+}
+
+// IsNotFound returns true if the error passed in is the common.NotFound error
+func IsNotFound(err error) bool {
+	_, ok := err.(*NotFound)
+	return ok
+}
+
 // Destination describes a sync service node.
 // Each sync service edge node (ESS) has an address that is composed of the node's ID, Type, and Organization.
 // An ESS node communicates with the CSS using either MQTT or HTTP.
@@ -88,6 +107,10 @@ type Destination struct {
 	// Communication is the communication protocol used by the destination to connect (can be MQTT or HTTP)
 	//   required: true
 	Communication string `json:"communication" bson:"communication"`
+
+	// CodeVersion is the sync service code version used by the destination
+	//   required: true
+	CodeVersion string `json:"codeVersion" bson:"code-version"`
 }
 
 // MetaData is the metadata that identifies and defines the sync service object.
@@ -128,6 +151,7 @@ type MetaData struct {
 	// Expiration is a timestamp/date indicating when the object expires.
 	// When the object expires it is automatically deleted.
 	// The timestamp should be provided in RFC3339 format.
+	// This field is available only when working with the CSS.
 	// Optional field, if omitted the object doesn't expire.
 	Expiration string `json:"expiration" bson:"expiration"`
 
@@ -323,6 +347,15 @@ type ConsumedObject struct {
 	Timestamp time.Time
 }
 
+// NotificationInfo contains information about a message to send to the other side
+type NotificationInfo struct {
+	NotificationTopic string
+	DestType          string
+	DestID            string
+	InstanceID        int64
+	MetaData          *MetaData
+}
+
 // Object status
 const (
 	NotReadyToSend     = "notReady"           // The object is not ready to be sent to the other side
@@ -332,7 +365,7 @@ const (
 	ObjConsumed        = "objconsumed"        // The object was consumed by the app
 	ObjDeleted         = "objdeleted"         // The object was deleted by the other side
 	ObjReceived        = "objreceived"        // The object was received by the app
-	ConsumedByDest     = "consumedByDest"     // The object was consumed by the other side
+	ConsumedByDest     = "consumedByDest"     // The object was consumed by the other side (ESS only)
 )
 
 // Notification status and type
@@ -356,12 +389,13 @@ const (
 	AckResend             = "ackresend"
 	Register              = "register"
 	AckRegister           = "regack"
+	RegisterNew           = "registerNew"
+	RegisterAsNew         = "registerAsNew"
 	Received              = "received"
 	ReceivedPending       = "receivedpending"
 	AckReceived           = "ackreceived"
 	ReceivedByDestination = "receivedByDest"
 	Feedback              = "feedback"
-	AckFeedback           = "ackFeedaback"
 	Error                 = "error"
 	Ping                  = "ping"
 )
@@ -377,15 +411,19 @@ const (
 
 // Feedback codes
 const (
-	InternalErrorCode = iota
-	IOErrorCode
-	SecurityErrorCode
-	PathErrorCode
-	lastErrorCode // Add new error codes before this one
+	InternalErrorCode = 1
+	IOErrorCode       = 2
+	SecurityErrorCode = 3
+	PathErrorCode     = 4
+	InvalidObject     = 5
+
+	// All error codes must have a value below this value
+	// and all feedback codes must have a value above this value
+	lastErrorCode = 10000
 )
 
 // Magic is a magic number placed in the front of various payloads
-const Magic = 0x01010101
+const Magic = uint32(0x01010101)
 
 // Registered indicates if this node, an ESS, has registered itself
 var Registered bool
@@ -396,8 +434,19 @@ var ResendAcked bool
 // Running indicates that the Sync Service is running
 var Running bool
 
+// SyncServiceVersion is the current version of the Sync-Service
+type SyncServiceVersion struct {
+	Major uint32
+	Minor uint32
+}
+
 // Version is the current version of the Sync-Service
-const Version = 1
+var Version SyncServiceVersion
+
+// VersionAsString returns the current version as string
+func VersionAsString() string {
+	return fmt.Sprintf("%d.%d", Version.Major, Version.Minor)
+}
 
 // SingleOrgCSS is true in case of CSS ouside WIoTP with one organization set in the configration,
 // and false otherwise
@@ -405,6 +454,9 @@ var SingleOrgCSS bool
 
 // HTTPCSSURL specifies the CSS URL for HTTP communication from ESS
 var HTTPCSSURL string
+
+// ServingAPIs when true, indicates that the Sync Service is serving the various APIs over HTTP
+var ServingAPIs bool
 
 // Types of various ACLs
 const (
@@ -419,12 +471,23 @@ const (
 	ResendUndelivered
 )
 
+// Storage providers
+const (
+	Bolt     = "bolt"
+	InMemory = "inmemory"
+	Mongo    = "mongo"
+)
+
 // HashStrings uses FNV-1a (Fowler/Noll/Vo) fast and well dispersed hash functions
 // Reference: http://www.isthe.com/chongo/tech/comp/fnv/index.html
 const (
 	fnv32Init  uint32 = 0x811c9dc5
 	fnv32Prime uint32 = 0x01000193
 )
+
+func init() {
+	ServingAPIs = true
+}
 
 // HashStrings hashes strings
 func HashStrings(strings ...string) uint32 {
@@ -437,6 +500,67 @@ func HashStrings(strings ...string) uint32 {
 		}
 	}
 	return h
+}
+
+// Locks is a set of object locks
+type Locks struct {
+	numberOfLocks uint32
+	locks         []sync.RWMutex
+}
+
+// NewLocks initializes object locks
+func NewLocks() *Locks {
+	locks := Locks{}
+	if Configuration.NodeType == ESS {
+		locks.numberOfLocks = 256
+	} else {
+		locks.numberOfLocks = 1024
+	}
+
+	locks.locks = make([]sync.RWMutex, locks.numberOfLocks)
+	return &locks
+}
+
+// ObjectLocks are locks for object and notification changes
+var ObjectLocks Locks
+
+// InitObjectLocks initializes ObjectLocks
+func InitObjectLocks() {
+	ObjectLocks = *NewLocks()
+}
+
+// Lock locks the object
+func (locks *Locks) Lock(index uint32) {
+	locks.locks[index&(locks.numberOfLocks-1)].Lock()
+}
+
+// Unlock unlocks the object
+func (locks *Locks) Unlock(index uint32) {
+	locks.locks[index&(locks.numberOfLocks-1)].Unlock()
+}
+
+// RLock locks the object for reading
+func (locks *Locks) RLock(index uint32) {
+	locks.locks[index&(locks.numberOfLocks-1)].RLock()
+}
+
+// RUnlock unlocks the object for reading
+func (locks *Locks) RUnlock(index uint32) {
+	locks.locks[index&(locks.numberOfLocks-1)].RUnlock()
+}
+
+// ConditionalLock locks the object if the index doesn't correspond to a lock that is already taken
+func (locks *Locks) ConditionalLock(index uint32, lockedIndex uint32) {
+	if index&(locks.numberOfLocks-1) != lockedIndex&(locks.numberOfLocks-1) {
+		locks.locks[index&(locks.numberOfLocks-1)].Lock()
+	}
+}
+
+// ConditionalUnlock unlocks the object if the index doesn't correspond to a lock that is already taken
+func (locks *Locks) ConditionalUnlock(index uint32, lockedIndex uint32) {
+	if index&(locks.numberOfLocks-1) != lockedIndex&(locks.numberOfLocks-1) {
+		locks.locks[index&(locks.numberOfLocks-1)].Unlock()
+	}
 }
 
 // GetNotificationID gets the notification ID for the notification
@@ -472,6 +596,8 @@ func CreateFeedback(err SyncServiceError) (code int, retryInterval int32, reason
 		code = IOErrorCode
 	case *PathError:
 		code = PathErrorCode
+	case *NotFound:
+		code = InvalidObject
 	default:
 		code = InternalErrorCode
 	}
@@ -552,4 +678,9 @@ func BlockUntilNoRunningGoRoutines() {
 	timer.Stop()
 
 	waitingOnBlockChannel = false
+}
+
+func init() {
+	Version.Major = 1
+	Version.Minor = 0
 }

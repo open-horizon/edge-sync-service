@@ -25,7 +25,28 @@ rm coverage.tmp.out
 
 #$HOME/build.common/bin/run-sonar-scanner.sh go
 #rc=$?
-rc=0
+#if [ ${rc} -ne 0 ]; then
+#  echo "Upload of coverage data to Sonar Scanner failed. rc=${rc}."
+#  exit 1
+#fi
+
 cd -
 
-exit ${rc}
+# Uncomment the following line to test the end t end tests on travis-ci,
+# without waiting for the overnight cron job
+#TRAVIS_EVENT_TYPE=cron
+
+if [ "${TRAVIS_EVENT_TYPE}" = "cron" ]; then
+  echo "This build is a cron job. Running the end to end tests"
+
+  go test -v -timeout 60m github.com/open-horizon/edge-sync-service/tests/endtoend
+  rc=$?
+  if [ ${rc} -ne 0 ]; then
+    echo "End to end tests failed. rc=${rc}."
+    exit 1
+  fi
+else
+  echo "This build is not a cron job. Not running the end to end tests"
+fi
+
+exit 0

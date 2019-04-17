@@ -4,6 +4,7 @@ package common
 
 import (
 	"fmt"
+	"path/filepath"
 	"math"
 	"math/rand"
 	"os"
@@ -288,9 +289,10 @@ type Config struct {
 	// that are ready to be activated
 	ObjectActivationInterval int16 `env:"OBJECT_ACTIVATION_INTERVAL"`
 
-	// ESSPersistentStorage specifies whether to use a persistent storage (boltdb) or in memory storage.
-	// The default value is false, i.e. in memory storage.
-	ESSPersistentStorage bool `env:"ESS_PERSISTENT_STORAGE"`
+	// StorageProvider specifies the type of the storage to be used by this node.
+	// For the CSS the options are 'mongo' (the default), and 'bolt'
+	// For the ESS the options are 'inmemory' (the default), and 'bolt'
+	StorageProvider string `env:"STORAGE_PROVIDER"`
 
 	// ESSConsumedObjectsKept specifies the number of objects sent by the ESS and consumed by the CSS
 	// that are kept by the ESS for reporting
@@ -303,6 +305,16 @@ type Config struct {
 	// ShutdownQuiesceTime specifies the maximum time in seconds that the Sync Service will wait for internal tasks to end while shuting down
 	// The default values is 60 seconds
 	ShutdownQuiesceTime int `env:"SHUTDOWN_QUIESCE_TIME"`
+	
+	// ObjectsDataPath specifies a directory in which the object's data should be persisted.
+	// The application can then access the object's data directly on the file system instead of reading
+	// the data via the Sync Service. Applications should only read/copy the data but not modify/delete it. 
+	// When ObjectsDataPath is set the DestinationDataURI field in the object's metadata includes 
+	// the full path to the object's data. 
+	// ObjectsDataPath can be used only when the StorageProvider is set to bolt.
+	// The default is empty (not set) meaning that the object's data is persisted internally in a 
+	// path selected by the Sync Service. 
+	ObjectsDataPath string `env:"OBJECTS_DATA_PATH"`
 }
 
 // Configuration contains the read in configuration
@@ -382,44 +394,46 @@ func ValidateConfig() error {
 		SingleOrgCSS = true
 	}
 
-	Configuration.ListeningType = strings.ToLower(Configuration.ListeningType)
-	if len(Configuration.ListeningType) == 0 {
-		if Configuration.NodeType == ESS {
-			Configuration.ListeningType = ListeningSecurely
-		} else {
-			Configuration.ListeningType = ListeningUnsecurely
+	if ServingAPIs || Configuration.NodeType == CSS {
+		Configuration.ListeningType = strings.ToLower(Configuration.ListeningType)
+		if len(Configuration.ListeningType) == 0 {
+			if Configuration.NodeType == ESS {
+				Configuration.ListeningType = ListeningSecurely
+			} else {
+				Configuration.ListeningType = ListeningUnsecurely
+			}
+		} else if Configuration.ListeningType != ListeningBoth &&
+			Configuration.ListeningType != ListeningSecurely && Configuration.ListeningType != ListeningUnsecurely &&
+			Configuration.ListeningType != ListeningUnix && Configuration.ListeningType != ListeningSecureUnix {
+			return &configError{fmt.Sprintf("ListeningType must be %s, %s, %s, %s, or %s",
+				ListeningBoth, ListeningSecurely, ListeningUnsecurely, ListeningUnix, ListeningSecureUnix)}
 		}
-	} else if Configuration.ListeningType != ListeningBoth &&
-		Configuration.ListeningType != ListeningSecurely && Configuration.ListeningType != ListeningUnsecurely &&
-		Configuration.ListeningType != ListeningUnix && Configuration.ListeningType != ListeningSecureUnix {
-		return &configError{fmt.Sprintf("ListeningType must be %s, %s, %s, %s, or %s",
-			ListeningBoth, ListeningSecurely, ListeningUnsecurely, ListeningUnix, ListeningSecureUnix)}
-	}
 
-	if (Configuration.ListeningType == ListeningUnsecurely || Configuration.ListeningType == ListeningBoth) &&
-		Configuration.UnsecureListeningPort == 0 {
-		return &configError{"Have requested unsecure API serving, but the UnsecureListeningPort is zero."}
-	}
-	if (Configuration.ListeningType == ListeningSecurely || Configuration.ListeningType == ListeningBoth) &&
-		Configuration.SecureListeningPort == 0 {
-		return &configError{"Have requested secure API serving, but the SecureListeningPort is zero."}
-	}
-	if Configuration.NodeType == CSS {
-		if (Configuration.ListeningType == ListeningSecurely || Configuration.ListeningType == ListeningBoth) &&
-			len(Configuration.ServerCertificate) == 0 {
-			return &configError{"Have requested secure API serving, but no server certificate has been specified."}
+		if (Configuration.ListeningType == ListeningUnsecurely || Configuration.ListeningType == ListeningBoth) &&
+			Configuration.UnsecureListeningPort == 0 {
+			return &configError{"Have requested unsecure API serving, but the UnsecureListeningPort is zero."}
 		}
 		if (Configuration.ListeningType == ListeningSecurely || Configuration.ListeningType == ListeningBoth) &&
-			len(Configuration.ServerKey) == 0 {
-			return &configError{"Have requested secure API serving, but no server private key has been specified."}
+			Configuration.SecureListeningPort == 0 {
+			return &configError{"Have requested secure API serving, but the SecureListeningPort is zero."}
 		}
-	}
-	if Configuration.ListeningType == ListeningUnix || Configuration.ListeningType == ListeningSecureUnix {
-		if Configuration.NodeType != ESS {
-			return &configError{"Only an ESS can listen via Unix Sockets"}
+		if Configuration.NodeType == CSS {
+			if (Configuration.ListeningType == ListeningSecurely || Configuration.ListeningType == ListeningBoth) &&
+				len(Configuration.ServerCertificate) == 0 {
+				return &configError{"Have requested secure API serving, but no server certificate has been specified."}
+			}
+			if (Configuration.ListeningType == ListeningSecurely || Configuration.ListeningType == ListeningBoth) &&
+				len(Configuration.ServerKey) == 0 {
+				return &configError{"Have requested secure API serving, but no server private key has been specified."}
+			}
 		}
-		if len(Configuration.ListeningAddress) == 0 {
-			return &configError{"When Listening via Unix Sockets, you must specify the Socket file using the ListeningAddress property"}
+		if Configuration.ListeningType == ListeningUnix || Configuration.ListeningType == ListeningSecureUnix {
+			if Configuration.NodeType != ESS {
+				return &configError{"Only an ESS can listen via Unix Sockets"}
+			}
+			if len(Configuration.ListeningAddress) == 0 {
+				return &configError{"When Listening via Unix Sockets, you must specify the Socket file using the ListeningAddress property"}
+			}
 		}
 	}
 
@@ -597,56 +611,87 @@ func ValidateConfig() error {
 		Configuration.MaxInflightChunks = 64
 	}
 
+	Configuration.StorageProvider = strings.ToLower(Configuration.StorageProvider)
+	if Configuration.NodeType == CSS {
+		if Configuration.StorageProvider == "" {
+			Configuration.StorageProvider = Mongo
+		} else if Configuration.StorageProvider != Mongo && Configuration.StorageProvider != Bolt {
+			return &configError{"Invalid StorageProvider, for CSS please specify any off: 'mongo', 'bolt', or leave as empty string"}
+		}
+	} else {
+		if Configuration.StorageProvider == "" {
+			Configuration.StorageProvider = InMemory
+		} else if Configuration.StorageProvider != InMemory && Configuration.StorageProvider != Bolt {
+			return &configError{"Invalid StorageProvider, for ESS please specify any off: 'inmemory', 'bolt', or leave as empty string"}
+		}
+	}
+	if len(Configuration.ObjectsDataPath) > 0 {
+		if Configuration.StorageProvider == Bolt {
+			if path, err := filepath.Abs(Configuration.ObjectsDataPath); err == nil { 
+				Configuration.ObjectsDataPath = path+"/"
+			} else {
+				return &configError{fmt.Sprintf("Invalid ObjectsDataPath (%s): failed to convert to absolute path, err= %s", Configuration.ObjectsDataPath, err)}			
+			}
+		} else {
+			return &configError{"Invalid ObjectsDataPath, it can only be set when StorageProvider is 'bolt'"}			
+		}
+	}
+
 	return nil
 }
 
 func init() {
-	Configuration.NodeType = CSS
-	Configuration.ListeningType = ""
-	Configuration.ListeningAddress = ""
-	Configuration.SecureListeningPort = 8443
-	Configuration.UnsecureListeningPort = 8080
-	Configuration.LeadershipTimeout = 30
-	Configuration.AuthenticationHandler = "dummy"
-	Configuration.CSSOnWIoTP = false
-	Configuration.UsingEdgeConnector = false
-	Configuration.MQTTUseSSL = true
-	Configuration.MQTTAllowInvalidCertificates = false
-	Configuration.PersistenceRootPath = "/var/wiotp-edge/persist"
-	Configuration.MQTTCACertificate = "broker/ca/ca.cert.pem"
-	Configuration.MQTTBrokerConnectTimeout = 300
-	Configuration.LogLevel = "INFO"
-	Configuration.LogRootPath = "/var/edge-sync-service/log"
-	Configuration.LogFileName = "sync-service"
-	Configuration.TraceLevel = "INFO"
-	Configuration.TraceRootPath = "/var/edge-sync-service/trace"
-	Configuration.TraceFileName = "sync-service"
-	Configuration.LogTraceFileSizeKB = DefaultLogTraceFileSize
-	Configuration.MaxCompressedlLogTraceFilesNumber = 50
-	Configuration.LogTraceDestination = "file"
-	Configuration.LogTraceMaintenanceInterval = 60
-	Configuration.ResendInterval = 5
-	Configuration.ESSPingInterval = 1
-	Configuration.RemoveESSRegistrationTime = 30
-	Configuration.MaxDataChunkSize = 120 * 1024
-	Configuration.MaxInflightChunks = 1
-	Configuration.MongoAddressCsv = "localhost:27017"
-	Configuration.MongoDbName = "d_edge"
-	Configuration.MongoAuthDbName = "admin"
-	Configuration.MongoUsername = ""
-	Configuration.MongoPassword = ""
-	Configuration.MongoUseSSL = false
-	Configuration.MongoCACertificate = ""
-	Configuration.MongoAllowInvalidCertificates = false
-	Configuration.MongoSessionCacheSize = 1
-	Configuration.DatabaseConnectTimeout = 300
-	Configuration.StorageMaintenanceInterval = 30
-	Configuration.ObjectActivationInterval = 30
-	Configuration.CommunicationProtocol = MQTTProtocol
-	Configuration.HTTPPollingInterval = 10
-	Configuration.HTTPCSSUseSSL = false
-	Configuration.HTTPCSSCACertificate = ""
-	Configuration.MessagingGroupCacheExpiration = 60
-	Configuration.ShutdownQuiesceTime = 60
-	Configuration.ESSConsumedObjectsKept = 1000
+	SetDefaultConfig(&Configuration)
+}
+
+// SetDefaultConfig sets the default configuration into the provided Config struct
+func SetDefaultConfig(config *Config) {
+	config.NodeType = CSS
+	config.ListeningType = ""
+	config.ListeningAddress = ""
+	config.SecureListeningPort = 8443
+	config.UnsecureListeningPort = 8080
+	config.LeadershipTimeout = 30
+	config.AuthenticationHandler = "dummy"
+	config.CSSOnWIoTP = false
+	config.UsingEdgeConnector = false
+	config.MQTTUseSSL = true
+	config.MQTTAllowInvalidCertificates = false
+	config.PersistenceRootPath = "/var/edge-sync-service/persist"
+	config.MQTTCACertificate = "broker/ca/ca.cert.pem"
+	config.MQTTBrokerConnectTimeout = 300
+	config.LogLevel = "INFO"
+	config.LogRootPath = "/var/edge-sync-service/log"
+	config.LogFileName = "sync-service"
+	config.TraceLevel = "INFO"
+	config.TraceRootPath = "/var/edge-sync-service/trace"
+	config.TraceFileName = "sync-service"
+	config.LogTraceFileSizeKB = DefaultLogTraceFileSize
+	config.MaxCompressedlLogTraceFilesNumber = 50
+	config.LogTraceDestination = "file"
+	config.LogTraceMaintenanceInterval = 60
+	config.ResendInterval = 5
+	config.ESSPingInterval = 1
+	config.RemoveESSRegistrationTime = 30
+	config.MaxDataChunkSize = 120 * 1024
+	config.MaxInflightChunks = 1
+	config.MongoAddressCsv = "localhost:27017"
+	config.MongoDbName = "d_edge"
+	config.MongoAuthDbName = "admin"
+	config.MongoUsername = ""
+	config.MongoPassword = ""
+	config.MongoUseSSL = false
+	config.MongoCACertificate = ""
+	config.MongoAllowInvalidCertificates = false
+	config.MongoSessionCacheSize = 1
+	config.DatabaseConnectTimeout = 300
+	config.StorageMaintenanceInterval = 30
+	config.ObjectActivationInterval = 30
+	config.CommunicationProtocol = MQTTProtocol
+	config.HTTPPollingInterval = 10
+	config.HTTPCSSUseSSL = false
+	config.HTTPCSSCACertificate = ""
+	config.MessagingGroupCacheExpiration = 60
+	config.ShutdownQuiesceTime = 60
+	config.ESSConsumedObjectsKept = 1000
 }

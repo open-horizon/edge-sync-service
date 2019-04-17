@@ -30,7 +30,7 @@ func init() {
 
 // StartLeaderDetermination starts the leader determination process
 func StartLeaderDetermination(theStore storage.Storage) {
-	if common.Configuration.NodeType != common.CSS {
+	if common.Configuration.NodeType != common.CSS || common.Configuration.StorageProvider != common.Mongo {
 		return
 	}
 	store = theStore
@@ -62,7 +62,7 @@ func StartLeaderDetermination(theStore storage.Storage) {
 
 // CheckIfLeader checks if the current process is the leader
 func CheckIfLeader() bool {
-	if common.Configuration.NodeType != common.CSS {
+	if common.Configuration.NodeType != common.CSS || common.Configuration.StorageProvider != common.Mongo {
 		return true
 	}
 	if !isLeader {

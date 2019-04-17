@@ -33,6 +33,11 @@ func TestHTTPCommUpdatedObjects(t *testing.T) {
 	defer Store.Stop()
 	defer security.Stop()
 
+	destination := common.Destination{DestOrgID: "myorg000", DestID: "dev1", DestType: "httpDevice", Communication: common.HTTPProtocol}
+	if err := Store.StoreDestination(destination); err != nil {
+		t.Errorf("Failed to store destination. Error: %s", err.Error())
+	}
+
 	testObjects := []httpTestObjectInfo{
 		{common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg000", DestID: "dev1", DestType: "httpDevice"},
 			common.ReadyToSend, []byte("plokmijnuhbygv")},
@@ -57,7 +62,9 @@ func TestHTTPCommUpdatedObjects(t *testing.T) {
 
 	writer := newHTTPCommTestResponseWriter()
 	request, _ := http.NewRequest(http.MethodGet, "", nil)
-	request.SetBasicAuth("myorg000/httpDevice/dev1", "")
+	identity := "myorg000/httpDevice/dev1"
+	request.SetBasicAuth(identity, "")
+	request.Header.Add(security.SPIRequestIdentityHeader, identity)
 
 	httpComm.handleObjects(writer, request)
 	if writer.statusCode != http.StatusOK {
@@ -84,7 +91,10 @@ func TestHTTPCommUpdatedObjects(t *testing.T) {
 				dataURL := message.MetaData.DestOrgID + "/" + message.MetaData.ObjectType + "/" +
 					message.MetaData.ObjectID + "/" + strconv.FormatInt(message.MetaData.InstanceID, 10) + "/" + common.Data
 				request, _ := http.NewRequest(http.MethodGet, dataURL, nil)
-				request.SetBasicAuth("myorg000/httpDevice/dev1", "")
+				identity := "myorg000/httpDevice/dev1"
+				request.SetBasicAuth(identity, "")
+				request.Header.Add(security.SPIRequestIdentityHeader, identity)
+
 				httpComm.handleObjects(writer, request)
 				if writer.statusCode != http.StatusOK {
 					t.Errorf("The call to handleObjects(data) returned %d instead of %d\n", writer.statusCode, http.StatusOK)
@@ -101,7 +111,9 @@ func TestHTTPCommUpdatedObjects(t *testing.T) {
 			consumedURL := message.MetaData.DestOrgID + "/" + message.MetaData.ObjectType + "/" +
 				message.MetaData.ObjectID + "/" + strconv.FormatInt(message.MetaData.InstanceID, 10) + "/" + operation
 			request, _ := http.NewRequest(http.MethodPut, consumedURL, nil)
-			request.SetBasicAuth("myorg000/httpDevice/dev1", "")
+			identity := "myorg000/httpDevice/dev1"
+			request.SetBasicAuth(identity, "")
+			request.Header.Add(security.SPIRequestIdentityHeader, identity)
 			httpComm.handleObjects(writer, request)
 			if writer.statusCode != http.StatusNoContent {
 				t.Errorf("The call to handleObjects(consumed) returned %d instead of %d\n", writer.statusCode, http.StatusNoContent)
@@ -117,10 +129,18 @@ func TestHttpCommCssMisc(t *testing.T) {
 	defer Store.Stop()
 	defer security.Stop()
 
+	destination := common.Destination{DestOrgID: common.Configuration.OrgID, DestType: "httpDevice", DestID: "dev1", Communication: common.HTTPProtocol}
+	if err := Store.StoreDestination(destination); err != nil {
+		t.Errorf("Failed to store destination. Error: %s", err.Error())
+	}
+
+	identity := common.Configuration.OrgID + "/httpDevice/dev1"
+
 	writer := newHTTPCommTestResponseWriter()
 	resendURL := common.Configuration.OrgID + "/" + common.Resend
 	request, _ := http.NewRequest(http.MethodPut, resendURL, nil)
-	request.SetBasicAuth(common.Configuration.OrgID+"/httpDevice/dev1", "")
+	request.SetBasicAuth(identity, "")
+	request.Header.Add(security.SPIRequestIdentityHeader, identity)
 	httpComm.handleObjects(writer, request)
 	if writer.statusCode != http.StatusNoContent {
 		t.Errorf("The call to handleObjects(resend) returned %d instead of %d\n", writer.statusCode, http.StatusNoContent)
@@ -138,7 +158,8 @@ func TestHttpCommCssMisc(t *testing.T) {
 	writer = newHTTPCommTestResponseWriter()
 	resendURL = common.Configuration.OrgID + "/" + common.Resend + "x"
 	request, _ = http.NewRequest(http.MethodPut, resendURL, nil)
-	request.SetBasicAuth(common.Configuration.OrgID+"/httpDevice/dev1", "")
+	request.SetBasicAuth(identity, "")
+	request.Header.Add(security.SPIRequestIdentityHeader, identity)
 	httpComm.handleObjects(writer, request)
 	if writer.statusCode != http.StatusBadRequest {
 		t.Errorf("The call to handleObjects(resend) returned %d instead of %d\n", writer.statusCode, http.StatusBadRequest)
@@ -147,6 +168,7 @@ func TestHttpCommCssMisc(t *testing.T) {
 	writer = newHTTPCommTestResponseWriter()
 	request, _ = http.NewRequest(http.MethodPut, common.Configuration.OrgID, nil)
 	request.SetBasicAuth(common.Configuration.OrgID+"/httpDevice@dev1", "")
+	request.Header.Add(security.SPIRequestIdentityHeader, identity)
 
 	httpComm.handleRegister(writer, request)
 	if writer.statusCode != http.StatusForbidden {
@@ -155,16 +177,8 @@ func TestHttpCommCssMisc(t *testing.T) {
 
 	writer = newHTTPCommTestResponseWriter()
 	request, _ = http.NewRequest(http.MethodPost, "", nil)
-	request.SetBasicAuth(common.Configuration.OrgID+"/httpDevice/dev1", "")
-
-	httpComm.handleRegister(writer, request)
-	if writer.statusCode != http.StatusMethodNotAllowed {
-		t.Errorf("The call to handleRegister returned %d instead of %d\n", writer.statusCode, http.StatusMethodNotAllowed)
-	}
-
-	writer = newHTTPCommTestResponseWriter()
-	request, _ = http.NewRequest(http.MethodPost, "", nil)
-	request.SetBasicAuth(common.Configuration.OrgID+"/httpDevice/dev1", "")
+	request.SetBasicAuth(identity, "")
+	request.Header.Add(security.SPIRequestIdentityHeader, identity)
 
 	httpComm.handleRegister(writer, request)
 	if writer.statusCode != http.StatusMethodNotAllowed {
@@ -188,9 +202,14 @@ func TestHTTPCommEssSendObjects(t *testing.T) {
 	testObjects := []httpTestEssSendObjectInfo{
 		{common.MetaData{ObjectID: "1", ObjectType: "type2", DestOrgID: "myorg000", OriginID: "dev1", OriginType: "httpDevice"},
 			common.Update, []byte("qazwsxedcrfvtgbyhn")},
-		{common.MetaData{ObjectID: "2", ObjectType: "type2", DestOrgID: "myorg000", DestID: "dev1", DestType: "httpDevice",
+		{common.MetaData{ObjectID: "2", ObjectType: "type2", DestOrgID: "myorg000", OriginID: "dev1", OriginType: "httpDevice",
 			Deleted: true},
 			common.Delete, nil},
+	}
+
+	destination := common.Destination{DestOrgID: "myorg000", DestType: "httpDevice", DestID: "dev1", Communication: common.HTTPProtocol}
+	if err := Store.StoreDestination(destination); err != nil {
+		t.Errorf("Failed to store destination. Error: %s", err.Error())
 	}
 
 	for _, testObject := range testObjects {
@@ -202,9 +221,13 @@ func TestHTTPCommEssSendObjects(t *testing.T) {
 			t.Errorf("Failed to marshal payload. Error: " + err.Error())
 		}
 		request, _ := http.NewRequest(http.MethodPut, theURL, bytes.NewReader(body))
-		request.SetBasicAuth(common.Configuration.OrgID+"/"+testObject.metaData.OriginType+"/"+testObject.metaData.OriginID, "")
+		identity := "myorg000/" + testObject.metaData.OriginType + "/" + testObject.metaData.OriginID
+		request.SetBasicAuth(identity, "")
+		request.Header.Add(security.SPIRequestIdentityHeader, identity)
+
 		httpComm.handleObjects(writer, request)
-		if writer.statusCode != http.StatusNoContent {
+
+		if writer.statusCode != http.StatusNoContent && writer.statusCode != http.StatusConflict {
 			t.Errorf("The call to handleObjects(%s) returned %d instead of %d\n",
 				testObject.action, writer.statusCode, http.StatusNoContent)
 		} else {
@@ -212,7 +235,9 @@ func TestHTTPCommEssSendObjects(t *testing.T) {
 				theURL = testObject.metaData.DestOrgID + "/" + testObject.metaData.ObjectType + "/" +
 					testObject.metaData.ObjectID + "/1/" + common.Data
 				request, _ := http.NewRequest(http.MethodPut, theURL, bytes.NewReader(testObject.data))
-				request.SetBasicAuth(common.Configuration.OrgID+"/"+testObject.metaData.OriginType+"/"+testObject.metaData.OriginID, "")
+				identity := common.Configuration.OrgID + "/" + testObject.metaData.OriginType + "/" + testObject.metaData.OriginID
+				request.SetBasicAuth(identity, "")
+				request.Header.Add(security.SPIRequestIdentityHeader, identity)
 				httpComm.handleObjects(writer, request)
 				if writer.statusCode != http.StatusNoContent {
 					t.Errorf("The call to handleObjects(data) returned %d instead of %d\n",
@@ -329,14 +354,14 @@ func TestEssHTTPComm(t *testing.T) {
 	err = httpComm.SendNotificationMessage(common.Update, "httpDevice", "dev2", 1,
 		&common.MetaData{ObjectType: "plover", ObjectID: "xyzzy", DestOrgID: "myorg000",
 			OriginType: "httpDevice", OriginID: "dev2", InstanceID: 1})
-	if err != nil {
+	if err != nil && !common.IsNotFound(err) {
 		t.Error(err)
 	}
 
 	err = httpComm.SendNotificationMessage(common.Delete, "httpDevice", "dev2", 1,
 		&common.MetaData{ObjectType: "plover", ObjectID: "xyzzy", DestOrgID: "myorg000",
 			OriginType: "httpDevice", OriginID: "dev2", InstanceID: 1})
-	if err != nil {
+	if err != nil && !isIgnoredByHandler(err) {
 		t.Error(err)
 	}
 
@@ -344,7 +369,7 @@ func TestEssHTTPComm(t *testing.T) {
 	err = httpComm.SendNotificationMessage(common.Deleted, "httpDevice", "dev2", 1,
 		&common.MetaData{ObjectType: "plover", ObjectID: "xyzzy", DestOrgID: "myorg000",
 			OriginType: "httpDevice", OriginID: "dev2", InstanceID: 1})
-	if err != nil {
+	if err != nil && !isIgnoredByHandler(err) {
 		t.Error(err)
 	}
 
@@ -352,7 +377,7 @@ func TestEssHTTPComm(t *testing.T) {
 	err = httpComm.SendNotificationMessage(common.Consumed, "httpDevice", "dev2", 1,
 		&common.MetaData{ObjectType: "plover", ObjectID: "xyzzy", DestOrgID: "myorg000",
 			OriginType: "httpDevice", OriginID: "dev2", InstanceID: 1})
-	if err != nil {
+	if err != nil && !isIgnoredByHandler(err) {
 		t.Error(err)
 	}
 
@@ -386,7 +411,7 @@ func testLoadObjects(testObjects []httpTestObjectInfo, t *testing.T) {
 		metaData := testObject.metaData
 
 		// Delete the object first
-		if err := DeleteStoredObject(metaData); err != nil {
+		if err := storage.DeleteStoredObject(Store, metaData); err != nil {
 			t.Errorf("Failed to delete object (objectID = %s). Error: %s\n",
 				metaData.ObjectID, err.Error())
 		}
@@ -409,15 +434,25 @@ func testLoadObjects(testObjects []httpTestObjectInfo, t *testing.T) {
 		}
 
 		if metaData.Deleted {
-			err = SendDeleteNotifications(*updatedMetaData)
+			notificationsInfo, err := PrepareDeleteNotifications(*updatedMetaData)
+			if err != nil {
+				t.Errorf("Failed to send delete notifications for object (objectID = %s). Error: %s\n",
+					metaData.ObjectID, err.Error())
+			}
+			err = SendNotifications(notificationsInfo)
 			if err != nil {
 				t.Errorf("Failed to send delete notifications for object (objectID = %s). Error: %s\n",
 					metaData.ObjectID, err.Error())
 			}
 		} else {
-			err = SendObjectNotifications(*updatedMetaData)
+			notificationsInfo, err := PrepareObjectNotifications(*updatedMetaData)
 			if err != nil {
 				t.Errorf("Failed to send notifications for object (objectID = %s). Error: %s\n",
+					metaData.ObjectID, err.Error())
+			}
+			err = SendNotifications(notificationsInfo)
+			if err != nil {
+				t.Errorf("Failed to send delete notifications for object (objectID = %s). Error: %s\n",
 					metaData.ObjectID, err.Error())
 			}
 		}
@@ -429,6 +464,12 @@ func registerTestDevice(orgID string, destType string, destID string, t *testing
 	theURL := orgID + "/" + destType + "/" + destID
 	request, _ := http.NewRequest(http.MethodPut, theURL, nil)
 	request.SetBasicAuth(theURL, "")
+	request.Header.Add(security.SPIRequestIdentityHeader, theURL)
+
+	destination := common.Destination{DestOrgID: orgID, DestType: destType, DestID: destID, Communication: common.HTTPProtocol}
+	if err := Store.StoreDestination(destination); err != nil {
+		t.Errorf("Failed to store destination. Error: %s", err.Error())
+	}
 
 	httpComm.handleRegister(writer, request)
 	if writer.statusCode != http.StatusNoContent {
@@ -513,10 +554,12 @@ func (ctx *testEssCommContext) testHandleObjects(writer http.ResponseWriter, req
 func testHTTPCommSetup(nodeType string) string {
 	common.Running = true
 	time.Sleep(100 * time.Millisecond) // Wait a bit
+	common.InitObjectLocks()
 	security.SetAuthentication(&security.TestAuthenticate{})
 	security.Start()
 
 	if nodeType == common.CSS {
+		common.Configuration.MongoDbName = "d_test_db"
 		Store = &storage.MongoStorage{}
 	} else {
 		// Store = &storage.InMemoryStorage{}
