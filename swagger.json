@@ -117,6 +117,104 @@
         }
       }
     },
+    "/api/v1/health": {
+      "get": {
+        "description": "Get health status of the sync service node.",
+        "produces": [
+          "application/json",
+          "text/plain"
+        ],
+        "summary": "Get health status of the sync service node.",
+        "operationId": "handleHealth",
+        "parameters": [
+          {
+            "type": "boolean",
+            "description": "Whether or not to include the detailed health status",
+            "name": "details",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Health status",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/healthReport"
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to send health status.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{orgID}": {
+      "get": {
+        "description": "Get the list of objects that have destination policies.\nAn application would typically invoke this API periodically to check for updates.",
+        "produces": [
+          "application/json",
+          "text/plain"
+        ],
+        "summary": "Get objects that have destination policies.",
+        "operationId": "handleListObjectsWithDestinationPolicy",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the updated objects to return. Present only when working with a CSS, removed from the path when working with an ESS",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "boolean",
+            "description": "Must be true to indicate that objects with destinationPolicy are to be retrieved",
+            "name": "destination_policy",
+            "in": "query",
+            "required": true
+          },
+          {
+            "type": "boolean",
+            "description": "Whether or not to include the objects that have been marked as received by the application",
+            "name": "received",
+            "in": "query"
+          },
+          {
+            "type": "boolean",
+            "description": "The ID of the service (orgID/architecture/version/serviceName) to which objects have affinity, whose Destination Policy should be fetched.",
+            "name": "service",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Object destination policy response",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ObjectDestinationPolicy"
+              }
+            }
+          },
+          "404": {
+            "description": "No updated objects found",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve the updated objects",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
     "/api/v1/objects/{orgID}/{objectType}": {
       "get": {
         "description": "Get the list of objects of the specified object type that have pending (unconsumed) updates.\nAn application would typically invoke this API periodically to check for updates (an alternative is to use a webhook).",
@@ -677,6 +775,111 @@
             }
           }
         }
+      },
+      "put": {
+        "description": "Set the list of sync service (ESS) nodes to be the destinations of the object of the specified object type and object ID.\nThis is a CSS only API.",
+        "consumes": [
+          "application/octet-stream"
+        ],
+        "produces": [
+          "text/plain"
+        ],
+        "summary": "Set the destinations of an object.",
+        "operationId": "handleObjectDestinationsUpdate",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the object whose destinations will be updated",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object type of the object whose destinations will be updated",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object whose destinations will be updated",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "description": "The object's destination list",
+            "name": "payload",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "binary"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Object destinations updated",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to update the object's destinations",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{orgID}/{objectType}/{objectID}/policyreceived": {
+      "put": {
+        "description": "Mark the object of the specified object type and object ID as having its destination policy received\nAfter the object is marked as such it will not be delivered to the application listing objects with\na destination policy, unless it adds \"received=true\" to the query parameters.",
+        "produces": [
+          "text/plain"
+        ],
+        "summary": "Mark an object's destination policy as having been received.",
+        "operationId": "handlePolicyReceived",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the object to mark as having its destination policy received. Present only when working with a CSS, removed from the path when working with an ESS",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object type of the object to mark as having its destination policy received",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object to mark as having its destination policy received",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Object marked as having its destination policy received",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to mark the object as having its destination policy received",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
       }
     },
     "/api/v1/objects/{orgID}/{objectType}/{objectID}/received": {
@@ -1187,6 +1390,55 @@
     }
   },
   "definitions": {
+    "ConsumedObject": {
+      "description": "ConsumedObject contains consumed object's meta data and its timestamp",
+      "type": "object",
+      "properties": {
+        "MetaData": {
+          "$ref": "#/definitions/MetaData"
+        },
+        "Timestamp": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
+    "DBHealthStatusInfo": {
+      "description": "DBHealthStatusInfo describes the health status of the database of the sync-service node",
+      "type": "object",
+      "properties": {
+        "dbReadFailures": {
+          "type": "integer",
+          "format": "uint32",
+          "x-go-name": "DBReadFailures"
+        },
+        "dbStatus": {
+          "type": "string",
+          "x-go-name": "DBStatus"
+        },
+        "dbWriteFailures": {
+          "type": "integer",
+          "format": "uint32",
+          "x-go-name": "DBWriteFailures"
+        },
+        "disconnectedFromDB": {
+          "type": "boolean",
+          "x-go-name": "DisconnectedFromDB"
+        },
+        "lastDisconnectFromDBDuration": {
+          "type": "integer",
+          "format": "uint64",
+          "x-go-name": "LastDisconnectFromDBDuration"
+        },
+        "timeSinceLastReadWriteError": {
+          "type": "integer",
+          "format": "uint64",
+          "x-go-name": "TimeSinceLastReadWriteError"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
     "Destination": {
       "description": "Each sync service edge node (ESS) has an address that is composed of the node's ID, Type, and Organization.\nAn ESS node communicates with the CSS using either MQTT or HTTP.",
       "type": "object",
@@ -1194,9 +1446,15 @@
       "required": [
         "destinationType",
         "destinationID",
-        "communication"
+        "communication",
+        "codeVersion"
       ],
       "properties": {
+        "codeVersion": {
+          "description": "CodeVersion is the sync service code version used by the destination",
+          "type": "string",
+          "x-go-name": "CodeVersion"
+        },
         "communication": {
           "description": "Communication is the communication protocol used by the destination to connect (can be MQTT or HTTP)",
           "type": "string",
@@ -1221,7 +1479,7 @@
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
     },
     "DestinationsStatus": {
-      "description": "DestinationsStatus describes the delivery status of an object for a destination\nDestinationsStatus provides information about the delivery status of an object for a certain destination.\nThe status can be one of the following:\nIndication whether the object has been delivered to the destination\npending - inidicates that the object is pending delivery to this destination\ndelivering - indicates that the object is being delivered to this destination\ndelivered - indicates that the object was delivered to this destination\nconsumed - indicates that the object was consumed by this destination\nerror - indicates that a feedback error message was received from this destination",
+      "description": "DestinationsStatus describes the delivery status of an object for a destination\nDestinationsStatus provides information about the delivery status of an object for a certain destination.\nThe status can be one of the following:\nIndication whether the object has been delivered to the destination\npending - inidicates that the object is pending delivery to this destination\ndelivering - indicates that the object is being delivered to this destination\ndelivered - indicates that the object was delivered to this destination\nconsumed - indicates that the object was consumed by this destination\ndeleted - indicates that this destination acknowledged the deletion of the object\nerror - indicates that a feedback error message was received from this destination",
       "type": "object",
       "required": [
         "destinationType",
@@ -1252,6 +1510,26 @@
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
     },
+    "HealthStatusInfo": {
+      "description": "HealthStatusInfo describes the health status of the sync-service node",
+      "type": "object",
+      "properties": {
+        "healthStatus": {
+          "type": "string",
+          "x-go-name": "HealthStatus"
+        },
+        "nodeType": {
+          "type": "string",
+          "x-go-name": "NodeType"
+        },
+        "upTime": {
+          "type": "integer",
+          "format": "uint64",
+          "x-go-name": "UpTime"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
     "IOError": {
       "description": "IOError is the error for requests failed because of the IO",
       "type": "object",
@@ -1268,6 +1546,51 @@
       "properties": {
         "Message": {
           "type": "string"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
+    "Locks": {
+      "description": "Locks is a set of object locks",
+      "type": "object",
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
+    "MQTTHealthStatusInfo": {
+      "description": "MQTTHealthStatusInfo describes the health status of the MQTT connection of the sync-service node",
+      "type": "object",
+      "properties": {
+        "disconnectedFromMQTTBroker": {
+          "type": "boolean",
+          "x-go-name": "DisconnectedFromMQTTBroker"
+        },
+        "lastDisconnectFromBrokerDuration": {
+          "type": "integer",
+          "format": "uint64",
+          "x-go-name": "LastDisconnectFromBrokerDuration"
+        },
+        "mqttConnectionStatus": {
+          "type": "string",
+          "x-go-name": "MQTTConnectionStatus"
+        },
+        "publishFailures": {
+          "type": "integer",
+          "format": "uint32",
+          "x-go-name": "PublishFailures"
+        },
+        "subscribeFailures": {
+          "type": "integer",
+          "format": "uint32",
+          "x-go-name": "SubscribeFailures"
+        },
+        "timeSinceLastPublishError": {
+          "type": "integer",
+          "format": "uint64",
+          "x-go-name": "TimeSinceLastPublishError"
+        },
+        "timeSinceLastSubscribeError": {
+          "type": "integer",
+          "format": "uint64",
+          "x-go-name": "TimeSinceLastSubscribeError"
         }
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
@@ -1316,6 +1639,12 @@
           "format": "int64",
           "x-go-name": "ExpectedConsumers"
         },
+        "dataID": {
+          "description": "DataID is an internal data ID.\nThis field should not be set by users.",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "DataID"
+        },
         "deleted": {
           "description": "Deleted is a flag indicating to applications polling for updates that this object has been deleted.\nRead only field, should not be set by users.",
           "type": "boolean",
@@ -1341,6 +1670,9 @@
           "type": "string",
           "x-go-name": "DestOrgID"
         },
+        "destinationPolicy": {
+          "$ref": "#/definitions/Policy"
+        },
         "destinationType": {
           "description": "DestType is the type of destination to send the object to.\nIf omitted (and if DestinationsList is omitted too) the object is broadcasted to all known destinations.\nThis field is ignored when working with ESS (the destination is always the CSS).",
           "type": "string",
@@ -1355,7 +1687,7 @@
           "x-go-name": "DestinationsList"
         },
         "expiration": {
-          "description": "Expiration is a timestamp/date indicating when the object expires.\nWhen the object expires it is automatically deleted.\nThe timestamp should be provided in RFC3339 format.\nOptional field, if omitted the object doesn't expire.",
+          "description": "Expiration is a timestamp/date indicating when the object expires.\nWhen the object expires it is automatically deleted.\nThe timestamp should be provided in RFC3339 format.\nThis field is available only when working with the CSS.\nOptional field, if omitted the object doesn't expire.",
           "type": "string",
           "x-go-name": "Expiration"
         },
@@ -1424,8 +1756,70 @@
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
     },
+    "NotFound": {
+      "description": "NotFound is the error returned if an object wasn't found",
+      "type": "object",
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
+    "NotificationInfo": {
+      "description": "NotificationInfo contains information about a message to send to the other side",
+      "type": "object",
+      "properties": {
+        "DataID": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "DestID": {
+          "type": "string"
+        },
+        "DestType": {
+          "type": "string"
+        },
+        "InstanceID": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "MetaData": {
+          "$ref": "#/definitions/MetaData"
+        },
+        "NotificationTopic": {
+          "type": "string"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
+    "ObjectDestinationPolicy": {
+      "type": "object",
+      "title": "ObjectDestinationPolicy contains information about an object that has a Destination Policy.",
+      "required": [
+        "orgID",
+        "objectType",
+        "objectID"
+      ],
+      "properties": {
+        "destinationPolicy": {
+          "$ref": "#/definitions/Policy"
+        },
+        "objectID": {
+          "description": "ObjectID is a unique identifier of the object",
+          "type": "string",
+          "x-go-name": "ObjectID"
+        },
+        "objectType": {
+          "description": "ObjectType is the type of the object.\nThe type is used to group multiple objects, for example when checking for object updates.",
+          "type": "string",
+          "x-go-name": "ObjectType"
+        },
+        "orgID": {
+          "description": "OrgID is the organization ID of the object (an object belongs to exactly one organization).",
+          "type": "string",
+          "x-go-name": "OrgID"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
     "ObjectStatus": {
-      "description": "ObjectStatus describes the delivery status of an object for a destination\nThe status can be one of the following:\nIndication whether the object has been delivered to the destination\ndelivering - indicates that the object is being delivered\ndelivered - indicates that the object was delivered\nconsumed - indicates that the object was consumed\nerror - indicates that a feedback error message was received",
+      "description": "ObjectStatus describes the delivery status of an object for a destination\nThe status can be one of the following:\nIndication whether the object has been delivered to the destination\ndelivering - indicates that the object is being delivered\ndelivered - indicates that the object was delivered\nconsumed - indicates that the object was consumed\ndeleted - indicates that this destination acknowledged the deletion of the object\nerror - indicates that a feedback error message was received",
       "type": "object",
       "required": [
         "objectType",
@@ -1493,12 +1887,102 @@
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
     },
+    "Policy": {
+      "description": "Policy describes a policy made up of a set of properties and constraints",
+      "type": "object",
+      "properties": {
+        "constraints": {
+          "description": "Constraints is a set of expressions that form the constraints for the policy",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Constraints"
+        },
+        "properties": {
+          "description": "Properties is the set of properties for a particular policy",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PolicyProperty"
+          },
+          "x-go-name": "Properties"
+        },
+        "services": {
+          "description": "Services is the list of services this object has affinity for",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ServiceID"
+          },
+          "x-go-name": "Services"
+        },
+        "timestamp": {
+          "description": "Timestamp indicates when the policy was last updated (result of time.Now().UnixNano())",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "Timestamp"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
+    "PolicyProperty": {
+      "description": "PolicyProperty is a property in a policy",
+      "type": "object",
+      "required": [
+        "name",
+        "value"
+      ],
+      "properties": {
+        "name": {
+          "description": "Name is the name of the property",
+          "type": "string",
+          "x-go-name": "Name"
+        },
+        "type": {
+          "description": "Type is the type of the property.\nIt is only required where the system can't interpret the value correctly by context.",
+          "type": "string",
+          "x-go-name": "Type"
+        },
+        "value": {
+          "description": "Value is the value of the property",
+          "type": "object",
+          "x-go-name": "Value"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
     "SecurityError": {
       "description": "SecurityError is the error for requests failed because of security",
       "type": "object",
       "properties": {
         "Message": {
           "type": "string"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
+    "ServiceID": {
+      "description": "ServiceID contains the ID of a service to which an object may have affinity for\nNOTE: If the order of the fields changes here, please update the query in\nmongoStorage.go RetrieveObjectsWithDestinationPolicyByService.",
+      "type": "object",
+      "properties": {
+        "arch": {
+          "description": "Arch is the architecture of the service",
+          "type": "string",
+          "x-go-name": "Arch"
+        },
+        "orgID": {
+          "description": "OrgID is the organization ID of the service",
+          "type": "string",
+          "x-go-name": "OrgID"
+        },
+        "serviceName": {
+          "description": "ServiceName is the name of the service",
+          "type": "string",
+          "x-go-name": "ServiceName"
+        },
+        "version": {
+          "description": "Version is the version of the service",
+          "type": "string",
+          "x-go-name": "Version"
         }
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
@@ -1513,6 +1997,43 @@
         "Timestamp": {
           "type": "string",
           "format": "date-time"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
+    "SyncServiceVersion": {
+      "description": "SyncServiceVersion is the current version of the Sync-Service",
+      "type": "object",
+      "properties": {
+        "Major": {
+          "type": "integer",
+          "format": "uint32"
+        },
+        "Minor": {
+          "type": "integer",
+          "format": "uint32"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
+    },
+    "UsageInfo": {
+      "description": "UsageInfo describes the usage of the sync-service node",
+      "type": "object",
+      "properties": {
+        "clientRequests": {
+          "type": "integer",
+          "format": "uint64",
+          "x-go-name": "ClientRequests"
+        },
+        "registeredESS": {
+          "type": "integer",
+          "format": "uint32",
+          "x-go-name": "RegisteredESS"
+        },
+        "storedObjects": {
+          "type": "integer",
+          "format": "uint32",
+          "x-go-name": "StoredObjects"
         }
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
@@ -1533,6 +2054,24 @@
             "type": "string"
           },
           "x-go-name": "Usernames"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/core/base"
+    },
+    "healthReport": {
+      "type": "object",
+      "properties": {
+        "dbHealth": {
+          "$ref": "#/definitions/DBHealthStatusInfo"
+        },
+        "general": {
+          "$ref": "#/definitions/HealthStatusInfo"
+        },
+        "mqttHealth": {
+          "$ref": "#/definitions/MQTTHealthStatusInfo"
+        },
+        "usage": {
+          "$ref": "#/definitions/UsageInfo"
         }
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/core/base"
