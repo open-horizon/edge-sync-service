@@ -2,6 +2,7 @@ package base
 
 import (
 	"bytes"
+	"fmt"
 	"math"
 	"os"
 	"testing"
@@ -11,16 +12,24 @@ import (
 	"github.com/open-horizon/edge-sync-service/core/storage"
 )
 
+func setupDB(dbType string) {
+	if dbType == common.Mongo {
+		common.Configuration.MongoDbName = "d_test_db"
+		store = &storage.MongoStorage{}
+	} else {
+		dir, _ := os.Getwd()
+		common.Configuration.PersistenceRootPath = dir + "/persist"
+		boltStore := &storage.BoltStorage{}
+		boltStore.Cleanup()
+		store = boltStore
+	}
+}
+
 func TestObjectAPI(t *testing.T) {
-	common.Configuration.MongoDbName = "d_test_db"
-	store = &storage.MongoStorage{}
+	setupDB(common.Mongo)
 	testObjectAPI(store, t)
 
-	dir, _ := os.Getwd()
-	common.Configuration.PersistenceRootPath = dir + "/persist"
-	boltStore := &storage.BoltStorage{}
-	boltStore.Cleanup()
-	store = boltStore
+	setupDB(common.Bolt)
 	testObjectAPI(store, t)
 }
 
@@ -76,6 +85,8 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 		{"myorg777", "type1", "123456", common.MetaData{ObjectID: "123456", ObjectType: "type1", DestOrgID: "myorg777",
 			DestType: "dev1", AutoDelete: true}, nil,
 			"updateObject didn't check that autoDelete is set for object without destinations list or dest ID"},
+		{"myorg777", "type1", "123456", common.MetaData{ObjectID: "12345", ObjectType: "type1", DestOrgID: "myorg777", MetaOnly: true}, []byte("data"),
+			"updateObject didn't check that the data is empty for meta only update"},
 	}
 
 	if err := store.Init(); err != nil {
@@ -100,41 +111,51 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 		expectedConsumers  int
 		newData            []byte
 		expectedDestNumber int
+		updateDests        bool
 	}{
 		{"myorg777", "type1", "1", common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg777",
 			DestID: "dev1", DestType: "device"},
-			nil, common.NotReadyToSend, 1, []byte("new"), 1},
+			nil, common.NotReadyToSend, 1, []byte("new"), 1, false},
 		{"myorg777", "type1", "2", common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "myorg777",
 			ExpectedConsumers: -1, NoData: true, Link: "abc", DestID: "dev1", DestType: "device"},
-			[]byte("abc"), common.ReadyToSend, math.MaxInt32, []byte("new"), 1},
+			[]byte("abc"), common.ReadyToSend, math.MaxInt32, []byte("new"), 1, false},
 		{"myorg777", "type1", "3", common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "myorg777",
 			ExpectedConsumers: 3, Link: "abc", DestID: "dev2", DestType: "device"},
-			nil, common.ReadyToSend, 3, []byte("new"), 0},
-		{"myorg777", "type1", "3", common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "myorg777",
+			nil, common.ReadyToSend, 3, []byte("new"), 0, false},
+		{"myorg777", "type1", "31", common.MetaData{ObjectID: "31", ObjectType: "type1", DestOrgID: "myorg777",
 			ExpectedConsumers: 3, MetaOnly: true, DestID: "dev2", DestType: "device"},
-			nil, common.ReadyToSend, 3, []byte("new"), 0},
+			nil, common.NotReadyToSend, 3, []byte("new"), 0, false},
 		{"myorg777", "type1", "4", common.MetaData{ObjectID: "4", ObjectType: "type1", DestOrgID: "myorg777",
 			ExpectedConsumers: 3, DestType: "device", DestID: "dev1"},
-			[]byte("abc"), common.ReadyToSend, 3, []byte("new"), 1},
+			[]byte("abc"), common.ReadyToSend, 3, []byte("new"), 1, false},
 		{"myorg777", "type1", "5", common.MetaData{ObjectID: "5", ObjectType: "type1", DestOrgID: "myorg777",
 			ExpectedConsumers: 3, DestType: "device", DestID: "dev1", Inactive: true},
-			[]byte("abc"), common.ReadyToSend, 3, []byte("new"), 1},
+			[]byte("abc"), common.ReadyToSend, 3, []byte("new"), 1, false},
 		{"myorg777", "type1", "6", common.MetaData{ObjectID: "6", ObjectType: "type1", DestOrgID: "myorg777",
 			ExpectedConsumers: 1, DestinationsList: dests},
-			[]byte("abc"), common.ReadyToSend, 1, []byte("new"), 3},
+			[]byte("abc"), common.ReadyToSend, 1, []byte("new"), 3, false},
+		{"myorg777", "type1", "6", common.MetaData{ObjectID: "6", ObjectType: "type1", DestOrgID: "myorg777",
+			ExpectedConsumers: 1, DestType: "device3", DestID: "dev1", MetaOnly: true},
+			nil, common.ReadyToSend, 1, []byte("new"), 1, true},
 	}
 
-	destination := common.Destination{DestOrgID: "myorg777", DestType: "device", DestID: "dev1", Communication: common.MQTTProtocol}
-	if err := store.StoreDestination(destination); err != nil {
+	destination1 := common.Destination{DestOrgID: "myorg777", DestType: "device", DestID: "dev1", Communication: common.MQTTProtocol}
+	if err := store.StoreDestination(destination1); err != nil {
 		t.Errorf("Failed to store destination. Error: %s", err.Error())
 	}
 
-	if err := store.StoreDestination(common.Destination{DestOrgID: "myorg777", DestType: "device2", DestID: "dev",
-		Communication: common.MQTTProtocol}); err != nil {
+	destination2 := common.Destination{DestOrgID: "myorg777", DestType: "device2", DestID: "dev", Communication: common.MQTTProtocol}
+	if err := store.StoreDestination(destination2); err != nil {
 		t.Errorf("Failed to store destination. Error: %s", err.Error())
 	}
-	if err := store.StoreDestination(common.Destination{DestOrgID: "myorg777", DestType: "device2", DestID: "dev1",
-		Communication: common.MQTTProtocol}); err != nil {
+
+	destination3 := common.Destination{DestOrgID: "myorg777", DestType: "device2", DestID: "dev1", Communication: common.MQTTProtocol}
+	if err := store.StoreDestination(destination3); err != nil {
+		t.Errorf("Failed to store destination. Error: %s", err.Error())
+	}
+
+	destination4 := common.Destination{DestOrgID: "myorg777", DestType: "device3", DestID: "dev1", Communication: common.MQTTProtocol}
+	if err := store.StoreDestination(destination4); err != nil {
 		t.Errorf("Failed to store destination. Error: %s", err.Error())
 	}
 
@@ -185,13 +206,13 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 
 		// Check the created notification
 		if row.expectedStatus == common.ReadyToSend && !metaData.Inactive {
-			if destination.DestID == metaData.DestID {
+			if destination1.DestID == metaData.DestID {
 				notification, err := store.RetrieveNotificationRecord(row.orgID, row.objectType, row.objectID, metaData.DestType, metaData.DestID)
 				if err != nil {
 					t.Errorf("An error occurred in notification fetch (objectID = %s). Error: %s", row.objectID, err.Error())
 				}
-				if (metaData.DestType == destination.DestType || metaData.DestType == "") &&
-					(metaData.DestID == destination.DestID || metaData.DestID == "") {
+				if (metaData.DestType == destination1.DestType || metaData.DestType == "") &&
+					(metaData.DestID == destination1.DestID || metaData.DestID == "") {
 					if notification == nil {
 						t.Errorf("No notification record (objectID = %s)", row.objectID)
 					} else {
@@ -224,6 +245,46 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 									metaData.InstanceID, row.objectID)
 							}
 						}
+					}
+				}
+			}
+		}
+
+		if row.updateDests {
+			// There should be delete notifications for destinations 1-3
+			notification, err := store.RetrieveNotificationRecord(row.orgID, row.objectType, row.objectID, destination1.DestType, destination1.DestID)
+			if err != nil {
+				t.Errorf("An error occurred in notification fetch (objectID = %s). Error: %s", row.objectID, err.Error())
+			} else {
+				if notification == nil {
+					t.Errorf("No delete notification record (objectID = %s)", row.objectID)
+				} else {
+					if notification.Status != common.Delete {
+						t.Errorf("Wrong notification status: %s instead of delete (objectID = %s)", notification.Status, row.objectID)
+					}
+				}
+			}
+			notification, err = store.RetrieveNotificationRecord(row.orgID, row.objectType, row.objectID, destination2.DestType, destination2.DestID)
+			if err != nil {
+				t.Errorf("An error occurred in notification fetch (objectID = %s). Error: %s", row.objectID, err.Error())
+			} else {
+				if notification == nil {
+					t.Errorf("No delete notification record (objectID = %s)", row.objectID)
+				} else {
+					if notification.Status != common.Delete {
+						t.Errorf("Wrong notification status: %s instead of delete (objectID = %s)", notification.Status, row.objectID)
+					}
+				}
+			}
+			notification, err = store.RetrieveNotificationRecord(row.orgID, row.objectType, row.objectID, destination3.DestType, destination3.DestID)
+			if err != nil {
+				t.Errorf("An error occurred in notification fetch (objectID = %s). Error: %s", row.objectID, err.Error())
+			} else {
+				if notification == nil {
+					t.Errorf("No delete notification record (objectID = %s)", row.objectID)
+				} else {
+					if notification.Status != common.Delete {
+						t.Errorf("Wrong notification status: %s instead of delete (objectID = %s)", notification.Status, row.objectID)
 					}
 				}
 			}
@@ -306,14 +367,14 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 								metaData.InstanceID, instance, row.objectID)
 						}
 
-						if destination.DestID == metaData.DestID {
+						if destination1.DestID == metaData.DestID {
 							notification, err := store.RetrieveNotificationRecord(row.orgID, row.objectType, row.objectID, metaData.DestType, metaData.DestID)
 							if err != nil {
 								t.Errorf("An error occurred in notification fetch (objectID = %s). Error: %s", row.objectID, err.Error())
 							}
 
-							if !metaData.Inactive && (metaData.DestType == destination.DestType || metaData.DestType == "") &&
-								(metaData.DestID == destination.DestID || metaData.DestID == "") {
+							if !metaData.Inactive && (metaData.DestType == destination1.DestType || metaData.DestType == "") &&
+								(metaData.DestID == destination1.DestID || metaData.DestID == "") {
 								if notification == nil {
 									t.Errorf("No notification record after data update (objectID = %s)", row.objectID)
 								} else {
@@ -349,14 +410,14 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 		if err := ActivateObject(row.orgID, row.objectType, row.objectID); err != nil {
 			t.Errorf("Failed to activate object (objectID = %s). Error: %s", row.objectID, err.Error())
 		} else {
-			if destination.DestID == metaData.DestID {
+			if destination1.DestID == metaData.DestID {
 				notification, err := store.RetrieveNotificationRecord(row.orgID, row.objectType, row.objectID, metaData.DestType, metaData.DestID)
 				if err != nil && !storage.IsNotFound(err) {
 					t.Errorf("An error occurred in notification fetch (objectID = %s). Error: %s", row.objectID, err.Error())
 				}
 
-				if (metaData.DestType == destination.DestType || metaData.DestType == "") &&
-					(metaData.DestID == destination.DestID || metaData.DestID == "") {
+				if (metaData.DestType == destination1.DestType || metaData.DestType == "") &&
+					(metaData.DestID == destination1.DestID || metaData.DestID == "") {
 					if notification == nil {
 						t.Errorf("No notification record after object activation (objectID = %s)", row.objectID)
 					} else {
@@ -375,20 +436,414 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 		} else if len(dests) != row.expectedDestNumber {
 			t.Errorf("Wrong number of destinations: %d instead of %d (objectID = %s).", len(dests), row.expectedDestNumber, row.objectID)
 		}
-
-		// Delete
-		if err := DeleteObject(row.orgID, row.objectType, row.objectID); err != nil {
-			t.Errorf("Failed to delete object (objectID = %s). Error: %s", row.objectID, err.Error())
-		} else {
-			if storedStatus, err := GetObjectStatus(row.orgID, row.objectType, row.objectID); err != nil {
-				t.Errorf("Error in getObjectStatus (objectID = %s). Error: %s", row.objectID, err.Error())
-			} else if storedStatus != common.ObjDeleted {
-				t.Errorf("Deleted object is not marked as deleted (objectID = %s)", row.objectID)
-			}
-		}
 	}
 
 	if err := deleteOrganization("myorg777"); err != nil {
 		t.Errorf("deleteOrganization failed. Error: %s", err.Error())
+	}
+}
+
+func TestObjectDestinationsAPI(t *testing.T) {
+	setupDB(common.Mongo)
+	testObjectDestinationsAPI(store, t)
+
+	setupDB(common.Bolt)
+	testObjectDestinationsAPI(store, t)
+}
+
+func testObjectDestinationsAPI(store storage.Storage, t *testing.T) {
+	communications.Store = store
+	common.InitObjectLocks()
+
+	if err := store.Init(); err != nil {
+		t.Errorf("Failed to initialize storage driver. Error: %s\n", err.Error())
+	}
+	defer store.Stop()
+
+	dests1 := []string{"device:dev1", "device2:dev", "device2:dev1"}
+	dests2 := []string{"device3:dev1"}
+
+	tests := []struct {
+		metaData           common.MetaData
+		expectedDestNumber int
+		updateDests        bool
+	}{
+		{common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg777",
+			DestID: "dev1", DestType: "device", NoData: true}, 1, false},
+
+		{common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "myorg777",
+			DestinationsList: dests1, NoData: true}, 3, false},
+
+		{common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "myorg777", NoData: true}, 4, false},
+		{common.MetaData{ObjectID: "4", ObjectType: "type1", DestOrgID: "myorg777", NoData: false}, 4, false},
+	}
+
+	destination1 := common.Destination{DestOrgID: "myorg777", DestType: "device", DestID: "dev1", Communication: common.MQTTProtocol}
+	if err := store.StoreDestination(destination1); err != nil {
+		t.Errorf("Failed to store destination. Error: %s", err.Error())
+	}
+
+	destination2 := common.Destination{DestOrgID: "myorg777", DestType: "device2", DestID: "dev", Communication: common.MQTTProtocol}
+	if err := store.StoreDestination(destination2); err != nil {
+		t.Errorf("Failed to store destination. Error: %s", err.Error())
+	}
+
+	destination3 := common.Destination{DestOrgID: "myorg777", DestType: "device2", DestID: "dev1", Communication: common.MQTTProtocol}
+	if err := store.StoreDestination(destination3); err != nil {
+		t.Errorf("Failed to store destination. Error: %s", err.Error())
+	}
+
+	destination4 := common.Destination{DestOrgID: "myorg777", DestType: "device3", DestID: "dev1", Communication: common.MQTTProtocol}
+	if err := store.StoreDestination(destination4); err != nil {
+		t.Errorf("Failed to store destination. Error: %s", err.Error())
+	}
+
+	communications.Comm = &communications.TestComm{}
+	if err := communications.Comm.StartCommunication(); err != nil {
+		t.Errorf("Failed to start MQTT communication. Error: %s", err.Error())
+	}
+
+	for _, test := range tests {
+		// Update object
+		err := UpdateObject(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID, test.metaData, nil)
+		if err != nil {
+			t.Errorf("UpdateObject failed to update (objectID = %s). Error: %s", test.metaData.ObjectID, err.Error())
+		}
+
+		dests, err := GetObjectDestinationsStatus(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID)
+		if err != nil {
+			t.Errorf("GetObjectDestinationsStatus failed (objectID = %s). Error: %s", test.metaData.ObjectID, err.Error())
+		} else if len(dests) != test.expectedDestNumber {
+			t.Errorf("GetObjectDestinationsStatus returned wrong number of destinations: %d instead of %d (objectID = %s)",
+				len(dests), test.expectedDestNumber, test.metaData.ObjectID)
+		}
+
+		// Remove notifications for testing
+		err = store.DeleteNotificationRecords(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID, "", "")
+		if err != nil {
+			t.Errorf("DeleteNotificationRecords failed (objectID = %s). Error: %s", test.metaData.ObjectID, err.Error())
+		}
+
+		err = UpdateObjectDestinations(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID, dests2)
+		if err != nil {
+			t.Errorf("UpdateObjectDestinations failed (objectID = %s). Error: %s", test.metaData.ObjectID, err.Error())
+		} else {
+			// There should be delete notifications for destination1
+			notification, err := store.RetrieveNotificationRecord(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID, destination1.DestType, destination1.DestID)
+			if err != nil {
+				t.Errorf("An error occurred in notification fetch (objectID = %s). Error: %s", test.metaData.ObjectID, err.Error())
+			} else {
+				if notification == nil {
+					if test.metaData.NoData == true {
+						t.Errorf("No delete notification record (objectID = %s)", test.metaData.ObjectID)
+					}
+				} else if test.metaData.NoData == false {
+					t.Errorf("Notification record created for not ready to send object (objectID = %s)", test.metaData.ObjectID)
+				} else {
+					if notification.Status != common.Delete {
+						t.Errorf("Wrong notification status: %s instead of delete (objectID = %s)", notification.Status, test.metaData.ObjectID)
+					}
+				}
+			}
+			if test.expectedDestNumber > 1 {
+				// There should be delete notifications for destination2
+				notification, err := store.RetrieveNotificationRecord(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID,
+					destination2.DestType, destination2.DestID)
+				if err != nil {
+					t.Errorf("An error occurred in notification fetch (objectID = %s). Error: %s", test.metaData.ObjectID, err.Error())
+				} else {
+					if notification == nil {
+						if test.metaData.NoData == true {
+							t.Errorf("No delete notification record (objectID = %s)", test.metaData.ObjectID)
+						}
+					} else if test.metaData.NoData == false {
+						t.Errorf("Notification record created for not ready to send object (objectID = %s)", test.metaData.ObjectID)
+					} else {
+						if notification.Status != common.Delete {
+							t.Errorf("Wrong notification status: %s instead of delete (objectID = %s)", notification.Status, test.metaData.ObjectID)
+						}
+					}
+				}
+				// There should be delete notifications for destination3
+				notification, err = store.RetrieveNotificationRecord(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID,
+					destination3.DestType, destination3.DestID)
+				if err != nil {
+					t.Errorf("An error occurred in notification fetch (objectID = %s). Error: %s", test.metaData.ObjectID, err.Error())
+				} else {
+					if notification == nil {
+						if test.metaData.NoData == true {
+							t.Errorf("No delete notification record (objectID = %s)", test.metaData.ObjectID)
+						}
+					} else if test.metaData.NoData == false {
+						t.Errorf("Notification record created for not ready to send object (objectID = %s)", test.metaData.ObjectID)
+					} else {
+						if notification.Status != common.Delete {
+							t.Errorf("Wrong notification status: %s instead of delete (objectID = %s)", notification.Status, test.metaData.ObjectID)
+						}
+					}
+				}
+			}
+			// Look for update notification for destination4
+			notification, err = store.RetrieveNotificationRecord(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID,
+				destination4.DestType, destination4.DestID)
+			if err != nil {
+				t.Errorf("An error occurred in notification fetch (objectID = %s). Error: %s", test.metaData.ObjectID, err.Error())
+			} else {
+				if notification == nil {
+					if test.expectedDestNumber < 4 && test.metaData.NoData == true {
+						t.Errorf("No notification record (objectID = %s)", test.metaData.ObjectID)
+					}
+				} else if test.metaData.NoData == false {
+					t.Errorf("Notification record created for not ready to send object (objectID = %s)", test.metaData.ObjectID)
+				} else {
+					if test.expectedDestNumber == 4 && test.metaData.NoData == true {
+						t.Errorf("Notification record created for already existing destination (objectID = %s)", test.metaData.ObjectID)
+					} else if notification.Status != common.Update {
+						t.Errorf("Wrong notification status: %s instead of update (objectID = %s)", notification.Status, test.metaData.ObjectID)
+					}
+				}
+			}
+		}
+	}
+
+}
+
+func TestObjectWithPolicyAPI(t *testing.T) {
+	common.Configuration.MongoDbName = "d_test_db"
+	store = &storage.MongoStorage{}
+	testObjectWithPolicyAPI(store, t)
+
+	dir, _ := os.Getwd()
+	common.Configuration.PersistenceRootPath = dir + "/persist"
+	boltStore := &storage.BoltStorage{}
+	boltStore.Cleanup()
+	store = boltStore
+	testObjectWithPolicyAPI(store, t)
+}
+
+func testObjectWithPolicyAPI(store storage.Storage, t *testing.T) {
+	tests := []struct {
+		metaData common.MetaData
+		recieved bool
+		data     []byte
+	}{
+		{common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg000",
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "a", Value: float64(1)},
+					{Name: "b", Value: "zxcv"},
+					{Name: "c", Value: true, Type: "bool"},
+				},
+				Constraints: []string{"Plover=34", "asdf=true"},
+			},
+		}, true, []byte("0123456789abcdef")},
+		{common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "myorg000",
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "d", Value: float64(98)},
+					{Name: "e", Value: "asdf", Type: "string"},
+					{Name: "f", Value: false},
+				},
+				Constraints: []string{"xyzzy=78", "vbnm=false"},
+			},
+		}, false, []byte("abcdefghijklmnopqrstuvwxyz")},
+		{common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "myorg000",
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "g", Value: float64(-34)},
+					{Name: "h", Value: "qwer"},
+					{Name: "i", Value: float64(42), Type: "float"},
+				},
+				Constraints: []string{"x=15", "y=0.0"},
+			},
+		}, true, nil},
+		{common.MetaData{ObjectID: "4", ObjectType: "type1", DestOrgID: "myorg000",
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "j", Value: float64(42.0)},
+					{Name: "k", Value: "ghjk"},
+					{Name: "l", Value: float64(613)},
+				},
+				Constraints: []string{"il=71", "rtyu=\"edcrfv\""},
+				Services: []common.ServiceID{
+					{OrgID: "myorg777", Arch: "amd64", ServiceName: "plony", Version: "1.0.0"},
+				},
+			},
+		}, false, nil},
+	}
+
+	destinations := []common.Destination{
+		common.Destination{DestOrgID: "myorg000", DestType: "device", DestID: "dev",
+			Communication: common.HTTPProtocol},
+		common.Destination{DestOrgID: "myorg000", DestType: "device2", DestID: "dev",
+			Communication: common.HTTPProtocol},
+		common.Destination{DestOrgID: "myorg000", DestType: "device2", DestID: "dev1",
+			Communication: common.HTTPProtocol},
+	}
+
+	communications.Store = store
+	if err := store.Init(); err != nil {
+		t.Errorf("Failed to initialize storage driver. Error: %s\n", err.Error())
+	}
+	defer store.Stop()
+
+	communications.Comm = &communications.TestComm{}
+	if err := communications.Comm.StartCommunication(); err != nil {
+		t.Errorf("Failed to start test communication. Error: %s", err.Error())
+	}
+
+	common.InitObjectLocks()
+
+	for _, destination := range destinations {
+		if err := store.StoreDestination(destination); err != nil {
+			t.Errorf("Failed to store destination. Error: %s", err.Error())
+		}
+	}
+
+	for _, test := range tests {
+		// Delete the object first
+		err := store.DeleteStoredObject(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID)
+		if err != nil {
+			t.Errorf("Failed to delete object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+			fmt.Printf("Error: %#v\n", err)
+		}
+		// Insert
+		if err := UpdateObject(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID,
+			test.metaData, test.data); err != nil {
+			t.Errorf("Failed to store object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+		}
+		storedMetaData, err := GetObject(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID)
+		if err != nil {
+			t.Errorf("Failed to retrieve object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+		} else {
+			if storedMetaData.DestinationPolicy == nil {
+				t.Errorf("DestinationPolicy nil in retrieved object (objectID = %s)\n", test.metaData.ObjectID)
+			} else {
+				equal := len(storedMetaData.DestinationPolicy.Properties) == len(test.metaData.DestinationPolicy.Properties) &&
+					len(storedMetaData.DestinationPolicy.Constraints) == len(test.metaData.DestinationPolicy.Constraints)
+				if equal {
+					for index, property := range storedMetaData.DestinationPolicy.Properties {
+						expectedProperty := test.metaData.DestinationPolicy.Properties[index]
+						if expectedProperty.Name != property.Name || expectedProperty.Value != property.Value ||
+							expectedProperty.Type != property.Type {
+							equal = false
+							break
+						}
+					}
+				}
+				if equal {
+					for index, value := range storedMetaData.DestinationPolicy.Constraints {
+						if value != test.metaData.DestinationPolicy.Constraints[index] {
+							equal = false
+							break
+						}
+					}
+				}
+				if !equal {
+					t.Errorf("The retrieved DestinationPolicy %#v does not match the expected one %#v\n",
+						storedMetaData.DestinationPolicy, test.metaData.DestinationPolicy)
+				}
+
+				destinations, err := store.GetObjectDestinations(test.metaData)
+				if err != nil {
+					t.Errorf("Failed to retrieve destinations for an object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+				} else if len(destinations) != 0 {
+					t.Errorf("Sent object with a policy to %d destinations.", len(destinations))
+				}
+
+				if test.data != nil {
+					ok, err := PutObjectData(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID, bytes.NewReader(test.data))
+					if !ok || err != nil {
+						t.Errorf("Failed to update object's data (objectID = %s). Error: %s", test.metaData.ObjectID, err.Error())
+					}
+
+					destinations, err := store.GetObjectDestinations(test.metaData)
+					if err != nil {
+						t.Errorf("Failed to retrieve destinations for an object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+					} else if len(destinations) != 0 {
+						t.Errorf("Sent object with a policy to %d destinations.", len(destinations))
+					}
+				}
+
+				policyTimestamp := storedMetaData.DestinationPolicy.Timestamp
+
+				if err := UpdateObject(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID,
+					test.metaData, test.data); err != nil {
+					t.Errorf("Failed to store object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+				}
+				storedMetaData, err := GetObject(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID)
+				if err != nil {
+					t.Errorf("Failed to retrieve object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+				} else if policyTimestamp >= storedMetaData.DestinationPolicy.Timestamp {
+					t.Errorf("DestinationPolicy Timestamp wasn't incremented after update. Was %d, now is %d",
+						policyTimestamp, storedMetaData.DestinationPolicy.Timestamp)
+				}
+			}
+		}
+	}
+
+	policyInfo, err := ListObjectsWithDestinationPolicy("myorg000", false)
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(policyInfo) != len(tests) {
+		t.Errorf("Received %d objects with a destination policy. Expected %d\n", len(policyInfo), len(tests))
+	}
+
+	objectsMarkedReceived := 0
+	for _, test := range tests {
+		if test.recieved {
+			objectsMarkedReceived++
+			err = ObjectPolicyReceived(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID)
+			if err != nil {
+				t.Errorf("Failed to mark the destination policy of %s as received. Error: %s\n", test.metaData.ObjectID, err)
+			}
+		}
+	}
+
+	policyInfo, err = ListObjectsWithDestinationPolicy("myorg000", false)
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(policyInfo) != len(tests)-objectsMarkedReceived {
+		t.Errorf("Received %d objects with a destination policy. Expected %d. Total %d. Received %d\n",
+			len(policyInfo), len(tests)-objectsMarkedReceived, len(tests), objectsMarkedReceived)
+	}
+
+	policyInfo, err = ListObjectsWithDestinationPolicy("myorg000", true)
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(policyInfo) != len(tests) {
+		t.Errorf("Received %d objects with a destination policy. Expected %d\n", len(policyInfo), len(tests))
+	}
+
+	for _, test := range tests {
+		if test.recieved {
+			if err := UpdateObject(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID,
+				test.metaData, test.data); err != nil {
+				t.Errorf("Failed to store object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+			}
+			objectsMarkedReceived--
+			break
+		}
+	}
+
+	policyInfo, err = ListObjectsWithDestinationPolicy("myorg000", false)
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(policyInfo) != len(tests)-objectsMarkedReceived {
+		t.Errorf("Received %d objects with a destination policy. Expected %d. Total %d. Received %d\n",
+			len(policyInfo), len(tests)-objectsMarkedReceived, len(tests), objectsMarkedReceived)
+	}
+
+	policyInfo, err = ListObjectsWithDestinationPolicyByService("myorg777", "amd64", "plony", "1.0.0")
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(policyInfo) != 1 {
+		t.Errorf("Received %d objects with a destination policy. Expected %d.\n",
+			len(policyInfo), 1)
 	}
 }

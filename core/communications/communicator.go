@@ -20,7 +20,7 @@ type Communicator interface {
 	StopCommunication() common.SyncServiceError
 
 	// SendNotificationMessage sends a notification message from the CSS to the ESS or from the ESS to the CSS
-	SendNotificationMessage(notificationTopic string, destType string, destID string, instanceID int64, metaData *common.MetaData) common.SyncServiceError
+	SendNotificationMessage(notificationTopic string, destType string, destID string, instanceID int64, dataID int64, metaData *common.MetaData) common.SyncServiceError
 
 	// SendFeedbackMessage sends a feedback message from the ESS to the CSS or from the CSS to the ESS
 	SendFeedbackMessage(code int, retryInterval int32, reason string, metaData *common.MetaData, sendToOrigin bool) common.SyncServiceError
@@ -64,6 +64,12 @@ type Communicator interface {
 
 	// DeleteOrganization removes an organization
 	DeleteOrganization(orgID string) common.SyncServiceError
+
+	// LockDataChunks locks one of the data chunks locks
+	LockDataChunks(index uint32, metadata *common.MetaData)
+
+	// UnlockDataChunks unlocks one of the data chunks locks
+	UnlockDataChunks(index uint32, metadata *common.MetaData)
 }
 
 // Error is the error struct used by the communications code

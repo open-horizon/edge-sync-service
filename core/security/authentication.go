@@ -8,7 +8,8 @@ import "net/http"
 type Authentication interface {
 	// Authenticate  authenticates a particular HTTP request and indicates
 	// whether it is an edge node, org admin, or plain user. Also returned is the
-	// user's org and identitity. An edge node's identity is destType/destID
+	// user's org and identitity. An edge node's identity is destType/destID. A
+	// service's identity is serviceOrg/arch/version/serviceName.
 	Authenticate(request *http.Request) (int, string, string)
 
 	// KeyandSecretForURL returns an app key and an app secret pair to be
@@ -34,4 +35,7 @@ const (
 
 	// AuthSyncAdmin is returned by Authenticate when the authenticated user is a Sync Service Admin
 	AuthSyncAdmin
+
+	// AuthService is returned by Authenticate when the authenticated user is a Service
+	AuthService
 )

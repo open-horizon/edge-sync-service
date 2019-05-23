@@ -63,6 +63,7 @@ func (store *InMemoryStorage) Init() common.SyncServiceError {
 			}
 		}
 	}
+	common.HealthStatus.ReconnectedToDatabase()
 	return nil
 }
 
@@ -77,7 +78,7 @@ func (store *InMemoryStorage) PerformMaintenance() {
 }
 
 // StoreObject stores an object
-func (store *InMemoryStorage) StoreObject(metaData common.MetaData, data []byte, status string) common.SyncServiceError {
+func (store *InMemoryStorage) StoreObject(metaData common.MetaData, data []byte, status string) ([]common.StoreDestinationStatus, common.SyncServiceError) {
 	store.lock()
 	defer store.unLock()
 
@@ -86,15 +87,20 @@ func (store *InMemoryStorage) StoreObject(metaData common.MetaData, data []byte,
 	// set instance id. If the object was received from the other side, this node is the receiver of the object:
 	// keep the instance id of the meta data.
 	if status == common.NotReadyToSend || status == common.ReadyToSend {
-		metaData.InstanceID = store.getInstanceID()
+		newID := store.getInstanceID()
+		metaData.InstanceID = newID
+		if data != nil && !metaData.NoData && !metaData.MetaOnly {
+			metaData.DataID = newID
+		}
 	}
 
 	if metaData.MetaOnly {
 		if object, ok := store.objects[id]; ok {
 			if object.status == common.ConsumedByDest {
 				// On ESS we remove the data of consumed objects, therefore we can't accept "meta only" updates
-				return &Error{"Can't update only the meta data of consumed object"}
+				return nil, &Error{"Can't update only the meta data of consumed object"}
 			}
+			metaData.DataID = object.meta.DataID // Keep the previous data id
 			object.meta = metaData
 			object.status = status
 			object.remainingConsumers = metaData.ExpectedConsumers
@@ -103,17 +109,17 @@ func (store *InMemoryStorage) StoreObject(metaData common.MetaData, data []byte,
 				object.data = nil
 			}
 			store.objects[id] = object
-		} else {
-			return &Error{"Failed to find object to update its meta data"}
+			return nil, nil
 		}
-	} else {
-		if metaData.NoData {
-			data = nil
-		}
-		store.objects[id] = inMemoryObject{meta: metaData, data: data, status: status,
-			remainingConsumers: metaData.ExpectedConsumers, remainingReceivers: metaData.ExpectedConsumers}
+		// If not found, insert the object
 	}
-	return nil
+	if metaData.NoData {
+		data = nil
+	}
+	store.objects[id] = inMemoryObject{meta: metaData, data: data, status: status,
+		remainingConsumers: metaData.ExpectedConsumers, remainingReceivers: metaData.ExpectedConsumers}
+
+	return nil, nil
 }
 
 // StoreObjectData stores an object's data
@@ -133,8 +139,11 @@ func (store *InMemoryStorage) StoreObjectData(orgID string, objectType string, o
 	if object, ok := store.objects[id]; ok {
 		if object.status == common.NotReadyToSend {
 			object.status = common.ReadyToSend
-		} else if object.status == common.ReadyToSend {
-			object.meta.InstanceID = store.getInstanceID()
+		}
+		if object.status == common.NotReadyToSend || object.status == common.ReadyToSend {
+			newID := store.getInstanceID()
+			object.meta.InstanceID = newID
+			object.meta.DataID = newID
 		}
 		object.data = data
 		object.meta.ObjectSize = int64(len(object.data))
@@ -313,6 +322,17 @@ func (store *InMemoryStorage) RetrieveUpdatedObjects(orgID string, objectType st
 	return result, nil
 }
 
+// RetrieveObjectsWithDestinationPolicy returns the list of all the objects that have a Destination Policy
+// If received is true, return objects marked as policy received
+func (store *InMemoryStorage) RetrieveObjectsWithDestinationPolicy(orgID string, received bool) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	return nil, nil
+}
+
+// RetrieveObjectsWithDestinationPolicyByService returns the list of all the object Policies for a particular service
+func (store *InMemoryStorage) RetrieveObjectsWithDestinationPolicyByService(orgID, arch, serviceName, version string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	return nil, nil
+}
+
 // RetrieveObjects returns the list of all the objects that need to be sent to the destination
 func (store *InMemoryStorage) RetrieveObjects(orgID string, destType string, destID string, resend int) ([]common.MetaData, common.SyncServiceError) {
 	store.lock()
@@ -435,6 +455,11 @@ func (store *InMemoryStorage) MarkObjectDeleted(orgID string, objectType string,
 	return notFound
 }
 
+// MarkDestinationPolicyReceived marks an object's destination policy as having been received
+func (store *InMemoryStorage) MarkDestinationPolicyReceived(orgID string, objectType string, objectID string) common.SyncServiceError {
+	return nil
+}
+
 // ActivateObject marks object as active
 func (store *InMemoryStorage) ActivateObject(orgID string, objectType string, objectID string) common.SyncServiceError {
 	store.lock()
@@ -455,7 +480,7 @@ func (store *InMemoryStorage) GetObjectsToActivate() ([]common.MetaData, common.
 	store.lock()
 	defer store.unLock()
 
-	currentTime := time.Now().Format(time.RFC3339)
+	currentTime := time.Now().UTC().Format(time.RFC3339)
 	result := make([]common.MetaData, 0)
 	for _, obj := range store.objects {
 		if (obj.status == common.NotReadyToSend || obj.status == common.ReadyToSend) &&
@@ -513,9 +538,10 @@ func (store *InMemoryStorage) GetObjectDestinations(metaData common.MetaData) ([
 }
 
 // UpdateObjectDeliveryStatus changes the object's delivery status for the destination
+// Returns true if the status is Deleted and all the destinations are in status Deleted
 func (store *InMemoryStorage) UpdateObjectDeliveryStatus(status string, message string, orgID string, objectType string, objectID string,
-	destType string, destID string) common.SyncServiceError {
-	return nil
+	destType string, destID string) (bool, common.SyncServiceError) {
+	return true, nil
 }
 
 // UpdateObjectDelivering marks the object as being delivered to all its destinations
@@ -527,6 +553,26 @@ func (store *InMemoryStorage) UpdateObjectDelivering(orgID string, objectType st
 func (store *InMemoryStorage) GetObjectDestinationsList(orgID string, objectType string,
 	objectID string) ([]common.StoreDestinationStatus, common.SyncServiceError) {
 	return nil, nil
+}
+
+// UpdateObjectDestinations updates object's destinations
+// Returns the meta data, object's status, an array of deleted destinations, and an array of added destinations
+func (store *InMemoryStorage) UpdateObjectDestinations(orgID string, objectType string, objectID string, destinationsList []string) (*common.MetaData, string,
+	[]common.StoreDestinationStatus, []common.StoreDestinationStatus, common.SyncServiceError) {
+	return nil, "", nil, nil, nil
+}
+
+// GetNumberOfStoredObjects returns the number of objects received from the application that are
+// currently stored in this node's storage
+func (store *InMemoryStorage) GetNumberOfStoredObjects() (uint32, common.SyncServiceError) {
+	var count uint32
+	for _, object := range store.objects {
+		if object.status == common.ReadyToSend || object.status == common.NotReadyToSend {
+			count++
+		}
+	}
+
+	return count, nil
 }
 
 // AddWebhook stores a webhook for an object type
@@ -612,6 +658,11 @@ func (store *InMemoryStorage) UpdateDestinationLastPingTime(destination common.D
 
 // RemoveInactiveDestinations removes destinations that haven't sent ping since the provided timestamp
 func (store *InMemoryStorage) RemoveInactiveDestinations(lastTimestamp time.Time) {}
+
+// GetNumberOfDestinations returns the number of currently registered ESS nodes (for CSS)
+func (store *InMemoryStorage) GetNumberOfDestinations() (uint32, common.SyncServiceError) {
+	return 0, nil
+}
 
 // RetrieveDestination retrieves a destination
 func (store *InMemoryStorage) RetrieveDestination(orgID string, destType string, destID string) (*common.Destination, common.SyncServiceError) {

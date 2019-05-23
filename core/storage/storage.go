@@ -33,7 +33,8 @@ type Storage interface {
 	PerformMaintenance()
 
 	// Store an object
-	StoreObject(metaData common.MetaData, data []byte, status string) common.SyncServiceError
+	// If the object already exists, return the changes in its destinations list (for CSS) - return the list of deleted destinations
+	StoreObject(metaData common.MetaData, data []byte, status string) ([]common.StoreDestinationStatus, common.SyncServiceError)
 
 	// Store object's data
 	// Return true if the object was found and updated
@@ -68,6 +69,13 @@ type Storage interface {
 	// If received is true, return objects marked as received
 	RetrieveUpdatedObjects(orgID string, objectType string, received bool) ([]common.MetaData, common.SyncServiceError)
 
+	// RetrieveObjectsWithDestinationPolicy returns the list of all the objects that have a Destination Policy
+	// If received is true, return objects marked as policy received
+	RetrieveObjectsWithDestinationPolicy(orgID string, received bool) ([]common.ObjectDestinationPolicy, common.SyncServiceError)
+
+	// RetrieveObjectsWithDestinationPolicyByService returns the list of all the object Policies for a particular service
+	RetrieveObjectsWithDestinationPolicyByService(orgID, arch, serviceName, version string) ([]common.ObjectDestinationPolicy, common.SyncServiceError)
+
 	// Return the list of all the objects that need to be sent to the destination
 	RetrieveObjects(orgID string, destType string, destID string, resend int) ([]common.MetaData, common.SyncServiceError)
 
@@ -92,6 +100,9 @@ type Storage interface {
 	// Marks the object as deleted
 	MarkObjectDeleted(orgID string, objectType string, objectID string) common.SyncServiceError
 
+	// Mark an object's destination policy as having been received
+	MarkDestinationPolicyReceived(orgID string, objectType string, objectID string) common.SyncServiceError
+
 	// Mark object as active
 	ActivateObject(orgID string, objectType string, objectID string) common.SyncServiceError
 
@@ -112,8 +123,9 @@ type Storage interface {
 	GetObjectDestinations(metaData common.MetaData) ([]common.Destination, common.SyncServiceError)
 
 	// UpdateObjectDeliveryStatus changes the object's delivery status for the destination
+	// Returns true if the status is Deleted and all the destinations are in status Deleted
 	UpdateObjectDeliveryStatus(status string, message string, orgID string, objectType string, objectID string,
-		destType string, destID string) common.SyncServiceError
+		destType string, destID string) (bool, common.SyncServiceError)
 
 	// UpdateObjectDelivering marks the object as being delivered to all its destinations
 	UpdateObjectDelivering(orgID string, objectType string, objectID string) common.SyncServiceError
@@ -121,6 +133,15 @@ type Storage interface {
 	// GetObjectDestinationsList gets destinations that the object has to be sent to and their status
 	GetObjectDestinationsList(orgID string, objectType string,
 		objectID string) ([]common.StoreDestinationStatus, common.SyncServiceError)
+
+	// UpdateObjectDestinations updates object's destinations
+	// Returns the meta data, object's status, an array of deleted destinations, and an array of added destinations
+	UpdateObjectDestinations(orgID string, objectType string, objectID string, destinationsList []string) (*common.MetaData, string,
+		[]common.StoreDestinationStatus, []common.StoreDestinationStatus, common.SyncServiceError)
+
+	// GetNumberOfStoredObjects returns the number of objects received from the application that are
+	// currently stored in this node's storage
+	GetNumberOfStoredObjects() (uint32, common.SyncServiceError)
 
 	// AddWebhook stores a webhook for an object type
 	AddWebhook(orgID string, objectType string, url string) common.SyncServiceError
@@ -151,6 +172,9 @@ type Storage interface {
 
 	// RemoveInactiveDestinations removes destinations that haven't sent ping since the provided timestamp
 	RemoveInactiveDestinations(lastTimestamp time.Time)
+
+	// GetNumberOfDestinations returns the number of currently registered ESS nodes (for CSS)
+	GetNumberOfDestinations() (uint32, common.SyncServiceError)
 
 	// Retrieve communication protocol for the destination
 	RetrieveDestinationProtocol(orgID string, destType string, destID string) (string, common.SyncServiceError)
@@ -357,20 +381,75 @@ func ensureArrayCapacity(data []byte, newCapacity int64) []byte {
 	return new
 }
 
-func createDataPath(prefix string, metaData common.MetaData) string {
+func createDataPath(prefix string, orgID string, objectType string, objectID string) string {
 	var strBuilder strings.Builder
-	strBuilder.Grow(len(prefix) + len(metaData.DestOrgID) + len(metaData.ObjectType) + len(metaData.ObjectID) + 3)
+	strBuilder.Grow(len(prefix) + len(orgID) + len(objectType) + len(objectID) + 3)
 	strBuilder.WriteString(prefix)
-	strBuilder.WriteString(metaData.DestOrgID)
+	strBuilder.WriteString(orgID)
 	strBuilder.WriteByte('-')
-	strBuilder.WriteString(metaData.ObjectType)
+	strBuilder.WriteString(objectType)
 	strBuilder.WriteByte('-')
-	strBuilder.WriteString(metaData.ObjectID)
+	strBuilder.WriteString(objectID)
 	return strBuilder.String()
 }
 
-func createDestinations(store Storage, metaData common.MetaData) ([]common.StoreDestinationStatus, common.SyncServiceError) {
+func createDataPathFromMeta(prefix string, metaData common.MetaData) string {
+	return createDataPath(prefix, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+}
+
+func createDestinationFromList(orgID string, store Storage, destinationsList []string) ([]common.StoreDestinationStatus, common.SyncServiceError) {
 	dests := make([]common.StoreDestinationStatus, 0)
+	for _, d := range destinationsList {
+		parts := strings.Split(d, ":")
+		if len(parts) == 2 {
+			if dest, err := store.RetrieveDestination(orgID, parts[0], parts[1]); err == nil && dest != nil {
+				dests = append(dests, common.StoreDestinationStatus{Destination: *dest, Status: common.Pending})
+			} else {
+				return nil, &Error{fmt.Sprintf("Failed to find destination %s:%s", parts[0], parts[1])}
+			}
+		} else {
+			return nil, &Error{fmt.Sprintf("Invalid destination %s", d)}
+		}
+	}
+	return dests, nil
+}
+
+func compareDestinations(oldList []common.StoreDestinationStatus, newList []common.StoreDestinationStatus) ([]common.StoreDestinationStatus, []common.StoreDestinationStatus) {
+	deletedDests := make([]common.StoreDestinationStatus, 0)
+	addedDests := make([]common.StoreDestinationStatus, 0)
+	for _, dest := range oldList {
+		found := false
+		for _, newDest := range newList {
+			if dest.Destination == newDest.Destination {
+				found = true
+				break
+			}
+		}
+		if !found {
+			deletedDests = append(deletedDests, dest)
+		}
+	}
+	for _, newDest := range newList {
+		found := false
+		for _, dest := range oldList {
+			if dest.Destination == newDest.Destination {
+				found = true
+				break
+			}
+		}
+		if !found {
+			addedDests = append(addedDests, newDest)
+		}
+	}
+	return deletedDests, addedDests
+}
+
+func createDestinationsFromMeta(store Storage, metaData common.MetaData) ([]common.StoreDestinationStatus, []common.StoreDestinationStatus, common.SyncServiceError) {
+	dests := make([]common.StoreDestinationStatus, 0)
+	if metaData.DestinationPolicy != nil {
+		return dests, nil, nil
+	}
+
 	if metaData.DestID != "" {
 		// We check that destType is not empty in updateObject()
 		if dest, err := store.RetrieveDestination(metaData.DestOrgID, metaData.DestType, metaData.DestID); err == nil && dest != nil {
@@ -385,21 +464,33 @@ func createDestinations(store Storage, metaData common.MetaData) ([]common.Store
 				}
 			}
 		} else {
-			for _, d := range metaData.DestinationsList {
-				parts := strings.Split(d, ":")
-				if len(parts) == 2 {
-					if dest, err := store.RetrieveDestination(metaData.DestOrgID, parts[0], parts[1]); err == nil {
-						dests = append(dests, common.StoreDestinationStatus{Destination: *dest, Status: common.Pending})
-					} else {
-						return nil, &Error{fmt.Sprintf("Failed to find destination %s:%s", parts[0], parts[1])}
-					}
-				} else {
-					return nil, &Error{fmt.Sprintf("Invalid destination %s", d)}
-				}
+			var err error
+			dests, err = createDestinationFromList(metaData.DestOrgID, store, metaData.DestinationsList)
+			if err != nil {
+				return nil, nil, err
 			}
 		}
 	}
-	return dests, nil
+
+	existingDestList, _ := store.GetObjectDestinationsList(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+	if existingDestList != nil {
+		deletedDests, _ := compareDestinations(existingDestList, dests)
+		return dests, deletedDests, nil
+	}
+
+	return dests, nil, nil
+}
+
+func createDestinations(orgID string, store Storage, existingDestinations []common.StoreDestinationStatus, destinationsList []string) ([]common.StoreDestinationStatus,
+	[]common.StoreDestinationStatus, []common.StoreDestinationStatus, common.SyncServiceError) {
+
+	dests, err := createDestinationFromList(orgID, store, destinationsList)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	deletedDests, addedDests := compareDestinations(existingDestinations, dests)
+	return dests, deletedDests, addedDests, nil
 }
 
 // DeleteStoredObject calls the storage to delete the object and its data

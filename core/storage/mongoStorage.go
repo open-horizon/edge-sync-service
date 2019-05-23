@@ -43,6 +43,7 @@ type object struct {
 	ID                 string                          `bson:"_id"`
 	MetaData           common.MetaData                 `bson:"metadata"`
 	Status             string                          `bson:"status"`
+	PolicyReceived     bool                            `bson:"policy-received"`
 	RemainingConsumers int                             `bson:"remaining-consumers"`
 	RemainingReceivers int                             `bson:"remaining-receivers"`
 	Destinations       []common.StoreDestinationStatus `bson:"destinations"`
@@ -201,7 +202,19 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 	notificationsCollection := db.C(notifications)
 	notificationsCollection.EnsureIndexKey("notification.destination-org-id", "notification.destination-id", "notification.destination-type")
 	notificationsCollection.EnsureIndexKey("notification.resend-time", "notification.status")
-	db.C(objects).EnsureIndexKey("metadata.destination-org-id")
+	objectsCollection := db.C(objects)
+	objectsCollection.EnsureIndexKey("metadata.destination-org-id")
+	err = objectsCollection.EnsureIndex(
+		mgo.Index{
+			Key:        []string{"metadata.destination-policy.services"},
+			Unique:     false,
+			DropDups:   false,
+			Background: false,
+			Sparse:     true,
+		})
+	if err != nil {
+		log.Error("Failed to create an index on %s. Error: %s", objects, err)
+	}
 	db.C(acls).EnsureIndexKey("org-id", "acl-type")
 
 	store.session = session
@@ -239,7 +252,7 @@ func (store *MongoStorage) PerformMaintenance() {
 
 // GetObjectsToActivate returns inactive objects that are ready to be activated
 func (store *MongoStorage) GetObjectsToActivate() ([]common.MetaData, common.SyncServiceError) {
-	currentTime := time.Now().Format(time.RFC3339)
+	currentTime := time.Now().UTC().Format(time.RFC3339)
 	query := bson.M{"$or": []bson.M{
 		bson.M{"status": common.NotReadyToSend},
 		bson.M{"status": common.ReadyToSend}},
@@ -261,48 +274,88 @@ func (store *MongoStorage) GetObjectsToActivate() ([]common.MetaData, common.Syn
 }
 
 // StoreObject stores an object
-func (store *MongoStorage) StoreObject(metaData common.MetaData, data []byte, status string) common.SyncServiceError {
+// If the object already exists, return the changes in its destinations list (for CSS) - return the list of deleted destinations
+func (store *MongoStorage) StoreObject(metaData common.MetaData, data []byte, status string) ([]common.StoreDestinationStatus, common.SyncServiceError) {
 	id := getObjectCollectionID(metaData)
-	if data != nil {
+	if !metaData.NoData && data != nil {
 		if err := store.storeDataInFile(id, data); err != nil {
-			return err
+			return nil, err
 		}
-	} else if !metaData.MetaOnly || metaData.NoData {
+	} else if !metaData.MetaOnly {
 		store.removeFile(id)
 	}
 
+	if metaData.DestinationPolicy != nil {
+		metaData.DestinationPolicy.Timestamp = time.Now().UnixNano()
+	}
+
 	var dests []common.StoreDestinationStatus
+	var deletedDests []common.StoreDestinationStatus
 	if status == common.NotReadyToSend || status == common.ReadyToSend {
 		// The object was receieved from a service, i.e. this node is the origin of the object:
 		// set its instance id and create destinations array
-		metaData.InstanceID = time.Now().UnixNano()
+		newID := store.getInstanceID()
+		metaData.InstanceID = newID
+		if data != nil && !metaData.NoData && !metaData.MetaOnly {
+			metaData.DataID = newID
+		}
 
 		var err error
-		dests, err = createDestinations(store, metaData)
+		dests, deletedDests, err = createDestinationsFromMeta(store, metaData)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	if metaData.MetaOnly {
-		if err := store.update(objects, bson.M{"_id": id},
+		err := store.update(objects, bson.M{"_id": id},
 			bson.M{
-				"$set": bson.M{"metadata": metaData, "status": status, "destinations": dests,
-					"remaining-consumers": metaData.ExpectedConsumers, "remaining-receivers": metaData.ExpectedConsumers},
-				"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}}},
-		); err != nil {
-			return &Error{fmt.Sprintf("Failed to update object. Error: %s.", err)}
+				"$set": bson.M{
+					"metadata.destination-id":     metaData.DestID,
+					"metadata.destination-type":   metaData.DestType,
+					"metadata.destination-list":   metaData.DestinationsList,
+					"metadata.destination-policy": metaData.DestinationPolicy,
+					"metadata.expiration":         metaData.Expiration,
+					"metadata.version":            metaData.Version,
+					"metadata.description":        metaData.Description,
+					"metadata.link":               metaData.Link,
+					"metadata.inactive":           metaData.Inactive,
+					"metadata.activation-time":    metaData.ActivationTime,
+					"metadata.no-data":            metaData.NoData,
+					"metadata.meta-only":          metaData.MetaOnly,
+					"metadata.data-uri":           metaData.DestinationDataURI,
+					"metadata.source-data-uri":    metaData.SourceDataURI,
+					"metadata.consumers":          metaData.ExpectedConsumers,
+					"metadata.autodelete":         metaData.AutoDelete,
+					"metadata.origin-id":          metaData.OriginID,
+					"metadata.origin-type":        metaData.OriginType,
+					"metadata.instance-id":        metaData.InstanceID,
+
+					"status": status, "destinations": dests,
+					"policy-received":     false,
+					"remaining-consumers": metaData.ExpectedConsumers,
+					"remaining-receivers": metaData.ExpectedConsumers},
+				"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}}})
+		if err == nil {
+			return deletedDests, nil
 		}
-		return nil
+		switch err {
+		case mgo.ErrNotFound:
+			// Insert the object
+			break
+		default:
+			return nil, &Error{fmt.Sprintf("Failed to update object. Error: %s.", err)}
+		}
 	}
 
-	newObject := object{ID: id, MetaData: metaData, Status: status, RemainingConsumers: metaData.ExpectedConsumers,
+	newObject := object{ID: id, MetaData: metaData, Status: status, PolicyReceived: false,
+		RemainingConsumers: metaData.ExpectedConsumers,
 		RemainingReceivers: metaData.ExpectedConsumers, Destinations: dests}
 	if err := store.upsert(objects, bson.M{"_id": id, "metadata.destination-org-id": metaData.DestOrgID}, newObject); err != nil {
-		return &Error{fmt.Sprintf("Failed to store an object. Error: %s.", err)}
+		return nil, &Error{fmt.Sprintf("Failed to store an object. Error: %s.", err)}
 	}
 
-	return nil
+	return deletedDests, nil
 }
 
 // GetObjectDestinations gets destinations that the object has to be sent to
@@ -337,30 +390,63 @@ func (store *MongoStorage) GetObjectDestinationsList(orgID string, objectType st
 			return nil, &Error{fmt.Sprintf("Failed to retrieve object's destinations. Error: %s.", err)}
 		}
 	}
-	dests := make([]common.StoreDestinationStatus, 0)
-	for _, d := range result.Destinations {
-		dests = append(dests, d)
+
+	return result.Destinations, nil
+}
+
+// UpdateObjectDestinations updates object's destinations
+// Returns the meta data, object's status, an array of deleted destinations, and an array of added destinations
+func (store *MongoStorage) UpdateObjectDestinations(orgID string, objectType string, objectID string, destinationsList []string) (*common.MetaData, string,
+	[]common.StoreDestinationStatus, []common.StoreDestinationStatus, common.SyncServiceError) {
+
+	result := object{}
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	selector := bson.M{"metadata": bson.ElementDocument, "destinations": bson.ElementArray, "last-update": bson.ElementTimestamp, "status": bson.ElementString}
+	for i := 0; i < maxUpdateTries; i++ {
+		if err := store.fetchOne(objects, bson.M{"_id": id}, selector, &result); err != nil {
+			return nil, "", nil, nil, &Error{fmt.Sprintf("Failed to retrieve object's destinations. Error: %s.", err)}
+		}
+
+		dests, deletedDests, addedDests, err := createDestinations(orgID, store, result.Destinations, destinationsList)
+		if err != nil {
+			return nil, "", nil, nil, err
+		}
+
+		query := bson.M{
+			"$set":         bson.M{"destinations": dests},
+			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+		}
+		if err := store.update(objects, bson.M{"_id": id, "last-update": result.LastUpdate}, query); err != nil {
+			if err == mgo.ErrNotFound {
+				continue
+			}
+			return nil, "", nil, nil, &Error{fmt.Sprintf("Failed to update object's destinations. Error: %s.", err)}
+		}
+		return &result.MetaData, result.Status, deletedDests, addedDests, nil
 	}
-	return dests, nil
+	return nil, "", nil, nil, &Error{"Failed to update object's destinations."}
 }
 
 // UpdateObjectDeliveryStatus changes the object's delivery status and message for the destination
+// Returns true if the status is Deleted and all the destinations are in status Deleted
 func (store *MongoStorage) UpdateObjectDeliveryStatus(status string, message string, orgID string, objectType string, objectID string,
-	destType string, destID string) common.SyncServiceError {
+	destType string, destID string) (bool, common.SyncServiceError) {
 	if status == "" && message == "" {
-		return nil
+		return false, nil
 	}
 	result := object{}
 	id := createObjectCollectionID(orgID, objectType, objectID)
+	allDeleted := true
 
 	for i := 0; i < maxUpdateTries; i++ {
 		if err := store.fetchOne(objects, bson.M{"_id": id},
 			bson.M{"metadata": bson.ElementDocument, "destinations": bson.ElementArray, "last-update": bson.ElementTimestamp},
 			&result); err != nil {
-			return &Error{fmt.Sprintf("Failed to retrieve object. Error: %s.", err)}
+			return false, &Error{fmt.Sprintf("Failed to retrieve object. Error: %s.", err)}
 		}
 		found := false
 		allConsumed := true
+		allDeleted = true
 		for i, d := range result.Destinations {
 			if !found && d.Destination.DestType == destType && d.Destination.DestID == destID {
 				if message != "" || d.Status == common.Error {
@@ -371,12 +457,17 @@ func (store *MongoStorage) UpdateObjectDeliveryStatus(status string, message str
 				}
 				found = true
 				result.Destinations[i] = d
-			} else if d.Status != common.Consumed {
-				allConsumed = false
+			} else {
+				if d.Status != common.Consumed {
+					allConsumed = false
+				}
+				if d.Status != common.Deleted {
+					allDeleted = false
+				}
 			}
 		}
 		if !found {
-			return &Error{"Failed to find destination."}
+			return false, &Error{"Failed to find destination."}
 		}
 
 		query := bson.M{
@@ -385,7 +476,7 @@ func (store *MongoStorage) UpdateObjectDeliveryStatus(status string, message str
 		}
 		if result.MetaData.AutoDelete && status == common.Consumed && allConsumed && result.MetaData.Expiration == "" {
 			// Delete the object by setting its expiration time to one hour
-			expirationTime := time.Now().Add(time.Hour * time.Duration(1)).Format(time.RFC3339)
+			expirationTime := time.Now().Add(time.Hour * time.Duration(1)).UTC().Format(time.RFC3339)
 			query = bson.M{
 				"$set":         bson.M{"destinations": result.Destinations, "metadata.expiration": expirationTime},
 				"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
@@ -395,11 +486,11 @@ func (store *MongoStorage) UpdateObjectDeliveryStatus(status string, message str
 			if err == mgo.ErrNotFound {
 				continue
 			}
-			return &Error{fmt.Sprintf("Failed to update object's destinations. Error: %s.", err)}
+			return false, &Error{fmt.Sprintf("Failed to update object's destinations. Error: %s.", err)}
 		}
-		return nil
+		return (allDeleted && status == common.Deleted), nil
 	}
-	return &Error{fmt.Sprintf("Failed to update object's destinations.")}
+	return false, &Error{"Failed to update object's destinations."}
 }
 
 // UpdateObjectDelivering marks the object as being delivered to all its destinations
@@ -542,6 +633,45 @@ func (store *MongoStorage) RetrieveUpdatedObjects(orgID string, objectType strin
 		metaDatas[i] = r.MetaData
 	}
 	return metaDatas, nil
+}
+
+// RetrieveObjectsWithDestinationPolicy returns the list of all the objects that have a Destination Policy
+// If received is true, return objects marked as policy received
+func (store *MongoStorage) RetrieveObjectsWithDestinationPolicy(orgID string, received bool) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	var query interface{}
+	if received {
+		query = bson.M{
+			"metadata.destination-org-id": orgID,
+			"$and": []bson.M{
+				bson.M{"status": bson.M{"$ne": common.ObjDeleted}},
+				bson.M{"metadata.destination-policy": bson.M{"$ne": nil}},
+			},
+		}
+	} else {
+		query = bson.M{
+			"metadata.destination-org-id": orgID,
+			"policy-received":             false,
+			"$and": []bson.M{
+				bson.M{"status": bson.M{"$ne": common.ObjDeleted}},
+				bson.M{"metadata.destination-policy": bson.M{"$ne": nil}},
+			},
+		}
+	}
+	return store.retrievePolicies(query)
+}
+
+// RetrieveObjectsWithDestinationPolicyByService returns the list of all the object Policies for a particular service
+func (store *MongoStorage) RetrieveObjectsWithDestinationPolicyByService(orgID, arch, serviceName, version string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	// The order of the fields in the following query seems to be important.
+	// DO NOT replace the bson.D with a bson.M
+	query := bson.M{
+		"metadata.destination-policy.services": bson.D{
+			{Name: "org-id", Value: orgID}, {Name: "arch", Value: arch},
+			{Name: "service-name", Value: serviceName}, {Name: "version", Value: version},
+		},
+	}
+
+	return store.retrievePolicies(query)
 }
 
 // RetrieveObjects returns the list of all the objects that need to be sent to the destination.
@@ -745,13 +875,15 @@ func (store *MongoStorage) StoreObjectData(orgID string, objectType string, obje
 			return false, &Error{fmt.Sprintf("Failed to store the data. Error: %s.", err)}
 		}
 	}
+
 	if result.Status == common.NotReadyToSend {
 		store.UpdateObjectStatus(orgID, objectType, objectID, common.ReadyToSend)
-	} else if result.Status == common.ReadyToSend {
-		// The data is being updated, set the instance id
+	}
+	if result.Status == common.NotReadyToSend || result.Status == common.ReadyToSend {
+		newID := store.getInstanceID()
 		if err := store.update(objects, bson.M{"_id": id},
 			bson.M{
-				"$set":         bson.M{"metadata.instance-id": time.Now().UnixNano()},
+				"$set":         bson.M{"metadata.data-id": newID, "metadata.instance-id": newID},
 				"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
 			}); err != nil {
 			return false, &Error{fmt.Sprintf("Failed to set instance id. Error: %s.", err)}
@@ -891,6 +1023,19 @@ func (store *MongoStorage) MarkObjectDeleted(orgID string, objectType string, ob
 	return nil
 }
 
+// MarkDestinationPolicyReceived marks an object's destination policy as having been received
+func (store *MongoStorage) MarkDestinationPolicyReceived(orgID string, objectType string, objectID string) common.SyncServiceError {
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	if err := store.update(objects, bson.M{"_id": id},
+		bson.M{
+			"$set":         bson.M{"policy-received": true},
+			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+		}); err != nil {
+		return &Error{fmt.Sprintf("Failed to mark an object's destination policy as received. Error: %s", err)}
+	}
+	return nil
+}
+
 // ActivateObject marks object as active
 func (store *MongoStorage) ActivateObject(orgID string, objectType string, objectID string) common.SyncServiceError {
 	id := createObjectCollectionID(orgID, objectType, objectID)
@@ -928,6 +1073,17 @@ func (store *MongoStorage) DeleteStoredData(orgID string, objectType string, obj
 func (store *MongoStorage) CleanObjects() common.SyncServiceError {
 	// ESS only function
 	return nil
+}
+
+// GetNumberOfStoredObjects returns the number of objects received from the application that are
+// currently stored in this node's storage
+func (store *MongoStorage) GetNumberOfStoredObjects() (uint32, common.SyncServiceError) {
+	query := bson.M{
+		"$or": []bson.M{
+			bson.M{"status": common.ReadyToSend},
+			bson.M{"status": common.NotReadyToSend},
+		}}
+	return store.count(objects, query)
 }
 
 // AddWebhook stores a webhook for an object type
@@ -1137,6 +1293,11 @@ func (store *MongoStorage) RemoveInactiveDestinations(lastTimestamp time.Time) {
 			log.Error("Error in mongoStorage.RemoveInactiveDestinations: failed to remove inactive destination. Error: %s\n", err)
 		}
 	}
+}
+
+// GetNumberOfDestinations returns the number of currently registered ESS nodes (for CSS)
+func (store *MongoStorage) GetNumberOfDestinations() (uint32, common.SyncServiceError) {
+	return store.count(destinations, nil)
 }
 
 // RetrieveDestinationProtocol retrieves the communication protocol for the destination
@@ -1395,6 +1556,9 @@ func (store *MongoStorage) RetrieveLeader() (string, int32, time.Time, int64, co
 	doc := leaderDocument{}
 	err := store.fetchOne(leader, bson.M{"_id": 1}, nil, &doc)
 	if err != nil {
+		if err == mgo.ErrNotFound {
+			return "", 0, time.Now(), 0, &NotFound{}
+		}
 		return "", 0, time.Now(), 0, &Error{fmt.Sprintf("Failed to fetch the document in the syncLeaderElection collection. Error: %s", err)}
 	}
 	return doc.UUID, doc.HeartbeatTimeout, doc.LastHeartbeatTS.Time(), doc.Version, nil
@@ -1514,6 +1678,17 @@ func (store *MongoStorage) DeleteOrganization(orgID string) common.SyncServiceEr
 
 	if err := store.removeAll(notifications, bson.M{"notification.destination-org-id": orgID}); err != nil && err != mgo.ErrNotFound {
 		return &Error{fmt.Sprintf("Failed to delete notifications. Error: %s.", err)}
+	}
+
+	type idstruct struct {
+		ID string `bson:"_id"`
+	}
+	results := []idstruct{}
+	if err := store.fetchAll(objects, bson.M{"metadata.destination-org-id": orgID}, bson.M{"_id": bson.ElementString}, &results); err != nil && err != mgo.ErrNotFound {
+		return &Error{fmt.Sprintf("Failed to fetch objects to delete. Error: %s.", err)}
+	}
+	for _, result := range results {
+		store.removeFile(result.ID)
 	}
 
 	if err := store.removeAll(objects, bson.M{"metadata.destination-org-id": orgID}); err != nil && err != mgo.ErrNotFound {

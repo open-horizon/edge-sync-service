@@ -52,7 +52,7 @@ func init() {
 	waitersForStartChannel = make(chan chan int, 40)
 }
 
-// Start starts up the synnc service
+// Start starts up the sync service
 func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 	startStopLock.Lock()
 	defer startStopLock.Unlock()
@@ -115,8 +115,7 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 	leader.StartLeaderDetermination(store)
 
 	var mqttComm *communications.MQTT
-	if (common.Configuration.NodeType == common.ESS && common.Configuration.CommunicationProtocol != common.HTTPProtocol) ||
-		(common.Configuration.NodeType == common.CSS && common.Configuration.CommunicationProtocol != common.HTTPProtocol) {
+	if common.Configuration.CommunicationProtocol != common.HTTPProtocol {
 		mqttComm = &communications.MQTT{}
 		if err := mqttComm.StartCommunication(); err != nil {
 			return &common.SetupError{Message: fmt.Sprintf("Failed to initialize MQTT communication driver. Error: %s\n", err.Error())}
@@ -173,7 +172,9 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 			activateTimer = time.NewTimer(time.Second * time.Duration(common.Configuration.ObjectActivationInterval))
 			select {
 			case <-activateTimer.C:
-				communications.ActivateObjects()
+				if leader.CheckIfLeader() {
+					communications.ActivateObjects()
+				}
 
 			case <-activateStopChannel:
 				keepRunning = false
@@ -191,7 +192,9 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 				maintenanceTimer = time.NewTimer(time.Second * time.Duration(common.Configuration.StorageMaintenanceInterval))
 				select {
 				case <-maintenanceTimer.C:
-					store.PerformMaintenance()
+					if leader.CheckIfLeader() {
+						store.PerformMaintenance()
+					}
 
 				case <-maintenanceStopChannel:
 					keepRunning = false
@@ -248,6 +251,7 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 	if err == nil {
 		common.Running = true
 		started = true
+		common.HealthStatus.NodeStarted()
 
 		keepOnGoing := true
 		for keepOnGoing {

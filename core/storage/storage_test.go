@@ -37,8 +37,12 @@ func testStorageObjects(storageType string, t *testing.T) {
 			t.Errorf("Failed to delete object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
 		}
 		// Insert
-		if err := store.StoreObject(test.metaData, nil, test.status); err != nil {
+		if deletedDests, err := store.StoreObject(test.metaData, nil, test.status); err != nil {
 			t.Errorf("Failed to store object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+		} else {
+			if len(deletedDests) != 0 {
+				t.Errorf("StoreObject for new object returned deleted destinations (objectID = %s)\n", test.metaData.ObjectID)
+			}
 		}
 		storedMetaData, storedStatus, err := store.RetrieveObjectAndStatus(test.metaData.DestOrgID,
 			test.metaData.ObjectType, test.metaData.ObjectID)
@@ -128,7 +132,8 @@ func testStorageObjects(storageType string, t *testing.T) {
 
 		instanceID := storedMetaData.InstanceID
 		// Update, instance ID for the sending side should be incremented
-		if err := store.StoreObject(test.metaData, nil, test.status); err != nil {
+		time.Sleep(20 * time.Millisecond)
+		if _, err := store.StoreObject(test.metaData, nil, test.status); err != nil {
 			t.Errorf("Failed to store object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
 		}
 		storedMetaData, storedStatus, err = store.RetrieveObjectAndStatus(test.metaData.DestOrgID,
@@ -233,6 +238,193 @@ func testStorageObjects(storageType string, t *testing.T) {
 	}
 }
 
+func testStorageObjectsWithPolicy(storageType string, t *testing.T) {
+	store, err := setUpStorage(storageType)
+	if err != nil {
+		t.Errorf(err.Error())
+		return
+	}
+	defer store.Stop()
+
+	tests := []struct {
+		metaData common.MetaData
+		recieved bool
+	}{
+		{common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg000",
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "a", Value: float64(1)},
+					{Name: "b", Value: "zxcv"},
+					{Name: "c", Value: true, Type: "bool"},
+				},
+				Constraints: []string{"Plover=34", "asdf=true"},
+			},
+		}, true},
+		{common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "myorg000",
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "d", Value: float64(98)},
+					{Name: "e", Value: "asdf", Type: "string"},
+					{Name: "f", Value: false},
+				},
+				Constraints: []string{"xyzzy=78", "vbnm=false"},
+				Services: []common.ServiceID{
+					{OrgID: "plover", Arch: "amd64", ServiceName: "xyzzy", Version: "1.0.0"},
+				},
+			},
+		}, false},
+		{common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "myorg000",
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "g", Value: float64(-34)},
+					{Name: "h", Value: "qwer"},
+					{Name: "i", Value: float64(42), Type: "float"},
+				},
+				Constraints: []string{"x=15", "y=0.0"},
+				Services: []common.ServiceID{
+					{OrgID: "plover", Arch: "amd64", ServiceName: "xyzzy", Version: "1.0.0"},
+				},
+			},
+		}, true},
+		{common.MetaData{ObjectID: "4", ObjectType: "type1", DestOrgID: "myorg000",
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "j", Value: float64(42.0)},
+					{Name: "k", Value: "ghjk"},
+					{Name: "l", Value: float64(613)},
+				},
+				Constraints: []string{"il=71", "rtyu=\"edcrfv\""},
+				Services: []common.ServiceID{
+					{OrgID: "plover", Arch: "amd64", ServiceName: "wompus", Version: "1.0.0"},
+				},
+			},
+		}, false},
+	}
+
+	for _, test := range tests {
+		// Delete the object first
+		if err := store.DeleteStoredObject(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID); err != nil {
+			t.Errorf("Failed to delete object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+		}
+		// Insert
+		if _, err := store.StoreObject(test.metaData, nil, common.NotReadyToSend); err != nil {
+			t.Errorf("Failed to store object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+		}
+		storedMetaData, err := store.RetrieveObject(test.metaData.DestOrgID,
+			test.metaData.ObjectType, test.metaData.ObjectID)
+		if err != nil {
+			t.Errorf("Failed to retrieve object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+		} else {
+			if storedMetaData.DestinationPolicy == nil {
+				t.Errorf("DestinationPolicy nil in retrieved object (objectID = %s)\n", test.metaData.ObjectID)
+			} else {
+				equal := len(storedMetaData.DestinationPolicy.Properties) == len(test.metaData.DestinationPolicy.Properties) &&
+					len(storedMetaData.DestinationPolicy.Constraints) == len(test.metaData.DestinationPolicy.Constraints)
+				if equal {
+					for index, property := range storedMetaData.DestinationPolicy.Properties {
+						expectedProperty := test.metaData.DestinationPolicy.Properties[index]
+						if expectedProperty.Name != property.Name || expectedProperty.Value != property.Value ||
+							expectedProperty.Type != property.Type {
+							equal = false
+							break
+						}
+					}
+				}
+				if equal {
+					for index, value := range storedMetaData.DestinationPolicy.Constraints {
+						if value != test.metaData.DestinationPolicy.Constraints[index] {
+							equal = false
+							break
+						}
+					}
+				}
+				if !equal {
+					t.Errorf("The retrieved DestinationPolicy %#v does not match the expected one %#v\n",
+						storedMetaData.DestinationPolicy, test.metaData.DestinationPolicy)
+				}
+
+				policyTimestamp := storedMetaData.DestinationPolicy.Timestamp
+
+				if _, err := store.StoreObject(test.metaData, nil, common.NotReadyToSend); err != nil {
+					t.Errorf("Failed to store object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+				}
+				storedMetaData, err := store.RetrieveObject(test.metaData.DestOrgID,
+					test.metaData.ObjectType, test.metaData.ObjectID)
+				if err != nil {
+					t.Errorf("Failed to retrieve object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+				} else if policyTimestamp >= storedMetaData.DestinationPolicy.Timestamp {
+					t.Errorf("DestinationPolicy Timestamp wasn't incremented after update. Was %d, now is %d",
+						policyTimestamp, storedMetaData.DestinationPolicy.Timestamp)
+				}
+			}
+		}
+	}
+
+	policyInfo, err := store.RetrieveObjectsWithDestinationPolicy("myorg000", false)
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(policyInfo) != len(tests) {
+		t.Errorf("Received %d objects with a destination policy. Expected %d\n", len(policyInfo), len(tests))
+	}
+
+	objectsMarkedReceived := 0
+	for _, test := range tests {
+		if test.recieved {
+			objectsMarkedReceived++
+			err = store.MarkDestinationPolicyReceived(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID)
+			if err != nil {
+				t.Errorf("Failed to mark the destination policy of %s as received. Error: %s\n", test.metaData.ObjectID, err)
+			}
+		}
+	}
+
+	policyInfo, err = store.RetrieveObjectsWithDestinationPolicy("myorg000", false)
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(policyInfo) != len(tests)-objectsMarkedReceived {
+		t.Errorf("Received %d objects with a destination policy. Expected %d. Total %d. Received %d\n",
+			len(policyInfo), len(tests)-objectsMarkedReceived, len(tests), objectsMarkedReceived)
+	}
+
+	policyInfo, err = store.RetrieveObjectsWithDestinationPolicy("myorg000", true)
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(policyInfo) != len(tests) {
+		t.Errorf("Received %d objects with a destination policy. Expected %d\n", len(policyInfo), len(tests))
+	}
+
+	for _, test := range tests {
+		if test.recieved {
+			if _, err := store.StoreObject(test.metaData, nil, common.NotReadyToSend); err != nil {
+				t.Errorf("Failed to store object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+			}
+			objectsMarkedReceived--
+			break
+		}
+	}
+
+	policyInfo, err = store.RetrieveObjectsWithDestinationPolicy("myorg000", false)
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(policyInfo) != len(tests)-objectsMarkedReceived {
+		t.Errorf("Received %d objects with a destination policy. Expected %d. Total %d. Received %d\n",
+			len(policyInfo), len(tests)-objectsMarkedReceived, len(tests), objectsMarkedReceived)
+	}
+
+	policyInfo, err = store.RetrieveObjectsWithDestinationPolicyByService("plover", "amd64", "xyzzy", "1.0.0")
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(policyInfo) != 2 {
+		t.Errorf("Received %d objects with a destination policy. Expected %d.\n",
+			len(policyInfo), 2)
+	}
+}
+
 func testStorageObjectActivation(storageType string, t *testing.T) {
 	store, err := setUpStorage(storageType)
 	if err != nil {
@@ -243,8 +435,8 @@ func testStorageObjectActivation(storageType string, t *testing.T) {
 
 	common.Configuration.StorageMaintenanceInterval = 1
 
-	activationTime1 := time.Now().Add(time.Second * 2).Format(time.RFC3339)
-	activationTime2 := time.Now().Add(time.Second * 6).Format(time.RFC3339)
+	activationTime1 := time.Now().Add(time.Second * 2).UTC().Format(time.RFC3339)
+	activationTime2 := time.Now().Add(time.Second * 6).UTC().Format(time.RFC3339)
 
 	tests := []struct {
 		metaData common.MetaData
@@ -264,7 +456,7 @@ func testStorageObjectActivation(storageType string, t *testing.T) {
 
 	for _, test := range tests {
 		// Insert
-		if err := store.StoreObject(test.metaData, nil, test.status); err != nil {
+		if _, err := store.StoreObject(test.metaData, nil, test.status); err != nil {
 			t.Errorf("Failed to store object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
 		}
 	}
@@ -329,17 +521,32 @@ func testStorageObjectData(storageType string, t *testing.T) {
 	}{
 		{common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "org555", DestID: "dev1", DestType: "device"},
 			common.ReadyToSend, []byte("abcdefghijklmnopqrstuvwxyz"), []byte("new")},
+		{common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "org555", DestID: "dev1", DestType: "device", MetaOnly: true},
+			common.ReadyToSend, nil, nil},
 		{common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "org555", DestID: "dev1", DestType: "device",
 			Inactive: true}, common.CompletelyReceived, []byte("abcdefghijklmnopqrstuvwxyz"), []byte("new")},
 		{common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "org555", DestID: "dev1", DestType: "device"},
-			common.ReadyToSend, nil, []byte("new")},
+			common.NotReadyToSend, nil, []byte("new")},
 	}
 
-	for _, test := range tests {
+	for i, test := range tests {
 		test.metaData.ObjectSize = int64(len(test.data) + len(test.newData))
 		// Insert
-		if err := store.StoreObject(test.metaData, test.data, test.status); err != nil {
+		if _, err := store.StoreObject(test.metaData, test.data, test.status); err != nil {
 			t.Errorf("Failed to store object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+		}
+
+		if test.metaData.MetaOnly {
+			// Instance id should be greater than the data id, because the instance id should be set and data id not
+			storedMetaData, err := store.RetrieveObject(test.metaData.DestOrgID,
+				test.metaData.ObjectType, test.metaData.ObjectID)
+			if err != nil {
+				t.Errorf("Failed to retrieve object(objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+			} else {
+				if storedMetaData.InstanceID <= storedMetaData.DataID {
+					t.Errorf("InstanceID <= DataID (objectID = %s)", test.metaData.ObjectID)
+				}
+			}
 		}
 
 		// Check stored data
@@ -358,14 +565,18 @@ func testStorageObjectData(storageType string, t *testing.T) {
 				t.Errorf("Failed to read object's data from the returned reader (objectID = %s). Error: %s",
 					test.metaData.ObjectID, err.Error())
 			}
-			if n != len(test.data) {
+			testData := test.data
+			if test.metaData.MetaOnly {
+				testData = append(tests[i-1].data, tests[i-1].newData...) // The data doesn't change in the meta only update
+			}
+			if n != len(testData) {
 				t.Errorf("Incorrect data size 's data from the returned reader (objectID = %s): %d instead of %d",
-					test.metaData.ObjectID, n, len(test.data))
+					test.metaData.ObjectID, n, len(testData))
 			}
 			data = data[:n]
-			if string(data) != string(test.data) {
+			if string(data) != string(testData) {
 				t.Errorf("Incorrect data (objectID = %s): %s instead of %s",
-					test.metaData.ObjectID, string(data), string(test.data))
+					test.metaData.ObjectID, string(data), string(testData))
 			}
 			store.CloseDataReader(dataReader)
 		}
@@ -719,8 +930,8 @@ func testStorageObjectExpiration(storageType string, t *testing.T) {
 		t.Errorf("StoreDestination failed. Error: %s\n", err.Error())
 	}
 
-	expirationTime1 := time.Now().Add(time.Second * 1).Format(time.RFC3339)
-	expirationTime2 := time.Now().Add(time.Second * 6).Format(time.RFC3339)
+	expirationTime1 := time.Now().Add(time.Second * 1).UTC().Format(time.RFC3339)
+	expirationTime2 := time.Now().Add(time.Second * 6).UTC().Format(time.RFC3339)
 
 	tests := []struct {
 		metaData common.MetaData
@@ -756,7 +967,7 @@ func testStorageObjectExpiration(storageType string, t *testing.T) {
 
 	for _, test := range tests {
 		// Insert
-		if err := store.StoreObject(test.metaData, nil, test.status); err != nil {
+		if _, err := store.StoreObject(test.metaData, nil, test.status); err != nil {
 			t.Errorf("Failed to store object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
 		}
 	}
@@ -846,7 +1057,7 @@ func testStorageOrgDeleteObjects(storageType string, t *testing.T) {
 
 	for _, test := range tests {
 		// Insert
-		if err := store.StoreObject(test.metaData, test.data, test.status); err != nil {
+		if _, err := store.StoreObject(test.metaData, test.data, test.status); err != nil {
 			t.Errorf("Failed to store object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
 		}
 	}
@@ -1059,19 +1270,27 @@ func testStorageObjectDestinations(storageType string, t *testing.T) {
 	}
 
 	tests := []struct {
-		metaData common.MetaData
-		status   string
+		metaData             common.MetaData
+		status               string
+		numberOfDeletedDests int
+		numberOfAddedDests   int
+		deletedDest          *common.Destination
+		addedDest            *common.Destination
 	}{
 		{common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "org444", DestID: "dev1", DestType: "device"},
-			common.NotReadyToSend},
+			common.NotReadyToSend, 0, 0, nil, nil},
 		{common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "org444", DestType: "device",
-			Inactive: true}, common.NotReadyToSend},
+			Inactive: true}, common.NotReadyToSend, 0, 0, nil, nil},
 		{common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "org444", DestID: "dev1", DestType: "device",
-			Inactive: true}, common.NotReadyToSend},
+			Inactive: true}, common.NotReadyToSend, 0, 0, nil, nil},
 		{common.MetaData{ObjectID: "4", ObjectType: "type1", DestOrgID: "org444", DestID: "dev1", DestType: "device",
-			NoData: true}, common.ReadyToSend},
+			NoData: true}, common.ReadyToSend, 0, 0, nil, nil},
 		{common.MetaData{ObjectID: "5", ObjectType: "type1", DestOrgID: "org444",
-			DestinationsList: destArray, NoData: true}, common.ReadyToSend},
+			DestinationsList: destArray, NoData: true}, common.ReadyToSend, 0, 0, nil, nil},
+		{common.MetaData{ObjectID: "4", ObjectType: "type1", DestOrgID: "org444", DestinationsList: destArray,
+			NoData: true}, common.ReadyToSend, 0, 1, nil, &dest2},
+		{common.MetaData{ObjectID: "5", ObjectType: "type1", DestOrgID: "org444", DestID: "dev1", DestType: "device",
+			NoData: true}, common.ReadyToSend, 1, 0, &dest2, nil},
 	}
 
 	for _, test := range tests {
@@ -1079,9 +1298,18 @@ func testStorageObjectDestinations(storageType string, t *testing.T) {
 		if err := store.DeleteStoredObject(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID); err != nil {
 			t.Errorf("Failed to delete object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
 		}
+	}
+	for _, test := range tests {
 		// Insert
-		if err := store.StoreObject(test.metaData, nil, test.status); err != nil {
+		if deletedDests, err := store.StoreObject(test.metaData, nil, test.status); err != nil {
 			t.Errorf("Failed to store object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+		} else {
+			if len(deletedDests) != test.numberOfDeletedDests {
+				t.Errorf("StoreObject returned wrong number of deleted destinations: %d instead of %d (objectID = %s).\n",
+					len(deletedDests), test.numberOfDeletedDests, test.metaData.ObjectID)
+			} else if len(deletedDests) == 1 && deletedDests[0].Destination != *test.deletedDest {
+				t.Errorf("StoreObject returned wrong deleted destination (objectID = %s).\n", test.metaData.ObjectID)
+			}
 		}
 		// Check destinations
 		if dests, err := store.GetObjectDestinations(test.metaData); err != nil {
@@ -1174,7 +1402,7 @@ func testStorageObjectDestinations(storageType string, t *testing.T) {
 		}
 
 		// Change status to Delivered for dest1
-		if err := store.UpdateObjectDeliveryStatus(common.Delivered, "", test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID,
+		if _, err := store.UpdateObjectDeliveryStatus(common.Delivered, "", test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID,
 			dest1.DestType, dest1.DestID); err != nil {
 			t.Errorf("UpdateObjectDeliveryStatus failed (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
 		} else if dests, err := store.GetObjectDestinationsList(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID); err != nil {
@@ -1192,7 +1420,7 @@ func testStorageObjectDestinations(storageType string, t *testing.T) {
 		}
 
 		// Change status to Error for dest1
-		if err := store.UpdateObjectDeliveryStatus(common.Error, "Error", test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID,
+		if _, err := store.UpdateObjectDeliveryStatus(common.Error, "Error", test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID,
 			dest1.DestType, dest1.DestID); err != nil {
 			t.Errorf("UpdateObjectDeliveryStatus failed (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
 		} else if dests, err := store.GetObjectDestinationsList(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID); err != nil {

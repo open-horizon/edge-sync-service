@@ -23,7 +23,7 @@ var apiLock sync.RWMutex
 var apiObjectLocks common.Locks
 
 func init() {
-	apiObjectLocks = *common.NewLocks()
+	apiObjectLocks = *common.NewLocks("api")
 }
 
 // UpdateObject invoked when an app sends an updated object
@@ -31,6 +31,8 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In UpdateObject. Update %s %s %s\n", orgID, objectType, objectID)
 	}
+
+	common.HealthStatus.ClientRequestReceived()
 
 	// Verify that the object is valid
 	if metaData.ObjectID == "" {
@@ -62,6 +64,10 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 		}
 	}
 
+	if metaData.MetaOnly && len(data) != 0 {
+		return &common.InvalidRequest{Message: "Can't update data if MetaOnly is true"}
+	}
+
 	if metaData.DestID != "" && metaData.DestType == "" {
 		return &common.InvalidRequest{Message: "Destination ID provided without destination type in object's meta data"}
 	}
@@ -70,6 +76,14 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 	}
 	if metaData.DestinationsList != nil && metaData.DestType != "" {
 		return &common.InvalidRequest{Message: "Both destinations list and destination type are specified"}
+	}
+
+	if metaData.DestinationPolicy != nil && metaData.DestType != "" {
+		return &common.InvalidRequest{Message: "Both destination policy and destination type are specified"}
+	}
+
+	if metaData.DestinationPolicy != nil && metaData.DestinationsList != nil {
+		return &common.InvalidRequest{Message: "Both destination policy and destination list are specified"}
 	}
 
 	if metaData.AutoDelete && metaData.DestinationsList == nil && metaData.DestID == "" {
@@ -137,8 +151,17 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 
 	// Store the object in the storage module
 	status := common.NotReadyToSend
-	if data != nil || metaData.Link != "" || metaData.NoData || metaData.MetaOnly || metaData.SourceDataURI != "" {
+	if data != nil || metaData.Link != "" || metaData.NoData || metaData.SourceDataURI != "" {
 		status = common.ReadyToSend
+	} else if metaData.MetaOnly {
+		reader, err := store.RetrieveObjectData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+		if err != nil {
+			return err
+		}
+		if reader != nil {
+			status = common.ReadyToSend
+			store.CloseDataReader(reader)
+		}
 	}
 	if metaData.NoData {
 		data = nil
@@ -154,9 +177,15 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 	defer apiObjectLocks.Unlock(lockIndex)
 
 	common.ObjectLocks.Lock(lockIndex)
-	if err := store.StoreObject(metaData, data, status); err != nil {
+	deletedDestinations, err := store.StoreObject(metaData, data, status)
+	if err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
 		return err
+	}
+
+	if metaData.DestinationPolicy != nil {
+		common.ObjectLocks.Unlock(lockIndex)
+		return nil
 	}
 
 	store.DeleteNotificationRecords(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, "", "")
@@ -173,12 +202,29 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 		return err
 	}
 
-	notificationsInfo, err := communications.PrepareObjectNotifications(*updatedMetaData)
+	var deleteNotificationsInfo []common.NotificationInfo
+	if len(deletedDestinations) != 0 {
+		deleteNotificationsInfo, err = communications.PrepareNotificationsForDestinations(*updatedMetaData, deletedDestinations, common.Delete)
+		if err != nil {
+			common.ObjectLocks.Unlock(lockIndex)
+			return err
+		}
+	}
+
+	updateNotificationsInfo, err := communications.PrepareObjectNotifications(*updatedMetaData)
 	common.ObjectLocks.Unlock(lockIndex)
+
 	if err != nil {
 		return err
 	}
-	return communications.SendNotifications(notificationsInfo)
+
+	if deleteNotificationsInfo != nil {
+		if err := communications.SendNotifications(deleteNotificationsInfo); err != nil {
+			return err
+		}
+	}
+
+	return communications.SendNotifications(updateNotificationsInfo)
 }
 
 // GetObjectStatus sends the status of the object to the app
@@ -187,6 +233,8 @@ func GetObjectStatus(orgID string, objectType string, objectID string) (string, 
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In GetObjectStatus. Get status of %s %s\n", objectType, objectID)
 	}
+
+	common.HealthStatus.ClientRequestReceived()
 
 	lockIndex := common.HashStrings(orgID, objectType, objectID)
 	apiObjectLocks.RLock(lockIndex)
@@ -201,6 +249,8 @@ func ListUpdatedObjects(orgID string, objectType string, received bool) ([]commo
 	apiLock.RLock()
 	defer apiLock.RUnlock()
 
+	common.HealthStatus.ClientRequestReceived()
+
 	updatedObjects, err := store.RetrieveUpdatedObjects(orgID, objectType, received)
 
 	if trace.IsLogging(logger.DEBUG) {
@@ -210,12 +260,48 @@ func ListUpdatedObjects(orgID string, objectType string, received bool) ([]commo
 	return updatedObjects, err
 }
 
+// ListObjectsWithDestinationPolicy provides a list of objects that have a DestinationPolicy
+func ListObjectsWithDestinationPolicy(orgID string, received bool) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	apiLock.RLock()
+	defer apiLock.RUnlock()
+
+	common.HealthStatus.ClientRequestReceived()
+
+	objects, err := store.RetrieveObjectsWithDestinationPolicy(orgID, received)
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In ListObjectsWithDestinationPolicy. Get %s. Returned %d objects\n", orgID, len(objects))
+	}
+
+	return objects, err
+}
+
+// ListObjectsWithDestinationPolicyByService provides a list of objects that have a DestinationPolicy and are
+// associated with a service
+func ListObjectsWithDestinationPolicyByService(orgID, arch, serviceName, version string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	apiLock.RLock()
+	defer apiLock.RUnlock()
+
+	common.HealthStatus.ClientRequestReceived()
+
+	objects, err := store.RetrieveObjectsWithDestinationPolicyByService(orgID, arch, serviceName, version)
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In ListObjectsWithDestinationPolicyByService. Get %s/%s/%s/%s. Returned %d objects\n",
+			orgID, arch, serviceName, version, len(objects))
+	}
+
+	return objects, err
+}
+
 // GetObject delivers an object to the app
 // Call the storage module to get the object's meta data and send it to the app
 func GetObject(orgID string, objectType string, objectID string) (*common.MetaData, common.SyncServiceError) {
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In GetObject. Get %s %s\n", objectType, objectID)
 	}
+
+	common.HealthStatus.ClientRequestReceived()
 
 	lockIndex := common.HashStrings(orgID, objectType, objectID)
 	apiObjectLocks.RLock(lockIndex)
@@ -230,6 +316,8 @@ func GetObjectData(orgID string, objectType string, objectID string) (io.Reader,
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In GetObjectData. Get data %s %s\n", objectType, objectID)
 	}
+
+	common.HealthStatus.ClientRequestReceived()
 
 	lockIndex := common.HashStrings(orgID, objectType, objectID)
 	apiObjectLocks.RLock(lockIndex)
@@ -259,6 +347,9 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In PutObjectData. Update data %s %s\n", objectType, objectID)
 	}
+
+	common.HealthStatus.ClientRequestReceived()
+
 	lockIndex := common.HashStrings(orgID, objectType, objectID)
 	apiObjectLocks.Lock(lockIndex)
 	defer apiObjectLocks.Unlock(lockIndex)
@@ -325,6 +416,9 @@ func ObjectConsumed(orgID string, objectType string, objectID string) common.Syn
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In ObjectConsumed. Consumed %s %s\n", objectType, objectID)
 	}
+
+	common.HealthStatus.ClientRequestReceived()
+
 	lockIndex := common.HashStrings(orgID, objectType, objectID)
 	apiObjectLocks.Lock(lockIndex)
 	defer apiObjectLocks.Unlock(lockIndex)
@@ -380,12 +474,37 @@ func ObjectConsumed(orgID string, objectType string, objectID string) common.Syn
 	return nil
 }
 
+// ObjectPolicyReceived is called when an application wants to mark an object as having received its
+// destination policy
+func ObjectPolicyReceived(orgID string, objectType string, objectID string) common.SyncServiceError {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In ObjectPolicyReceived. Received %s %s\n", objectType, objectID)
+	}
+
+	common.HealthStatus.ClientRequestReceived()
+
+	lockIndex := common.HashStrings(orgID, objectType, objectID)
+	apiObjectLocks.Lock(lockIndex)
+	defer apiObjectLocks.Unlock(lockIndex)
+
+	common.ObjectLocks.Lock(lockIndex)
+
+	err := store.MarkDestinationPolicyReceived(orgID, objectType, objectID)
+
+	common.ObjectLocks.Unlock(lockIndex)
+
+	return err
+}
+
 // ObjectReceived is called when an app indicates that it received the object
 // Call the storage module to mark the object as received
 func ObjectReceived(orgID string, objectType string, objectID string) common.SyncServiceError {
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In ObjectReceived. Received %s %s\n", objectType, objectID)
 	}
+
+	common.HealthStatus.ClientRequestReceived()
+
 	lockIndex := common.HashStrings(orgID, objectType, objectID)
 	apiObjectLocks.Lock(lockIndex)
 	defer apiObjectLocks.Unlock(lockIndex)
@@ -438,6 +557,9 @@ func ObjectDeleted(orgID string, objectType string, objectID string) common.Sync
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In ObjectDeleted. Deleted %s %s\n", objectType, objectID)
 	}
+
+	common.HealthStatus.ClientRequestReceived()
+
 	lockIndex := common.HashStrings(orgID, objectType, objectID)
 	apiObjectLocks.Lock(lockIndex)
 	defer apiObjectLocks.Unlock(lockIndex)
@@ -494,6 +616,9 @@ func DeleteObject(orgID string, objectType string, objectID string) common.SyncS
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In DeleteObject. Delete %s %s\n", objectType, objectID)
 	}
+
+	common.HealthStatus.ClientRequestReceived()
+
 	lockIndex := common.HashStrings(orgID, objectType, objectID)
 	apiObjectLocks.Lock(lockIndex)
 	defer apiObjectLocks.Unlock(lockIndex)
@@ -547,6 +672,9 @@ func ActivateObject(orgID string, objectType string, objectID string) common.Syn
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In ActivateObject. Activate %s %s\n", objectType, objectID)
 	}
+
+	common.HealthStatus.ClientRequestReceived()
+
 	lockIndex := common.HashStrings(orgID, objectType, objectID)
 	apiObjectLocks.Lock(lockIndex)
 	defer apiObjectLocks.Unlock(lockIndex)
@@ -591,6 +719,8 @@ func ListDestinations(orgID string) ([]common.Destination, common.SyncServiceErr
 		trace.Debug("In ListDestinations.\n")
 	}
 
+	common.HealthStatus.ClientRequestReceived()
+
 	apiLock.RLock()
 	defer apiLock.RUnlock()
 
@@ -602,6 +732,9 @@ func ResendObjects() common.SyncServiceError {
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In ResendObjects.\n")
 	}
+
+	common.HealthStatus.ClientRequestReceived()
+
 	if common.Configuration.NodeType == common.CSS {
 		return &common.InvalidRequest{Message: "CSS can't request to resend objects"}
 	}
@@ -610,9 +743,12 @@ func ResendObjects() common.SyncServiceError {
 
 // Delete the organization
 func deleteOrganization(orgID string) common.SyncServiceError {
+	common.HealthStatus.ClientRequestReceived()
+
 	if common.Configuration.NodeType == common.ESS {
 		return &common.InvalidRequest{Message: "ESS can't delete organization"}
 	}
+
 	if common.SingleOrgCSS {
 		return &common.InvalidRequest{Message: "Can't modify organizations for single organization CSS"}
 	}
@@ -631,6 +767,8 @@ func deleteOrganization(orgID string) common.SyncServiceError {
 }
 
 func updateOrganization(orgID string, org common.Organization) common.SyncServiceError {
+	common.HealthStatus.ClientRequestReceived()
+
 	if common.Configuration.NodeType == common.ESS {
 		return &common.InvalidRequest{Message: "ESS can't add organization"}
 	}
@@ -664,6 +802,8 @@ func updateOrganization(orgID string, org common.Organization) common.SyncServic
 }
 
 func getOrganizations() ([]common.Organization, common.SyncServiceError) {
+	common.HealthStatus.ClientRequestReceived()
+
 	if common.Configuration.NodeType == common.ESS {
 		return nil, &common.InvalidRequest{Message: "ESS doesn't have organizations"}
 	}
@@ -697,6 +837,8 @@ func getOrganizations() ([]common.Organization, common.SyncServiceError) {
 
 // GetObjectDestinationsStatus gets the destinations of the object and their statuses
 func GetObjectDestinationsStatus(orgID string, objectType string, objectID string) ([]common.DestinationsStatus, common.SyncServiceError) {
+	common.HealthStatus.ClientRequestReceived()
+
 	lockIndex := common.HashStrings(orgID, objectType, objectID)
 	apiObjectLocks.RLock(lockIndex)
 	defer apiObjectLocks.RUnlock(lockIndex)
@@ -718,6 +860,8 @@ func GetObjectDestinationsStatus(orgID string, objectType string, objectID strin
 
 // GetObjectsForDestination gets objects that are in use on a given node
 func GetObjectsForDestination(orgID string, destType string, destID string) ([]common.ObjectStatus, common.SyncServiceError) {
+	common.HealthStatus.ClientRequestReceived()
+
 	apiLock.RLock()
 	defer apiLock.RUnlock()
 
@@ -727,8 +871,58 @@ func GetObjectsForDestination(orgID string, destType string, destID string) ([]c
 	return store.GetObjectsForDestination(orgID, destType, destID)
 }
 
+// UpdateObjectDestinations updates object's destinations
+func UpdateObjectDestinations(orgID string, objectType string, objectID string, destinationsList []string) common.SyncServiceError {
+	common.HealthStatus.ClientRequestReceived()
+
+	if common.Configuration.NodeType != common.CSS {
+		return &common.InvalidRequest{Message: "ESS doesn't support destinations update"}
+	}
+
+	lockIndex := common.HashStrings(orgID, objectType, objectID)
+	apiObjectLocks.Lock(lockIndex)
+
+	metaData, status, deletedDestinations, addedDestinations, err := store.UpdateObjectDestinations(orgID, objectType, objectID, destinationsList)
+	if err != nil {
+		apiObjectLocks.Unlock(lockIndex)
+		return &common.InvalidRequest{Message: "Failed to update destinations: " + err.Error()}
+	}
+
+	var deleteNotificationsInfo, updateNotificationsInfo []common.NotificationInfo
+	if len(deletedDestinations) != 0 {
+		deleteNotificationsInfo, err = communications.PrepareNotificationsForDestinations(*metaData, deletedDestinations, common.Delete)
+		if err != nil {
+			apiObjectLocks.Unlock(lockIndex)
+			return err
+		}
+	}
+
+	if len(addedDestinations) != 0 && status == common.ReadyToSend {
+		updateNotificationsInfo, err = communications.PrepareNotificationsForDestinations(*metaData, addedDestinations, common.Update)
+		if err != nil {
+			apiObjectLocks.Unlock(lockIndex)
+			return err
+		}
+	}
+
+	apiObjectLocks.Unlock(lockIndex)
+	if len(deleteNotificationsInfo) != 0 {
+		if err := communications.SendNotifications(deleteNotificationsInfo); err != nil {
+			return err
+		}
+	}
+	if len(updateNotificationsInfo) != 0 {
+		if err := communications.SendNotifications(updateNotificationsInfo); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // DeleteWebhook deletes a WebHook
 func DeleteWebhook(orgID string, objectType string, url string) common.SyncServiceError {
+	common.HealthStatus.ClientRequestReceived()
+
 	apiLock.Lock()
 	defer apiLock.Unlock()
 	return store.DeleteWebhook(orgID, objectType, url)
@@ -736,6 +930,8 @@ func DeleteWebhook(orgID string, objectType string, url string) common.SyncServi
 
 // RegisterWebhook registers a WebHook
 func RegisterWebhook(orgID string, objectType string, webhook string) common.SyncServiceError {
+	common.HealthStatus.ClientRequestReceived()
+
 	apiLock.Lock()
 	defer apiLock.Unlock()
 	uri, err := url.Parse(webhook)
@@ -752,6 +948,8 @@ func RegisterWebhook(orgID string, objectType string, webhook string) common.Syn
 // AddUsersToACL adds users to an ACL.
 // Note: Adding the first user to such an ACL automatically creates it.
 func AddUsersToACL(aclType string, orgID string, key string, usernames []string) common.SyncServiceError {
+	common.HealthStatus.ClientRequestReceived()
+
 	apiLock.Lock()
 	defer apiLock.Unlock()
 	return store.AddUsersToACL(aclType, orgID, key, usernames)
@@ -760,6 +958,8 @@ func AddUsersToACL(aclType string, orgID string, key string, usernames []string)
 // RemoveUsersFromACL removes users from an ACL.
 // Note: Removing the last user from such an ACL automatically deletes it.
 func RemoveUsersFromACL(aclType string, orgID string, key string, usernames []string) common.SyncServiceError {
+	common.HealthStatus.ClientRequestReceived()
+
 	apiLock.Lock()
 	defer apiLock.Unlock()
 	return store.RemoveUsersFromACL(aclType, orgID, key, usernames)
@@ -767,6 +967,8 @@ func RemoveUsersFromACL(aclType string, orgID string, key string, usernames []st
 
 // RetrieveACL retrieves the list of users in the specified ACL
 func RetrieveACL(aclType string, orgID string, key string) ([]string, common.SyncServiceError) {
+	common.HealthStatus.ClientRequestReceived()
+
 	apiLock.RLock()
 	defer apiLock.RUnlock()
 	return store.RetrieveACL(aclType, orgID, key)
@@ -774,6 +976,8 @@ func RetrieveACL(aclType string, orgID string, key string) ([]string, common.Syn
 
 // RetrieveACLsInOrg retrieves the list of ACLs of the specified type in an organization
 func RetrieveACLsInOrg(aclType string, orgID string) ([]string, common.SyncServiceError) {
+	common.HealthStatus.ClientRequestReceived()
+
 	apiLock.Lock()
 	defer apiLock.Unlock()
 	return store.RetrieveACLsInOrg(aclType, orgID)
