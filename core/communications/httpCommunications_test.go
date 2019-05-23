@@ -89,7 +89,8 @@ func TestHTTPCommUpdatedObjects(t *testing.T) {
 				writer := newHTTPCommTestResponseWriter()
 
 				dataURL := message.MetaData.DestOrgID + "/" + message.MetaData.ObjectType + "/" +
-					message.MetaData.ObjectID + "/" + strconv.FormatInt(message.MetaData.InstanceID, 10) + "/" + common.Data
+					message.MetaData.ObjectID + "/" + strconv.FormatInt(message.MetaData.InstanceID, 10) + "/" +
+					strconv.FormatInt(message.MetaData.DataID, 10) + "/" + common.Data
 				request, _ := http.NewRequest(http.MethodGet, dataURL, nil)
 				identity := "myorg000/httpDevice/dev1"
 				request.SetBasicAuth(identity, "")
@@ -109,7 +110,8 @@ func TestHTTPCommUpdatedObjects(t *testing.T) {
 				operation = common.Deleted
 			}
 			consumedURL := message.MetaData.DestOrgID + "/" + message.MetaData.ObjectType + "/" +
-				message.MetaData.ObjectID + "/" + strconv.FormatInt(message.MetaData.InstanceID, 10) + "/" + operation
+				message.MetaData.ObjectID + "/" + strconv.FormatInt(message.MetaData.InstanceID, 10) + "/" +
+				strconv.FormatInt(message.MetaData.DataID, 10) + "/" + operation
 			request, _ := http.NewRequest(http.MethodPut, consumedURL, nil)
 			identity := "myorg000/httpDevice/dev1"
 			request.SetBasicAuth(identity, "")
@@ -215,7 +217,7 @@ func TestHTTPCommEssSendObjects(t *testing.T) {
 	for _, testObject := range testObjects {
 		writer := newHTTPCommTestResponseWriter()
 		theURL := testObject.metaData.DestOrgID + "/" + testObject.metaData.ObjectType + "/" +
-			testObject.metaData.ObjectID + "/1/" + testObject.action
+			testObject.metaData.ObjectID + "/1/1/" + testObject.action
 		body, err := json.MarshalIndent(testObject.metaData, "", "  ")
 		if err != nil {
 			t.Errorf("Failed to marshal payload. Error: " + err.Error())
@@ -233,7 +235,7 @@ func TestHTTPCommEssSendObjects(t *testing.T) {
 		} else {
 			if testObject.data != nil {
 				theURL = testObject.metaData.DestOrgID + "/" + testObject.metaData.ObjectType + "/" +
-					testObject.metaData.ObjectID + "/1/" + common.Data
+					testObject.metaData.ObjectID + "/1/1/" + common.Data
 				request, _ := http.NewRequest(http.MethodPut, theURL, bytes.NewReader(testObject.data))
 				identity := common.Configuration.OrgID + "/" + testObject.metaData.OriginType + "/" + testObject.metaData.OriginID
 				request.SetBasicAuth(identity, "")
@@ -351,32 +353,32 @@ func TestEssHTTPComm(t *testing.T) {
 		Status: common.UpdatePending, InstanceID: 1}
 
 	Store.UpdateNotificationRecord(notification)
-	err = httpComm.SendNotificationMessage(common.Update, "httpDevice", "dev2", 1,
+	err = httpComm.SendNotificationMessage(common.Update, "httpDevice", "dev2", 1, 1,
 		&common.MetaData{ObjectType: "plover", ObjectID: "xyzzy", DestOrgID: "myorg000",
-			OriginType: "httpDevice", OriginID: "dev2", InstanceID: 1})
+			OriginType: "httpDevice", OriginID: "dev2", InstanceID: 1, DataID: 1})
 	if err != nil && !common.IsNotFound(err) {
 		t.Error(err)
 	}
 
-	err = httpComm.SendNotificationMessage(common.Delete, "httpDevice", "dev2", 1,
+	err = httpComm.SendNotificationMessage(common.Delete, "httpDevice", "dev2", 1, 1,
 		&common.MetaData{ObjectType: "plover", ObjectID: "xyzzy", DestOrgID: "myorg000",
-			OriginType: "httpDevice", OriginID: "dev2", InstanceID: 1})
+			OriginType: "httpDevice", OriginID: "dev2", InstanceID: 1, DataID: 1})
 	if err != nil && !isIgnoredByHandler(err) {
 		t.Error(err)
 	}
 
 	notification.Status = common.Updated
-	err = httpComm.SendNotificationMessage(common.Deleted, "httpDevice", "dev2", 1,
+	err = httpComm.SendNotificationMessage(common.Deleted, "httpDevice", "dev2", 1, 1,
 		&common.MetaData{ObjectType: "plover", ObjectID: "xyzzy", DestOrgID: "myorg000",
-			OriginType: "httpDevice", OriginID: "dev2", InstanceID: 1})
+			OriginType: "httpDevice", OriginID: "dev2", InstanceID: 1, DataID: 1})
 	if err != nil && !isIgnoredByHandler(err) {
 		t.Error(err)
 	}
 
 	notification.Status = common.Updated
-	err = httpComm.SendNotificationMessage(common.Consumed, "httpDevice", "dev2", 1,
+	err = httpComm.SendNotificationMessage(common.Consumed, "httpDevice", "dev2", 1, 1,
 		&common.MetaData{ObjectType: "plover", ObjectID: "xyzzy", DestOrgID: "myorg000",
-			OriginType: "httpDevice", OriginID: "dev2", InstanceID: 1})
+			OriginType: "httpDevice", OriginID: "dev2", InstanceID: 1, DataID: 1})
 	if err != nil && !isIgnoredByHandler(err) {
 		t.Error(err)
 	}
@@ -416,7 +418,7 @@ func testLoadObjects(testObjects []httpTestObjectInfo, t *testing.T) {
 				metaData.ObjectID, err.Error())
 		}
 		// Insert
-		if err := Store.StoreObject(metaData, testObject.data, testObject.status); err != nil {
+		if _, err := Store.StoreObject(metaData, testObject.data, testObject.status); err != nil {
 			t.Errorf("Failed to store object (objectID = %s). Error: %s\n", metaData.ObjectID, err.Error())
 		}
 

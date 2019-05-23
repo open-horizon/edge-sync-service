@@ -25,6 +25,7 @@ const getOrganizationsURL = "/api/v1/organizations"
 const resendURL = "/api/v1/resend"
 const securityURL = "/api/v1/security/"
 const shutdownURL = "/api/v1/shutdown"
+const healthURL = "/api/v1/health"
 
 const (
 	contentType     = "Content-Type"
@@ -90,6 +91,7 @@ func setupAPIServer() {
 	http.HandleFunc(resendURL, handleResend)
 	http.Handle(getOrganizationsURL, http.StripPrefix(getOrganizationsURL, http.HandlerFunc(handleGetOrganizations)))
 	http.Handle(organizationURL, http.StripPrefix(organizationURL, http.HandlerFunc(handleOrganizations)))
+	http.HandleFunc(healthURL, handleHealth)
 }
 
 func handleDestinations(writer http.ResponseWriter, request *http.Request) {
@@ -360,17 +362,31 @@ func handleObjects(writer http.ResponseWriter, request *http.Request) {
 		parts := strings.Split(request.URL.Path, "/")
 		var orgID string
 		if common.Configuration.NodeType == common.CSS {
-			if len(parts) == 1 {
-				writer.WriteHeader(http.StatusBadRequest)
-				return
-			}
 			orgID = parts[0]
 			parts = parts[1:]
 		} else {
 			orgID = common.Configuration.OrgID
 		}
 
-		if len(parts) == 1 || (len(parts) == 2 && len(parts[1]) == 0) {
+		if len(parts) == 0 {
+			// GET     /api/v1/objects/orgID?destination_policy=true
+			if request.Method != http.MethodGet {
+				writer.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+			destPolicyString := request.URL.Query().Get("destination_policy")
+			destPolicy := false
+			if destPolicyString != "" {
+				var err error
+				destPolicy, err = strconv.ParseBool(destPolicyString)
+				if err == nil && destPolicy {
+					handleListObjectsWithDestinationPolicy(orgID, writer, request)
+					return
+				}
+			}
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		} else if len(parts) == 1 || (len(parts) == 2 && len(parts[1]) == 0) {
 			// /api/v1/objects/orgID/type
 			// GET - get updated objects
 			// PUT - register/delete a webhook
@@ -404,7 +420,7 @@ func handleObjects(writer http.ResponseWriter, request *http.Request) {
 			// PUT     /api/v1/objects/orgID/type/id/activate
 			// GET     /api/v1/objects/orgID/type/id/status
 			// GET/PUT /api/v1/objects/orgID/type/id/data
-			// GET     /api/v1/objects/orgID/type/id/destinations
+			// GET/PUT /api/v1/objects/orgID/type/id/destinations
 			operation := strings.ToLower(parts[2])
 			handleObjectOperation(operation, orgID, parts[0], parts[1], writer, request)
 
@@ -466,7 +482,7 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleObjects. Get %s %s\n", objectType, objectID)
 		}
-		if !canUserAccessObject(request, orgID, objectType) {
+		if code, _ := canUserAccessObject(request, orgID, objectType, objectID); code == security.AuthFailed {
 			writer.WriteHeader(http.StatusForbidden)
 			writer.Write(unauthorizedBytes)
 			return
@@ -529,7 +545,7 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleObjects. Delete %s %s\n", objectType, objectID)
 		}
-		if !canUserAccessObject(request, orgID, objectType) {
+		if code, _ := canUserAccessObject(request, orgID, objectType, objectID); code == security.AuthFailed {
 			writer.WriteHeader(http.StatusForbidden)
 			writer.Write(unauthorizedBytes)
 			return
@@ -549,7 +565,7 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 }
 
 func handleObjectOperation(operation string, orgID string, objectType string, objectID string, writer http.ResponseWriter, request *http.Request) {
-	if !canUserAccessObject(request, orgID, objectType) {
+	if code, _ := canUserAccessObject(request, orgID, objectType, objectID); code == security.AuthFailed {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
 		return
@@ -559,6 +575,8 @@ func handleObjectOperation(operation string, orgID string, objectType string, ob
 		handleObjectConsumed(orgID, objectType, objectID, writer, request)
 	case "deleted":
 		handleObjectDeleted(orgID, objectType, objectID, writer, request)
+	case "policyreceived":
+		handlePolicyReceived(orgID, objectType, objectID, writer, request)
 	case "received":
 		handleObjectReceived(orgID, objectType, objectID, writer, request)
 	case "activate":
@@ -681,6 +699,64 @@ func handleObjectDeleted(orgID string, objectType string, objectID string, write
 		}
 		if err := ObjectDeleted(orgID, objectType, objectID); err != nil {
 			communications.SendErrorResponse(writer, err, "Failed to confirm object's deletion. Error: ", 0)
+		} else {
+			writer.WriteHeader(http.StatusNoContent)
+		}
+	} else {
+		writer.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+// swagger:operation PUT /api/v1/objects/{orgID}/{objectType}/{objectID}/policyreceived handlePolicyReceived
+//
+// Mark an object's destination policy as having been received.
+//
+// Mark the object of the specified object type and object ID as having its destination policy received
+// After the object is marked as such it will not be delivered to the application listing objects with
+// a destination policy, unless it adds "received=true" to the query parameters.
+//
+// ---
+//
+// produces:
+// - text/plain
+//
+// parameters:
+// - name: orgID
+//   in: path
+//   description: The orgID of the object to mark as having its destination policy received. Present only when working with a CSS, removed from the path when working with an ESS
+//   required: true
+//   type: string
+// - name: objectType
+//   in: path
+//   description: The object type of the object to mark as having its destination policy received
+//   required: true
+//   type: string
+// - name: objectID
+//   in: path
+//   description: The object ID of the object to mark as having its destination policy received
+//   required: true
+//   type: string
+//
+// responses:
+//   '204':
+//     description: Object marked as having its destination policy received
+//     schema:
+//       type: string
+//   '500':
+//     description: Failed to mark the object as having its destination policy received
+//     schema:
+//       type: string
+func handlePolicyReceived(orgID string, objectType string, objectID string, writer http.ResponseWriter, request *http.Request) {
+	if request.Method == http.MethodPut {
+		if common.Configuration.NodeType == common.ESS {
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In handleObjects. Policy Received %s %s\n", objectType, objectID)
+		}
+		if err := ObjectPolicyReceived(orgID, objectType, objectID); err != nil {
+			communications.SendErrorResponse(writer, err, "Failed to mark the object's destination policy as having been received. Error: ", 0)
 		} else {
 			writer.WriteHeader(http.StatusNoContent)
 		}
@@ -862,49 +938,49 @@ func handleObjectStatus(orgID string, objectType string, objectID string, writer
 	}
 }
 
-// swagger:operation GET /api/v1/objects/{orgID}/{objectType}/{objectID}/destinations handleObjectDestinations
-//
-// Get the destinations of an object.
-//
-// Get the list of sync service (ESS) nodes which are the destinations of the object of the specified object type and object ID.
-// The delivery status of the object is provided for each destination along with its type and ID.
-// This is a CSS only API.
-//
-// ---
-//
-// produces:
-// - text/plain
-//
-// parameters:
-// - name: orgID
-//   in: path
-//   description: The orgID of the object whose destinations will be retrieved. Present only when working with a CSS, removed from the path when working with an ESS
-//   required: true
-//   type: string
-// - name: objectType
-//   in: path
-//   description: The object type of the object whose destinations will be retrieved
-//   required: true
-//   type: string
-// - name: objectID
-//   in: path
-//   description: The object ID of the object whose destinations will be retrieved
-//   required: true
-//   type: string
-//
-// responses:
-//   '200':
-//     description: Object destinations and their status
-//     schema:
-//       type: array
-//       items:
-//         "$ref": "#/definitions/DestinationsStatus"
-//   '500':
-//     description: Failed to retrieve the object's destinations
-//     schema:
-//       type: string
 func handleObjectDestinations(orgID string, objectType string, objectID string, writer http.ResponseWriter, request *http.Request) {
 	if request.Method == http.MethodGet {
+		// swagger:operation GET /api/v1/objects/{orgID}/{objectType}/{objectID}/destinations handleObjectDestinations
+		//
+		// Get the destinations of an object.
+		//
+		// Get the list of sync service (ESS) nodes which are the destinations of the object of the specified object type and object ID.
+		// The delivery status of the object is provided for each destination along with its type and ID.
+		// This is a CSS only API.
+		//
+		// ---
+		//
+		// produces:
+		// - text/plain
+		//
+		// parameters:
+		// - name: orgID
+		//   in: path
+		//   description: The orgID of the object whose destinations will be retrieved. Present only when working with a CSS, removed from the path when working with an ESS
+		//   required: true
+		//   type: string
+		// - name: objectType
+		//   in: path
+		//   description: The object type of the object whose destinations will be retrieved
+		//   required: true
+		//   type: string
+		// - name: objectID
+		//   in: path
+		//   description: The object ID of the object whose destinations will be retrieved
+		//   required: true
+		//   type: string
+		//
+		// responses:
+		//   '200':
+		//     description: Object destinations and their status
+		//     schema:
+		//       type: array
+		//       items:
+		//         "$ref": "#/definitions/DestinationsStatus"
+		//   '500':
+		//     description: Failed to retrieve the object's destinations
+		//     schema:
+		//       type: string
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleObjects. Get destinations of %s %s\n", objectType, objectID)
 		}
@@ -922,6 +998,69 @@ func handleObjectDestinations(orgID string, objectType string, objectID string, 
 					writer.Write([]byte(destinations))
 				}
 			}
+		}
+	} else if request.Method == http.MethodPut {
+		// swagger:operation PUT /api/v1/objects/{orgID}/{objectType}/{objectID}/destinations handleObjectDestinationsUpdate
+		//
+		// Set the destinations of an object.
+		//
+		// Set the list of sync service (ESS) nodes to be the destinations of the object of the specified object type and object ID.
+		// This is a CSS only API.
+		//
+		// ---
+		//
+		// consumes:
+		// - application/octet-stream
+		//
+		// produces:
+		// - text/plain
+		//
+		// parameters:
+		// - name: orgID
+		//   in: path
+		//   description: The orgID of the object whose destinations will be updated
+		//   required: true
+		//   type: string
+		// - name: objectType
+		//   in: path
+		//   description: The object type of the object whose destinations will be updated
+		//   required: true
+		//   type: string
+		// - name: objectID
+		//   in: path
+		//   description: The object ID of the object whose destinations will be updated
+		//   required: true
+		//   type: string
+		// - name: payload
+		//   in: body
+		//   description: The object's destination list
+		//   required: true
+		//   schema:
+		//     type: string
+		//     format: binary
+		//
+		// responses:
+		//   '204':
+		//     description: Object destinations updated
+		//     schema:
+		//       type: string
+		//   '500':
+		//     description: Failed to update the object's destinations
+		//     schema:
+		//       type: string
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In handleObjects. Set destinations of %s %s\n", objectType, objectID)
+		}
+		var destinationsList []string
+		err := json.NewDecoder(request.Body).Decode(&destinationsList)
+		if err == nil {
+			if err := UpdateObjectDestinations(orgID, objectType, objectID, destinationsList); err == nil {
+				writer.WriteHeader(http.StatusNoContent)
+			} else {
+				communications.SendErrorResponse(writer, err, "", 0)
+			}
+		} else {
+			communications.SendErrorResponse(writer, err, "Invalid JSON for update. Error: ", http.StatusBadRequest)
 		}
 	} else {
 		writer.WriteHeader(http.StatusMethodNotAllowed)
@@ -1108,7 +1247,8 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 		trace.Debug("In handleObjects. List %s, Method %s, orgID %s, objectType %s. Include received %t\n",
 			objectType, request.Method, orgID, objectType, received)
 	}
-	if !canUserAccessObject(request, orgID, objectType) {
+	code, userID := canUserAccessObject(request, orgID, objectType, "")
+	if code == security.AuthFailed {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
 		return
@@ -1116,11 +1256,145 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 	if metaData, err := ListUpdatedObjects(orgID, objectType, received); err != nil {
 		communications.SendErrorResponse(writer, err, "Failed to fetch the list of updates. Error: ", 0)
 	} else {
-		if len(metaData) == 0 {
+		var result []common.MetaData
+		if common.Configuration.NodeType == common.CSS || code != security.AuthService {
+			result = metaData
+		} else {
+			result = make([]common.MetaData, 0)
+			for _, object := range metaData {
+				if canServiceAccessObject(userID, &object) {
+					result = append(result, object)
+				}
+			}
+		}
+
+		if len(result) == 0 {
 			writer.WriteHeader(http.StatusNotFound)
 		} else {
-			if data, err := json.MarshalIndent(metaData, "", "  "); err != nil {
+			if data, err := json.MarshalIndent(result, "", "  "); err != nil {
 				communications.SendErrorResponse(writer, err, "Failed to marshal the list of updates. Error: ", 0)
+			} else {
+				writer.Header().Add(contentType, applicationJSON)
+				writer.WriteHeader(http.StatusOK)
+				writer.Write(data)
+			}
+		}
+	}
+}
+
+// swagger:operation GET /api/v1/objects/{orgID} handleListObjectsWithDestinationPolicy
+//
+// Get objects that have destination policies.
+//
+// Get the list of objects that have destination policies.
+// An application would typically invoke this API periodically to check for updates.
+//
+// ---
+//
+// produces:
+// - application/json
+// - text/plain
+//
+// parameters:
+// - name: orgID
+//   in: path
+//   description: The orgID of the updated objects to return. Present only when working with a CSS, removed from the path when working with an ESS
+//   required: true
+//   type: string
+// - name: destination_policy
+//   in: query
+//   description: Must be true to indicate that objects with destinationPolicy are to be retrieved
+//   required: true
+//   type: boolean
+// - name: received
+//   in: query
+//   description: Whether or not to include the objects that have been marked as received by the application
+//   required: false
+//   type: boolean
+// - name: service
+//   in: query
+//   description: The ID of the service (orgID/architecture/version/serviceName) to which objects have affinity,
+//        whose Destination Policy should be fetched.
+//   required: false
+//   type: boolean
+//
+// responses:
+//   '200':
+//     description: Object destination policy response
+//     schema:
+//       type: array
+//       items:
+//         "$ref": "#/definitions/ObjectDestinationPolicy"
+//   '404':
+//     description: No updated objects found
+//     schema:
+//       type: string
+//   '500':
+//     description: Failed to retrieve the updated objects
+//     schema:
+//       type: string
+func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWriter,
+	request *http.Request) {
+	code, userOrgID, _ := security.Authenticate(request)
+	if code != security.AuthAdmin || userOrgID != orgID {
+		writer.WriteHeader(http.StatusForbidden)
+		writer.Write(unauthorizedBytes)
+		return
+	}
+
+	receivedString := request.URL.Query().Get("received")
+	received := false
+	if receivedString != "" {
+		var err error
+		received, err = strconv.ParseBool(receivedString)
+		if err != nil {
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+	}
+
+	serviceOrgID := ""
+	serviceArch := ""
+	serviceName := ""
+	serviceVersion := ""
+	serviceID := request.URL.Query().Get("service")
+	if serviceID != "" {
+		parts := strings.SplitN(serviceID, "/", 4)
+		if len(parts) < 4 || len(parts[0]) == 0 || len(parts[1]) == 0 || len(parts[2]) == 0 || len(parts[3]) == 0 {
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		serviceOrgID = parts[0]
+		serviceArch = parts[1]
+		serviceVersion = parts[2]
+		serviceName = parts[3]
+	}
+
+	var objects []common.ObjectDestinationPolicy
+	var err error
+
+	if serviceName == "" {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In handleObjects. List DestinationPolicy, orgID %s. Include received %t\n",
+				orgID, received)
+		}
+		objects, err = ListObjectsWithDestinationPolicy(orgID, received)
+	} else {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In handleObjects. List DestinationPolicy, service %s/%s/%s/%s\n",
+				serviceOrgID, serviceArch, serviceName, serviceVersion)
+		}
+		objects, err = ListObjectsWithDestinationPolicyByService(serviceOrgID, serviceArch, serviceName, serviceVersion)
+	}
+
+	if err != nil {
+		communications.SendErrorResponse(writer, err, "Failed to fetch the list of objects with a DestinationPolicy. Error: ", 0)
+	} else {
+		if len(objects) == 0 {
+			writer.WriteHeader(http.StatusNotFound)
+		} else {
+			if data, err := json.MarshalIndent(objects, "", "  "); err != nil {
+				communications.SendErrorResponse(writer, err, "Failed to marshal the list of objects with a DestinationPolicy. Error: ", 0)
 			} else {
 				writer.Header().Add(contentType, applicationJSON)
 				writer.WriteHeader(http.StatusOK)
@@ -1177,7 +1451,8 @@ func handleWebhook(orgID string, objectType string, writer http.ResponseWriter, 
 		writer.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	if !canUserAccessObject(request, orgID, objectType) {
+	code, _ := canUserAccessObject(request, orgID, objectType, "")
+	if code == security.AuthFailed || code == security.AuthService {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
 		return
@@ -1822,6 +2097,129 @@ func handleACLUpdate(request *http.Request, aclType string, orgID string, parts 
 	}
 }
 
-func canUserAccessObject(request *http.Request, orgID, objectType string) bool {
-	return security.CanUserAccessObject(request, orgID, objectType)
+func canUserAccessObject(request *http.Request, orgID, objectType, objectID string) (int, string) {
+	code, userID := security.CanUserAccessObject(request, orgID, objectType)
+	if code != security.AuthService || common.Configuration.NodeType == common.CSS || objectID == "" {
+		return code, userID
+	}
+
+	lockIndex := common.HashStrings(orgID, objectType, objectID)
+	apiObjectLocks.RLock(lockIndex)
+	defer apiObjectLocks.RUnlock(lockIndex)
+
+	metadata, err := store.RetrieveObject(orgID, objectType, objectID)
+	if err == nil && metadata != nil && canServiceAccessObject(userID, metadata) {
+		return code, userID
+	}
+	return security.AuthFailed, ""
+}
+
+func canServiceAccessObject(serviceID string, metadata *common.MetaData) bool {
+	if metadata.DestinationPolicy == nil || len(metadata.DestinationPolicy.Services) == 0 {
+		return true
+	}
+	// serviceOrgID/arch/version/serviceName
+	parts := strings.SplitN(serviceID, "/", 4)
+	if len(parts) < 4 {
+		return false
+	}
+	for _, service := range metadata.DestinationPolicy.Services {
+		if parts[0] == service.OrgID && parts[1] == service.Arch &&
+			parts[2] == service.Version && parts[3] == service.ServiceName {
+			return true
+		}
+	}
+	return false
+}
+
+// swagger:model
+type healthReport struct {
+	GeneralInfo common.HealthStatusInfo      `json:"general"`
+	DBHealth    common.DBHealthStatusInfo    `json:"dbHealth"`
+	Usage       *common.UsageInfo            `json:"usage,omitempty"`
+	MQTTHealth  *common.MQTTHealthStatusInfo `json:"mqttHealth,omitempty"`
+}
+
+// swagger:operation GET /api/v1/health handleHealth
+//
+// Get health status of the sync service node.
+//
+// Get health status of the sync service node.
+//
+// ---
+//
+// produces:
+// - application/json
+// - text/plain
+//
+// parameters:
+// - name: details
+//   in: query
+//   description: Whether or not to include the detailed health status
+//   required: false
+//   type: boolean
+//
+// responses:
+//   '200':
+//     description: Health status
+//     schema:
+//       type: array
+//       items:
+//         "$ref": "#/definitions/healthReport"
+//   '500':
+//     description: Failed to send health status.
+//     schema:
+//       type: string
+func handleHealth(writer http.ResponseWriter, request *http.Request) {
+	detailsString := request.URL.Query().Get("details")
+	details := false
+	var err error
+	if detailsString != "" {
+		details, err = strconv.ParseBool(detailsString)
+		if err != nil {
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In handleHealth. Include details %t\n", details)
+	}
+
+	code, _, _ := security.Authenticate(request)
+	if code == security.AuthFailed || code == security.AuthEdgeNode {
+		writer.WriteHeader(http.StatusForbidden)
+		writer.Write(unauthorizedBytes)
+		return
+	}
+
+	var registeredESS uint32
+	var storedObjects uint32
+	if details {
+		nodes, err := store.GetNumberOfDestinations()
+		if err == nil {
+			registeredESS = nodes
+		}
+		objects, err := store.GetNumberOfStoredObjects()
+		if err == nil {
+			storedObjects = objects
+		}
+	}
+	common.HealthStatus.UpdateHealthInfo(details, registeredESS, storedObjects)
+
+	report := healthReport{GeneralInfo: common.HealthStatus, DBHealth: common.DBHealth}
+	if details {
+		report.Usage = &common.HealthUsageInfo
+	}
+	if common.Configuration.CommunicationProtocol != common.HTTPProtocol {
+		report.MQTTHealth = &common.MQTTHealth
+	}
+
+	if data, err := json.MarshalIndent(report, "", "  "); err != nil {
+		communications.SendErrorResponse(writer, err, "Failed to marshal the health status. Error: ", 0)
+	} else {
+		writer.Header().Add(contentType, applicationJSON)
+		writer.WriteHeader(http.StatusOK)
+		writer.Write(data)
+	}
 }

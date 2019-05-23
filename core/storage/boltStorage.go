@@ -30,6 +30,7 @@ type BoltStorage struct {
 type boltObject struct {
 	Meta               common.MetaData                 `json:"meta"`
 	Status             string                          `json:"status"`
+	PolicyReceived     bool                            `json:"policy-received"`
 	RemainingConsumers int                             `json:"remaining-consumers"`
 	RemainingReceivers int                             `json:"remaining-receivers"`
 	DataPath           string                          `json:"data-path"`
@@ -159,10 +160,13 @@ func (store *BoltStorage) Init() common.SyncServiceError {
 	}
 	err = os.MkdirAll(path, 0755)
 	store.localDataPath = "file://" + path
+	if err == nil {
+		common.HealthStatus.ReconnectedToDatabase()
+	}
 	return err
 }
 
-// Stop stops the InMemory store
+// Stop stops the Bolt store
 func (store *BoltStorage) Stop() {
 	store.db.Close()
 }
@@ -170,7 +174,7 @@ func (store *BoltStorage) Stop() {
 // PerformMaintenance performs store's maintenance
 func (store *BoltStorage) PerformMaintenance() {
 	if common.Configuration.NodeType == common.CSS {
-		currentTime := time.Now().Format(time.RFC3339)
+		currentTime := time.Now().UTC().Format(time.RFC3339)
 
 		function := func(object boltObject) bool {
 			if object.Meta.Expiration != "" && object.Meta.Expiration <= currentTime &&
@@ -197,52 +201,73 @@ func (store *BoltStorage) Cleanup() {
 }
 
 // StoreObject stores an object
-func (store *BoltStorage) StoreObject(metaData common.MetaData, data []byte, status string) common.SyncServiceError {
+// If the object already exists, return the changes in its destinations list (for CSS) - return the list of deleted destinations
+func (store *BoltStorage) StoreObject(metaData common.MetaData, data []byte, status string) ([]common.StoreDestinationStatus, common.SyncServiceError) {
 	var dests []common.StoreDestinationStatus
+	var deletedDests []common.StoreDestinationStatus
 
 	// If the object was receieved from a service (status NotReadyToSend/ReadyToSend), i.e. this node is the origin of the object,
 	// set instance id. If the object was received from the other side, this node is the receiver of the object:
 	// keep the instance id of the meta data.
 	if status == common.NotReadyToSend || status == common.ReadyToSend {
-		metaData.InstanceID = store.getInstanceID()
+		newID := store.getInstanceID()
+		metaData.InstanceID = newID
+		if data != nil && !metaData.NoData && !metaData.MetaOnly {
+			metaData.DataID = newID
+		}
 
 		if common.Configuration.NodeType == common.CSS {
 			var err error
-			dests, err = createDestinations(store, metaData)
+			dests, deletedDests, err = createDestinationsFromMeta(store, metaData)
 			if err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
-	var function func(object boltObject) (boltObject, common.SyncServiceError)
+
+	if metaData.DestinationPolicy != nil {
+		metaData.DestinationPolicy.Timestamp = time.Now().UnixNano()
+	}
+
 	if metaData.MetaOnly {
-		function = func(object boltObject) (boltObject, common.SyncServiceError) {
+		function := func(object boltObject) (boltObject, common.SyncServiceError) {
 			if object.Status == common.ConsumedByDest {
 				// On ESS we remove the data of consumed objects, therefore we can't accept "meta only" updates
 				return object, &Error{"Can't update only the meta data of consumed object"}
 			}
+			metaData.DataID = object.Meta.DataID // Keep the previous data id
 			object.Meta = metaData
 			object.Status = status
+			object.PolicyReceived = false
 			object.RemainingConsumers = metaData.ExpectedConsumers
 			object.RemainingReceivers = metaData.ExpectedConsumers
 			object.Destinations = dests
 			return object, nil
 		}
-		return store.updateObjectHelper(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, function)
+		err := store.updateObjectHelper(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, function)
+		if err == nil || err != notFound {
+			return deletedDests, err
+		}
+		// If not found, insert it
 	}
 
-	dataPath := ""
+	var dataPath string
 	if !metaData.NoData && data != nil {
-		dataPath = createDataPath(store.localDataPath, metaData)
+		dataPath = createDataPathFromMeta(store.localDataPath, metaData)
 		if _, err := dataURI.StoreData(dataPath, bytes.NewReader(data), uint32(len(data))); err != nil {
-			return err
+			return nil, err
+		}
+	} else if !metaData.MetaOnly {
+		if err := dataURI.DeleteStoredData(createDataPathFromMeta(store.localDataPath, metaData)); err != nil {
+			return nil, err
 		}
 	}
-	object := boltObject{Meta: metaData, Status: status, RemainingConsumers: metaData.ExpectedConsumers,
-		RemainingReceivers: metaData.ExpectedConsumers, DataPath: dataPath, Destinations: dests}
+	object := boltObject{Meta: metaData, Status: status, PolicyReceived: false,
+		RemainingConsumers: metaData.ExpectedConsumers, RemainingReceivers: metaData.ExpectedConsumers,
+		DataPath: dataPath, Destinations: dests}
 	encoded, err := json.Marshal(object)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	id := getObjectCollectionID(metaData)
@@ -251,7 +276,7 @@ func (store *BoltStorage) StoreObject(metaData common.MetaData, data []byte, sta
 		return err
 	})
 
-	return err
+	return deletedDests, err
 }
 
 // StoreObjectData stores an object's data
@@ -259,18 +284,22 @@ func (store *BoltStorage) StoreObject(metaData common.MetaData, data []byte, sta
 // Return false and no error, if the object doesn't exist
 func (store *BoltStorage) StoreObjectData(orgID string, objectType string, objectID string, dataReader io.Reader) (bool, common.SyncServiceError) {
 
+	dataPath := createDataPath(store.localDataPath, orgID, objectType, objectID)
+	written, err := dataURI.StoreData(dataPath, dataReader, 0)
+	if err != nil {
+		return false, err
+	}
+
 	function := func(object boltObject) (boltObject, common.SyncServiceError) {
 		if object.Status == common.NotReadyToSend {
 			object.Status = common.ReadyToSend
-		} else if object.Status == common.ReadyToSend {
-			object.Meta.InstanceID = store.getInstanceID()
+		}
+		if object.Status == common.NotReadyToSend || object.Status == common.ReadyToSend {
+			newID := store.getInstanceID()
+			object.Meta.InstanceID = newID
+			object.Meta.DataID = newID
 		}
 
-		dataPath := createDataPath(store.localDataPath, object.Meta)
-		written, err := dataURI.StoreData(dataPath, dataReader, 0)
-		if err != nil {
-			return object, err
-		}
 		object.DataPath = dataPath
 		object.Meta.ObjectSize = written
 
@@ -371,9 +400,49 @@ func (store *BoltStorage) RetrieveUpdatedObjects(orgID string, objectType string
 		return nil, err
 	}
 	if len(common.Configuration.ObjectsDataPath) > 0 {
-		for i:=0 ; i<len(result) ; i++ {
-			result[i].DestinationDataURI = createDataPath(store.localDataPath, result[i])
+		for i := 0; i < len(result); i++ {
+			result[i].DestinationDataURI = createDataPathFromMeta(store.localDataPath, result[i])
 		}
+	}
+	return result, nil
+}
+
+// RetrieveObjectsWithDestinationPolicy returns the list of all the objects that have a Destination Policy
+// If received is true, return objects marked as policy received
+func (store *BoltStorage) RetrieveObjectsWithDestinationPolicy(orgID string, received bool) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	result := make([]common.ObjectDestinationPolicy, 0)
+	function := func(object boltObject) {
+		if orgID == object.Meta.DestOrgID && object.Meta.DestinationPolicy != nil &&
+			(received || !object.PolicyReceived) {
+			result = append(result, common.ObjectDestinationPolicy{
+				OrgID: orgID, ObjectType: object.Meta.ObjectType, ObjectID: object.Meta.ObjectID,
+				DestinationPolicy: *object.Meta.DestinationPolicy,
+			})
+		}
+	}
+	if err := store.retrieveObjectsHelper(function); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// RetrieveObjectsWithDestinationPolicyByService returns the list of all the object Policies for a particular service
+func (store *BoltStorage) RetrieveObjectsWithDestinationPolicyByService(orgID, arch, serviceName, version string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	result := make([]common.ObjectDestinationPolicy, 0)
+	function := func(object boltObject) {
+		if object.Meta.DestinationPolicy != nil {
+			for _, service := range object.Meta.DestinationPolicy.Services {
+				if orgID == service.OrgID && arch == service.Arch && serviceName == service.ServiceName && version == service.Version {
+					result = append(result, common.ObjectDestinationPolicy{
+						OrgID: object.Meta.DestOrgID, ObjectType: object.Meta.ObjectType, ObjectID: object.Meta.ObjectID,
+						DestinationPolicy: *object.Meta.DestinationPolicy,
+					})
+				}
+			}
+		}
+	}
+	if err := store.retrieveObjectsHelper(function); err != nil {
+		return nil, err
 	}
 	return result, nil
 }
@@ -464,7 +533,7 @@ func (store *BoltStorage) RetrieveConsumedObjects() ([]common.ConsumedObject, co
 
 // GetObjectsToActivate returns inactive objects that are ready to be activated
 func (store *BoltStorage) GetObjectsToActivate() ([]common.MetaData, common.SyncServiceError) {
-	currentTime := time.Now().Format(time.RFC3339)
+	currentTime := time.Now().UTC().Format(time.RFC3339)
 	result := make([]common.MetaData, 0)
 	function := func(object boltObject) {
 		if (object.Status == common.NotReadyToSend || object.Status == common.ReadyToSend) &&
@@ -484,18 +553,22 @@ func (store *BoltStorage) GetObjectsToActivate() ([]common.MetaData, common.Sync
 func (store *BoltStorage) AppendObjectData(orgID string, objectType string, objectID string, dataReader io.Reader, dataLength uint32,
 	offset int64, total int64, isFirstChunk bool, isLastChunk bool) common.SyncServiceError {
 
+	dataPath := ""
 	function := func(object boltObject) (boltObject, common.SyncServiceError) {
-		dataPath := object.DataPath
+		dataPath = object.DataPath
 		if dataPath == "" {
 			if !isFirstChunk {
 				return object, &Error{"No path to store data"}
 			}
-			dataPath = createDataPath(store.localDataPath, object.Meta)
+			dataPath = createDataPathFromMeta(store.localDataPath, object.Meta)
 			object.DataPath = dataPath
 		}
-		return object, dataURI.AppendData(dataPath, dataReader, dataLength, offset, total, isFirstChunk, isLastChunk)
+		return object, nil
 	}
-	return store.updateObjectHelper(orgID, objectType, objectID, function)
+	if err := store.updateObjectHelper(orgID, objectType, objectID, function); err != nil {
+		return err
+	}
+	return dataURI.AppendData(dataPath, dataReader, dataLength, offset, total, isFirstChunk, isLastChunk)
 }
 
 // UpdateObjectStatus updates an object's status
@@ -608,6 +681,15 @@ func (store *BoltStorage) MarkObjectDeleted(orgID string, objectType string, obj
 	return store.updateObjectHelper(orgID, objectType, objectID, function)
 }
 
+// MarkDestinationPolicyReceived marks an object's destination policy as having been received
+func (store *BoltStorage) MarkDestinationPolicyReceived(orgID string, objectType string, objectID string) common.SyncServiceError {
+	function := func(object boltObject) (boltObject, common.SyncServiceError) {
+		object.PolicyReceived = true
+		return object, nil
+	}
+	return store.updateObjectHelper(orgID, objectType, objectID, function)
+}
+
 // ActivateObject marks object as active
 func (store *BoltStorage) ActivateObject(orgID string, objectType string, objectID string) common.SyncServiceError {
 	function := func(object boltObject) (boltObject, common.SyncServiceError) {
@@ -712,13 +794,46 @@ func (store *BoltStorage) GetObjectDestinationsList(orgID string, objectType str
 	return dests, nil
 }
 
-// UpdateObjectDeliveryStatus changes the object's delivery status for the destination
-func (store *BoltStorage) UpdateObjectDeliveryStatus(status string, message string, orgID string, objectType string, objectID string,
-	destType string, destID string) common.SyncServiceError {
+// UpdateObjectDestinations updates object's destinations
+// Returns the meta data, object's status, an array of deleted destinations, and an array of added destinations
+func (store *BoltStorage) UpdateObjectDestinations(orgID string, objectType string, objectID string, destinationsList []string) (*common.MetaData, string,
+	[]common.StoreDestinationStatus, []common.StoreDestinationStatus, common.SyncServiceError) {
 	if common.Configuration.NodeType == common.ESS {
-		return nil
+		return nil, "", nil, nil, nil
+	}
+	var deletedDests, addedDests []common.StoreDestinationStatus
+	var metaData common.MetaData
+	var status string
+	function := func(object boltObject) (boltObject, common.SyncServiceError) {
+		var dests []common.StoreDestinationStatus
+		var err error
+		dests, deletedDests, addedDests, err = createDestinations(orgID, store, object.Destinations, destinationsList)
+		if err != nil {
+			return object, err
+		}
+
+		object.Destinations = dests
+		metaData = object.Meta
+		status = object.Status
+		return object, nil
 	}
 
+	err := store.updateObjectHelper(orgID, objectType, objectID, function)
+	if err != nil {
+		return nil, "", nil, nil, err
+	}
+	return &metaData, status, deletedDests, addedDests, nil
+}
+
+// UpdateObjectDeliveryStatus changes the object's delivery status for the destination
+// Returns true if the status is Deleted and all the destinations are in status Deleted
+func (store *BoltStorage) UpdateObjectDeliveryStatus(status string, message string, orgID string, objectType string, objectID string,
+	destType string, destID string) (bool, common.SyncServiceError) {
+	if common.Configuration.NodeType == common.ESS {
+		return true, nil
+	}
+
+	allDeleted := true
 	function := func(object boltObject) (boltObject, common.SyncServiceError) {
 		found := false
 		allConsumed := true
@@ -731,8 +846,13 @@ func (store *BoltStorage) UpdateObjectDeliveryStatus(status string, message stri
 					object.Destinations[i].Status = status
 				}
 				found = true
-			} else if d.Status != common.Consumed {
-				allConsumed = false
+			} else {
+				if d.Status != common.Consumed {
+					allConsumed = false
+				}
+				if d.Status != common.Deleted {
+					allDeleted = false
+				}
 			}
 		}
 		if !found {
@@ -740,11 +860,12 @@ func (store *BoltStorage) UpdateObjectDeliveryStatus(status string, message stri
 		}
 		if object.Meta.AutoDelete && status == common.Consumed && allConsumed && object.Meta.Expiration == "" {
 			// Delete the object by setting its expiration time to one hour
-			object.Meta.Expiration = time.Now().Add(time.Hour * time.Duration(1)).Format(time.RFC3339)
+			object.Meta.Expiration = time.Now().Add(time.Hour * time.Duration(1)).UTC().Format(time.RFC3339)
 		}
 		return object, nil
 	}
-	return store.updateObjectHelper(orgID, objectType, objectID, function)
+	err := store.updateObjectHelper(orgID, objectType, objectID, function)
+	return (allDeleted && status == common.Deleted), err
 }
 
 // UpdateObjectDelivering marks the object as being delivered to all its destinations
@@ -760,6 +881,22 @@ func (store *BoltStorage) UpdateObjectDelivering(orgID string, objectType string
 		return object, nil
 	}
 	return store.updateObjectHelper(orgID, objectType, objectID, function)
+}
+
+// GetNumberOfStoredObjects returns the number of objects received from the application that are
+// currently stored in this node's storage
+func (store *BoltStorage) GetNumberOfStoredObjects() (uint32, common.SyncServiceError) {
+	var count uint32
+	function := func(object boltObject) {
+		if object.Status == common.ReadyToSend || object.Status == common.NotReadyToSend {
+			count++
+		}
+	}
+
+	if err := store.retrieveObjectsHelper(function); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 // AddWebhook stores a webhook for an object type
@@ -934,6 +1071,22 @@ func (store *BoltStorage) RemoveInactiveDestinations(lastTimestamp time.Time) {
 	}
 }
 
+// GetNumberOfDestinations returns the number of currently registered ESS nodes (for CSS)
+func (store *BoltStorage) GetNumberOfDestinations() (uint32, common.SyncServiceError) {
+	if common.Configuration.NodeType == common.ESS {
+		return 0, nil
+	}
+	var count uint32
+	function := func(dest boltDestination) {
+		count++
+	}
+
+	if err := store.retrieveDestinationsHelper(function); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 // RetrieveDestination retrieves a destination
 func (store *BoltStorage) RetrieveDestination(orgID string, destType string, destID string) (*common.Destination, common.SyncServiceError) {
 	if common.Configuration.NodeType == common.ESS {
@@ -1013,7 +1166,9 @@ func (store *BoltStorage) GetObjectsForDestination(orgID string, destType string
 
 // UpdateNotificationRecord updates/adds a notification record to the object
 func (store *BoltStorage) UpdateNotificationRecord(notification common.Notification) common.SyncServiceError {
-	notification.ResendTime = time.Now().Unix() + int64(common.Configuration.ResendInterval*6)
+	if notification.ResendTime == 0 {
+		notification.ResendTime = time.Now().Unix() + int64(common.Configuration.ResendInterval*6)
+	}
 	function := func(*common.Notification) (*common.Notification, common.SyncServiceError) {
 		return &notification, nil
 	}

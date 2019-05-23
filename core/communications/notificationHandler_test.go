@@ -110,21 +110,25 @@ func TestNotificationHandler(t *testing.T) {
 		data           string
 	}{
 		{common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "someorg",
-			DestID: "dev1", DestType: "device", OriginID: "123", OriginType: "type2", ObjectSize: 5, ChunkSize: 4096, InstanceID: 12},
+			DestID: "dev1", DestType: "device", OriginID: "123", OriginType: "type2", ObjectSize: 5, ChunkSize: 4096, InstanceID: 12, DataID: 12},
 			common.PartiallyReceived, 12, data1, nil, 0, "hello"},
-		{common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "someorg", InstanceID: 13,
+		{common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "someorg", InstanceID: 13, DataID: 13,
 			DestID: "dev1", DestType: "device", NoData: true, OriginID: "123", OriginType: "type2", ObjectSize: 0, ChunkSize: 4096},
 			common.CompletelyReceived, 13, nil, nil, 0, ""},
-		{common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "someorg", InstanceID: 13,
+		{common.MetaData{ObjectID: "21", ObjectType: "type1", DestOrgID: "someorg", InstanceID: 13, DataID: 0,
 			DestID: "dev1", DestType: "device", MetaOnly: true, OriginID: "123", OriginType: "type2", ObjectSize: 0, ChunkSize: 4096},
 			common.CompletelyReceived, 13, nil, nil, 0, ""},
-		{common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "someorg", InstanceID: 15,
-			DestID: "dev1", DestType: "device", Link: "true", OriginID: "123", OriginType: "type2", ObjectSize: 0, ChunkSize: 4096},
+		{common.MetaData{ObjectID: "22", ObjectType: "type1", DestOrgID: "someorg", InstanceID: 13, DataID: 13,
+			DestID: "dev1", DestType: "device", MetaOnly: true, OriginID: "123", OriginType: "type2", ObjectSize: 0, ChunkSize: 4096},
+			common.PartiallyReceived, 13, nil, nil, 0, ""},
+		{common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "someorg", InstanceID: 15, DataID: 15,
+			DestinationsList: []string{"device:dev1", "device2:dev", "device2:dev1"},
+			Link:             "true", OriginID: "123", OriginType: "type2", ObjectSize: 0, ChunkSize: 4096},
 			common.CompletelyReceived, 15, nil, nil, 0, ""},
-		{common.MetaData{ObjectID: "4", ObjectType: "type1", DestOrgID: "someorg", InstanceID: 16,
+		{common.MetaData{ObjectID: "4", ObjectType: "type1", DestOrgID: "someorg", InstanceID: 16, DataID: 16,
 			DestID: "dev1", DestType: "device", OriginID: "123", OriginType: "type2", ObjectSize: 12, ChunkSize: 5},
 			common.PartiallyReceived, 16, data2, data3, 5, "hello world!"},
-		{common.MetaData{ObjectID: "5", ObjectType: "type1", DestOrgID: "someorg", InstanceID: 17,
+		{common.MetaData{ObjectID: "5", ObjectType: "type1", DestOrgID: "someorg", InstanceID: 17, DataID: 17,
 			DestID: "dev1", DestType: "device", OriginID: "123", OriginType: "type2", ObjectSize: 0, ChunkSize: 4096},
 			common.PartiallyReceived, 17, data4, nil, 0, ""},
 	}
@@ -279,7 +283,7 @@ func TestNotificationHandler(t *testing.T) {
 			t.Errorf("SendObjectStatus failed (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 		}
 		if err := handleAckObjectReceived(row.metaData.DestOrgID, row.metaData.ObjectType, row.metaData.ObjectID,
-			row.metaData.OriginType, row.metaData.OriginID, row.metaData.InstanceID); err != nil {
+			row.metaData.OriginType, row.metaData.OriginID, row.metaData.InstanceID, row.metaData.DataID); err != nil {
 			t.Errorf("handleAckObjectReceived failed (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 		}
 
@@ -335,7 +339,7 @@ func TestNotificationHandler(t *testing.T) {
 			t.Errorf("SendObjectStatus failed (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 		}
 		if err := handleAckConsumed(row.metaData.DestOrgID, row.metaData.ObjectType, row.metaData.ObjectID,
-			row.metaData.OriginType, row.metaData.OriginID, row.metaData.InstanceID); err != nil {
+			row.metaData.OriginType, row.metaData.OriginID, row.metaData.InstanceID, row.metaData.DataID); err != nil {
 			t.Errorf("handleAckConsumed failed (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 		}
 
@@ -353,13 +357,22 @@ func TestNotificationHandler(t *testing.T) {
 		}
 	}
 
-	destination := common.Destination{DestOrgID: "someorg", DestType: "device", DestID: "dev1", Communication: common.MQTTProtocol}
-	if err := Store.StoreDestination(destination); err != nil {
+	destination1 := common.Destination{DestOrgID: "someorg", DestType: "device", DestID: "dev1", Communication: common.MQTTProtocol}
+	if err := Store.StoreDestination(destination1); err != nil {
 		t.Errorf("Failed to store destination. Error: %s", err.Error())
 	}
+	destination2 := common.Destination{DestOrgID: "someorg", DestType: "device2", DestID: "dev", Communication: common.MQTTProtocol}
+	if err := Store.StoreDestination(destination2); err != nil {
+		t.Errorf("Failed to store destination. Error: %s", err.Error())
+	}
+	destination3 := common.Destination{DestOrgID: "someorg", DestType: "device2", DestID: "dev1", Communication: common.MQTTProtocol}
+	if err := Store.StoreDestination(destination3); err != nil {
+		t.Errorf("Failed to store destination. Error: %s", err.Error())
+	}
+
 	for _, row := range tests {
 		// The sending side
-		if err := Store.StoreObject(row.metaData, row.chunk1, common.ReadyToSend); err != nil {
+		if _, err := Store.StoreObject(row.metaData, row.chunk1, common.ReadyToSend); err != nil {
 			t.Errorf("Failed to store object (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 		} else {
 			notificationsInfo, err := PrepareObjectNotifications(row.metaData)
@@ -372,12 +385,18 @@ func TestNotificationHandler(t *testing.T) {
 			}
 
 			// Updated
+			destType := row.metaData.DestType
+			destID := row.metaData.DestID
+			if destType == "" {
+				destType = destination1.DestType
+				destID = destination1.DestID
+			}
 			if err = handleObjectUpdated(row.metaData.DestOrgID, row.metaData.ObjectType, row.metaData.ObjectID,
-				row.metaData.DestType, row.metaData.DestID, row.metaData.InstanceID); err != nil {
+				destType, destID, row.metaData.InstanceID, row.metaData.DataID); err != nil {
 				t.Errorf("handleObjectUpdated failed (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 			} else {
 				notification, err := Store.RetrieveNotificationRecord(row.metaData.DestOrgID, row.metaData.ObjectType, row.metaData.ObjectID,
-					row.metaData.DestType, row.metaData.DestID)
+					destType, destID)
 				if err != nil && !storage.IsNotFound(err) {
 					t.Errorf("An error occurred in notification fetch (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 				} else {
@@ -394,21 +413,24 @@ func TestNotificationHandler(t *testing.T) {
 			}
 
 			// Get data
-			if err := handleGetData(row.metaData, row.metaData.InstanceID); err != nil {
-				t.Errorf("handleGetData failed (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
-			} else {
-				notification, err := Store.RetrieveNotificationRecord(row.metaData.DestOrgID, row.metaData.ObjectType, row.metaData.ObjectID,
-					row.metaData.DestType, row.metaData.DestID)
-				if err != nil && !storage.IsNotFound(err) {
-					t.Errorf("An error occurred in notification fetch (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
+			if row.metaData.DestType != "" {
+				// Can't check handleGetData with destinations list
+				if err := handleGetData(row.metaData, row.metaData.InstanceID); err != nil {
+					t.Errorf("handleGetData failed (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 				} else {
-					if notification == nil {
-						t.Errorf("No notification record (objectID = %s)", row.metaData.ObjectID)
-
+					notification, err := Store.RetrieveNotificationRecord(row.metaData.DestOrgID, row.metaData.ObjectType, row.metaData.ObjectID,
+						destType, destID)
+					if err != nil && !storage.IsNotFound(err) {
+						t.Errorf("An error occurred in notification fetch (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 					} else {
-						if notification.Status != common.Data {
-							t.Errorf("Wrong notification status: %s instead of data (objectID = %s)", notification.Status,
-								row.metaData.ObjectID)
+						if notification == nil {
+							t.Errorf("No notification record (objectID = %s)", row.metaData.ObjectID)
+
+						} else {
+							if notification.Status != common.Data {
+								t.Errorf("Wrong notification status: %s instead of data (objectID = %s)", notification.Status,
+									row.metaData.ObjectID)
+							}
 						}
 					}
 				}
@@ -416,11 +438,11 @@ func TestNotificationHandler(t *testing.T) {
 
 			// Received
 			if err := handleObjectReceived(row.metaData.DestOrgID, row.metaData.ObjectType, row.metaData.ObjectID,
-				row.metaData.DestType, row.metaData.DestID, row.metaData.InstanceID); err != nil {
+				destType, destID, row.metaData.InstanceID, row.metaData.DataID); err != nil {
 				t.Errorf("handleObjectReceived failed (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 			} else {
 				notification, err := Store.RetrieveNotificationRecord(row.metaData.DestOrgID, row.metaData.ObjectType, row.metaData.ObjectID,
-					row.metaData.DestType, row.metaData.DestID)
+					destType, destID)
 				if err != nil && !storage.IsNotFound(err) {
 					t.Errorf("An error occurred in notification fetch (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 				} else {
@@ -438,11 +460,11 @@ func TestNotificationHandler(t *testing.T) {
 
 			// Consumed
 			if err := handleObjectConsumed(row.metaData.DestOrgID, row.metaData.ObjectType, row.metaData.ObjectID,
-				row.metaData.DestType, row.metaData.DestID, row.metaData.InstanceID); err != nil {
+				destType, destID, row.metaData.InstanceID, row.metaData.DataID); err != nil {
 				t.Errorf("handleObjectConsumed failed (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 			} else {
 				notification, err := Store.RetrieveNotificationRecord(row.metaData.DestOrgID, row.metaData.ObjectType, row.metaData.ObjectID,
-					row.metaData.DestType, row.metaData.DestID)
+					destType, destID)
 				if err != nil && !storage.IsNotFound(err) {
 					t.Errorf("An error occurred in notification fetch (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 				} else {
@@ -459,11 +481,11 @@ func TestNotificationHandler(t *testing.T) {
 			}
 
 			// Resend
-			if err := handleResendRequest(destination); err != nil {
+			if err := handleResendRequest(destination1); err != nil {
 				t.Errorf("handleResendRequest failed (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 			} else {
 				notification, err := Store.RetrieveNotificationRecord(row.metaData.DestOrgID, row.metaData.ObjectType, row.metaData.ObjectID,
-					row.metaData.DestType, row.metaData.DestID)
+					destination1.DestType, destination1.DestID)
 				if err != nil && !storage.IsNotFound(err) {
 					t.Errorf("An error occurred in notification fetch (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 				} else {
@@ -485,17 +507,17 @@ func TestNotificationHandler(t *testing.T) {
 
 				// "Send" delete notification and handle the ack
 				notification := common.Notification{ObjectID: row.metaData.ObjectID, ObjectType: row.metaData.ObjectType,
-					DestOrgID: row.metaData.DestOrgID, DestID: destination.DestID, DestType: destination.DestType,
+					DestOrgID: row.metaData.DestOrgID, DestID: destination1.DestID, DestType: destination1.DestType,
 					Status: common.Delete, InstanceID: row.metaData.InstanceID}
 				if err := Store.UpdateNotificationRecord(notification); err != nil {
 					t.Errorf("UpdateNotificationRecord failed (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 				} else {
 					if err := handleAckDelete(row.metaData.DestOrgID, row.metaData.ObjectType, row.metaData.ObjectID,
-						row.metaData.DestType, row.metaData.DestID, row.metaData.InstanceID); err != nil {
+						destination1.DestType, destination1.DestID, row.metaData.InstanceID, row.metaData.DataID); err != nil {
 						t.Errorf("handleAckDelete failed (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 					} else {
 						notification, err := Store.RetrieveNotificationRecord(row.metaData.DestOrgID, row.metaData.ObjectType, row.metaData.ObjectID,
-							row.metaData.DestType, row.metaData.DestID)
+							destination1.DestType, destination1.DestID)
 						if err != nil && !storage.IsNotFound(err) {
 							t.Errorf("An error occurred in notification fetch (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 						} else {
@@ -510,13 +532,49 @@ func TestNotificationHandler(t *testing.T) {
 						}
 
 						storedObject, _ := Store.RetrieveObject(row.metaData.DestOrgID, row.metaData.ObjectType, row.metaData.ObjectID)
-						if storedObject != nil {
+						if row.metaData.DestinationsList == nil && storedObject != nil {
 							t.Errorf("Object exists after ackdelete received (objectID = %s)", row.metaData.ObjectID)
+						} else if row.metaData.DestinationsList != nil && storedObject == nil {
+							t.Errorf("Object deleted by only one destination was deleted (objectID = %s)", row.metaData.ObjectID)
+						}
+					}
+
+					if row.metaData.DestinationsList != nil {
+						// This object has three destinations and has to be deleted only after receiving ackDelete from all the three
+						notification = common.Notification{ObjectID: row.metaData.ObjectID, ObjectType: row.metaData.ObjectType,
+							DestOrgID: row.metaData.DestOrgID, DestID: destination2.DestID, DestType: destination2.DestType,
+							Status: common.Delete, InstanceID: row.metaData.InstanceID}
+						if err := Store.UpdateNotificationRecord(notification); err != nil {
+							t.Errorf("UpdateNotificationRecord failed (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
+						}
+						notification = common.Notification{ObjectID: row.metaData.ObjectID, ObjectType: row.metaData.ObjectType,
+							DestOrgID: row.metaData.DestOrgID, DestID: destination3.DestID, DestType: destination3.DestType,
+							Status: common.Delete, InstanceID: row.metaData.InstanceID}
+						if err := Store.UpdateNotificationRecord(notification); err != nil {
+							t.Errorf("UpdateNotificationRecord failed (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
+						}
+						if err := handleAckDelete(row.metaData.DestOrgID, row.metaData.ObjectType, row.metaData.ObjectID,
+							destination2.DestType, destination2.DestID, row.metaData.InstanceID, row.metaData.DataID); err != nil {
+							t.Errorf("handleAckDelete failed (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
+						} else {
+							storedObject, _ := Store.RetrieveObject(row.metaData.DestOrgID, row.metaData.ObjectType, row.metaData.ObjectID)
+							if storedObject == nil {
+								t.Errorf("Object deleted by only one destination was deleted (objectID = %s)", row.metaData.ObjectID)
+							}
+							if err := handleAckDelete(row.metaData.DestOrgID, row.metaData.ObjectType, row.metaData.ObjectID,
+								destination3.DestType, destination3.DestID, row.metaData.InstanceID, row.metaData.DataID); err != nil {
+								t.Errorf("handleAckDelete failed (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
+							} else {
+								storedObject, _ := Store.RetrieveObject(row.metaData.DestOrgID, row.metaData.ObjectType, row.metaData.ObjectID)
+								if storedObject != nil {
+									t.Errorf("Object exists after ackdelete received from all destinations (objectID = %s)", row.metaData.ObjectID)
+								}
+							}
 						}
 					}
 				}
 
-				if err := Store.StoreObject(row.metaData, row.chunk1, common.ReadyToSend); err != nil {
+				if _, err := Store.StoreObject(row.metaData, row.chunk1, common.ReadyToSend); err != nil {
 					t.Errorf("Failed to store object (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 				}
 			}
@@ -572,7 +630,7 @@ func testPingAndRegisterNew(storageType string, t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if err := Store.StoreObject(test.metaData, test.data, test.status); err != nil {
+		if _, err := Store.StoreObject(test.metaData, test.data, test.status); err != nil {
 			t.Errorf("StoreObject failed. Error: %s", err.Error())
 		}
 		if err := Store.DeleteNotificationRecords(test.metaData.DestOrgID, test.metaData.ObjectType,
@@ -649,7 +707,7 @@ func testPingAndRegisterNew(storageType string, t *testing.T) {
 		tests[0].metaData.ObjectID, tests[0].metaData.DestType, tests[0].metaData.DestID); err != nil {
 		t.Errorf("DeleteNotificationRecords failed. Error: %s", err.Error())
 	}
-	if err := Store.UpdateObjectDeliveryStatus(common.Delivered, "", tests[0].metaData.DestOrgID, tests[0].metaData.ObjectType,
+	if _, err := Store.UpdateObjectDeliveryStatus(common.Delivered, "", tests[0].metaData.DestOrgID, tests[0].metaData.ObjectType,
 		tests[0].metaData.ObjectID, tests[0].metaData.DestType, tests[0].metaData.DestID); err != nil {
 		t.Errorf("UpdateObjectDeliveryStatus failed. Error: %s", err.Error())
 	}
@@ -746,7 +804,7 @@ func testRegisterAsNew(storageType string, t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if err := Store.StoreObject(test.metaData, test.data, test.status); err != nil {
+		if _, err := Store.StoreObject(test.metaData, test.data, test.status); err != nil {
 			t.Errorf("StoreObject failed. Error: %s", err.Error())
 		}
 

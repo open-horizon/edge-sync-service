@@ -394,14 +394,20 @@ func testHandleObjectHelper(nodeType string, storageType string, t *testing.T) {
 				}
 			}
 		} else if nodeType != common.ESS && test.method != "destinations" {
-			t.Errorf("handleObjects of %s returned a status of %d instead of %d for test %d and %s under %s\n", urlString, writer.statusCode,
-				test.expectedHTTPStatus, test.testID, nodeType, test.appKey)
+			t.Errorf("handleObjects of %s returned a status of %d instead of %d for test %d and %s under %s and %s database\n", urlString,
+				writer.statusCode, test.expectedHTTPStatus, test.testID, nodeType, test.appKey, storageType)
 		}
 	}
 
 	for _, info := range aclInfo {
 		if err := store.RemoveUsersFromACL(info.aclType, "myorg222", info.key, []string{info.username}); err != nil {
 			t.Errorf("Failed to cleanup %s ACL. Error: %s\n", info.aclType, err.Error())
+		}
+	}
+
+	if nodeType == common.CSS {
+		if err := deleteOrganization("myorg222"); err != nil {
+			t.Errorf("deleteOrganization failed. Error: %s", err.Error())
 		}
 	}
 }
@@ -430,6 +436,14 @@ func testInvalidURLs(storageType string, t *testing.T) {
 	request, _ = http.NewRequest(http.MethodPut, "plover", nil)
 	request.SetBasicAuth("testerAdmin@plover", "")
 	handleObjects(writer, request)
+	if writer.statusCode != http.StatusMethodNotAllowed {
+		t.Errorf("handleObjects of \"plover\" returned a status of %d instead of %d\n", writer.statusCode, http.StatusMethodNotAllowed)
+	}
+
+	writer = newAPIServerTestResponseWriter()
+	request, _ = http.NewRequest(http.MethodGet, "plover", nil)
+	request.SetBasicAuth("testerAdmin@plover", "")
+	handleObjects(writer, request)
 	if writer.statusCode != http.StatusBadRequest {
 		t.Errorf("handleObjects of \"plover\" returned a status of %d instead of %d\n", writer.statusCode, http.StatusBadRequest)
 	}
@@ -448,6 +462,122 @@ func testInvalidURLs(storageType string, t *testing.T) {
 	handleShutdown(writer, request)
 	if writer.statusCode != http.StatusMethodNotAllowed {
 		t.Errorf("handleObjects of \"/api/v1/shutdown\" returned a status of %d instead of %d\n", writer.statusCode, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestPolicies(t *testing.T) {
+	if status := testAPIServerSetup(common.ESS, common.Mongo); status != "" {
+		t.Errorf(status)
+	}
+	defer communications.Store.Stop()
+
+	common.Configuration.OrgID = "myorgPolicy"
+
+	metaData1 := common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorgPolicy", NoData: true,
+		DestinationPolicy: &common.Policy{
+			Properties: []common.PolicyProperty{
+				{Name: "a", Value: float64(1)},
+				{Name: "b", Value: "zxcv"},
+				{Name: "c", Value: true, Type: "bool"},
+			},
+			Constraints: []string{"Plover=34", "asdf=true"},
+			Services: []common.ServiceID{
+				{OrgID: "plover", Arch: "amd64", ServiceName: "testerService1", Version: "0.0.1"},
+			}}}
+
+	if _, err := store.StoreObject(metaData1, nil, common.CompletelyReceived); err != nil {
+		t.Errorf("StoreObject failed: %s", err.Error())
+	}
+
+	metaData2 := common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "myorgPolicy", NoData: true,
+		DestinationPolicy: &common.Policy{
+			Properties: []common.PolicyProperty{
+				{Name: "a", Value: float64(1)},
+				{Name: "b", Value: "zxcv"},
+				{Name: "c", Value: true, Type: "bool"},
+			},
+			Constraints: []string{"Plover=34", "asdf=true"},
+			Services: []common.ServiceID{
+				{OrgID: "plover", Arch: "amd64", ServiceName: "testerService1", Version: "0.0.1"},
+				{OrgID: "plover", Arch: "amd64", ServiceName: "testerService2", Version: "0.0.1"},
+			}}}
+
+	if _, err := store.StoreObject(metaData2, nil, common.CompletelyReceived); err != nil {
+		t.Errorf("StoreObject failed: %s", err.Error())
+	}
+
+	metaData3 := common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "myorgPolicy", NoData: true,
+		DestinationPolicy: &common.Policy{
+			Properties: []common.PolicyProperty{
+				{Name: "a", Value: float64(1)},
+				{Name: "b", Value: "zxcv"},
+				{Name: "c", Value: true, Type: "bool"},
+			},
+			Constraints: []string{"Plover=34", "asdf=true"},
+			Services: []common.ServiceID{
+				{OrgID: "plover", Arch: "amd64", ServiceName: "testerService3", Version: "0.0.1"},
+			}}}
+
+	if _, err := store.StoreObject(metaData3, nil, common.CompletelyReceived); err != nil {
+		t.Errorf("StoreObject failed: %s", err.Error())
+	}
+
+	tests := []struct {
+		method             string
+		appKey             string
+		orgID              string
+		objectType         string
+		objectID           string
+		expectedHTTPStatus int
+		expectedCount      int
+		testID             int
+	}{
+		{http.MethodGet, "testerService1@myorgPolicy", "myorgPolicy", "type1", "1", http.StatusOK, 0, 1},
+		{http.MethodGet, "testerService2@myorgPolicy", "myorgPolicy", "type1", "1", http.StatusForbidden, 0, 2},
+		{http.MethodGet, "kuku@myorgPolicy", "myorgPolicy", "type1", "1", http.StatusForbidden, 0, 3},
+		{http.MethodGet, "testerUser@myorgPolicy", "myorgPolicy", "type1", "1", http.StatusOK, 0, 4},
+
+		{http.MethodGet, "testerService1@myorgPolicy", "myorgPolicy", "type1", "2", http.StatusOK, 0, 5},
+		{http.MethodGet, "testerService2@myorgPolicy", "myorgPolicy", "type1", "2", http.StatusOK, 0, 6},
+		{http.MethodGet, "kuku@myorgPolicy", "myorgPolicy", "type1", "2", http.StatusForbidden, 0, 7},
+		{http.MethodGet, "testerUser@myorgPolicy", "myorgPolicy", "type1", "2", http.StatusOK, 0, 8},
+
+		{http.MethodGet, "testerService1@myorgPolicy", "myorgPolicy", "type1", "3", http.StatusForbidden, 0, 9},
+		{http.MethodGet, "testerService2@myorgPolicy", "myorgPolicy", "type1", "3", http.StatusForbidden, 0, 10},
+		{http.MethodGet, "kuku@myorgPolicy", "myorgPolicy", "type1", "3", http.StatusForbidden, 0, 11},
+		{http.MethodGet, "testerUser@myorgPolicy", "myorgPolicy", "type1", "3", http.StatusOK, 0, 12},
+
+		{http.MethodGet, "testerService1@myorgPolicy", "myorgPolicy", "type1", "", http.StatusOK, 2, 13},
+		{http.MethodGet, "testerService2@myorgPolicy", "myorgPolicy", "type1", "", http.StatusOK, 1, 14},
+		{http.MethodGet, "kuku@myorgPolicy", "myorgPolicy", "type1", "", http.StatusForbidden, 0, 15},
+		{http.MethodGet, "testerUser@myorgPolicy", "myorgPolicy", "type1", "", http.StatusOK, 3, 16},
+	}
+	for _, test := range tests {
+		urlString := test.objectType
+		if test.objectID != "" {
+			urlString = urlString + "/" + test.objectID
+		}
+
+		writer := newAPIServerTestResponseWriter()
+		request, _ := http.NewRequest(test.method, urlString, nil)
+		request.SetBasicAuth(test.appKey, "")
+
+		handleObjects(writer, request)
+		if writer.statusCode != test.expectedHTTPStatus {
+			t.Errorf("handleObjects of %s returned a status of %d instead of %d for test %d under %s\n", urlString, writer.statusCode,
+				test.expectedHTTPStatus, test.testID, test.appKey)
+		}
+		if writer.statusCode == http.StatusOK && test.objectID == "" {
+			decoder := json.NewDecoder(&writer.body)
+			var data []common.MetaData
+			if err := decoder.Decode(&data); err != nil {
+				t.Errorf("Failed to unmarshall objects. Error: %s\n", err)
+			} else {
+				if len(data) != test.expectedCount {
+					t.Errorf("Fetched %d objects instead of %d", test.expectedCount, len(data))
+				}
+			}
+		}
 	}
 }
 

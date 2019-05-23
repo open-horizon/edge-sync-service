@@ -30,7 +30,7 @@ func (store *MongoStorage) checkObjects() {
 		return
 	}
 
-	currentTime := time.Now().Format(time.RFC3339)
+	currentTime := time.Now().UTC().Format(time.RFC3339)
 	query := bson.M{
 		"$and": []bson.M{
 			bson.M{"metadata.expiration": bson.M{"$ne": ""}},
@@ -137,6 +137,31 @@ func (store *MongoStorage) storeDataInFile(id string, data []byte) common.SyncSe
 	return nil
 }
 
+func (store *MongoStorage) retrievePolicies(query interface{}) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	results := []object{}
+
+	selectedFields := bson.M{"metadata.destination-org-id": bson.ElementString,
+		"metadata.object-type": bson.ElementString, "metadata.object-id": bson.ElementString,
+		"metadata.destination-policy": bson.ElementDocument}
+	if err := store.fetchAll(objects, query, selectedFields, &results); err != nil {
+		switch err {
+		case mgo.ErrNotFound:
+			return nil, nil
+		default:
+			return nil, &Error{fmt.Sprintf("Failed to fetch the objects with a Destination Policy. Error: %s", err)}
+		}
+	}
+
+	objects := make([]common.ObjectDestinationPolicy, len(results))
+	for index, oneResult := range results {
+		objects[index] = common.ObjectDestinationPolicy{
+			OrgID: oneResult.MetaData.DestOrgID, ObjectType: oneResult.MetaData.ObjectType, ObjectID: oneResult.MetaData.ObjectID,
+			DestinationPolicy: *oneResult.MetaData.DestinationPolicy,
+		}
+	}
+	return objects, nil
+}
+
 func (store *MongoStorage) removeAll(collectionName string, query interface{}) common.SyncServiceError {
 	function := func(collection *mgo.Collection) error {
 		_, err := collection.RemoveAll(query)
@@ -233,6 +258,26 @@ func (store *MongoStorage) insert(collectionName string, doc interface{}) common
 		return store.insert(collectionName, doc)
 	}
 	return nil
+}
+
+func (store *MongoStorage) count(collectionName string, selector interface{}) (uint32, common.SyncServiceError) {
+	var count uint32
+	function := func(collection *mgo.Collection) error {
+		var err error
+		countInt, err := collection.Find(selector).Count()
+		count = uint32(countInt)
+		return err
+	}
+
+	retry, err := store.withCollectionHelper(collectionName, function, true)
+	if err != nil {
+		return 0, err
+	}
+
+	if retry {
+		return store.count(collectionName, selector)
+	}
+	return count, nil
 }
 
 func (store *MongoStorage) removeFile(id string) common.SyncServiceError {
@@ -675,4 +720,12 @@ func (store *MongoStorage) retrieveACLsInOrgHelper(collection string, aclType st
 		result = append(result, parts[2])
 	}
 	return result, nil
+}
+
+func (store *MongoStorage) getInstanceID() int64 {
+	currentTime, err := store.RetrieveTimeOnServer()
+	if err != nil {
+		currentTime = time.Now()
+	}
+	return currentTime.UnixNano() / (int64(time.Millisecond) / int64(time.Nanosecond))
 }

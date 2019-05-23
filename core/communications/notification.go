@@ -46,6 +46,20 @@ func PrepareDeleteNotifications(metaData common.MetaData) ([]common.Notification
 	return prepareNotifications(common.Delete, metaData, destinations)
 }
 
+// PrepareNotificationsForDestinations prepares notification messages for the destinations if necessary
+// This function should not acquire an object lock (common.ObjectLocks) as the caller has already acquired one.
+func PrepareNotificationsForDestinations(metaData common.MetaData, destinations []common.StoreDestinationStatus, topic string) ([]common.NotificationInfo,
+	common.SyncServiceError) {
+	dests := make([]common.Destination, 0)
+	for _, dest := range destinations {
+		if topic != common.Delete || (dest.Status == common.Delivering || dest.Status == common.Delivered || dest.Status == common.Consumed ||
+			dest.Status == common.Error) {
+			dests = append(dests, dest.Destination)
+		}
+	}
+	return prepareNotifications(topic, metaData, dests)
+}
+
 func prepareNotifications(topic string, metaData common.MetaData, destinations []common.Destination) ([]common.NotificationInfo, common.SyncServiceError) {
 	result := make([]common.NotificationInfo, 0)
 
@@ -53,7 +67,7 @@ func prepareNotifications(topic string, metaData common.MetaData, destinations [
 	for _, destination := range destinations {
 		notification := common.Notification{ObjectID: metaData.ObjectID, ObjectType: metaData.ObjectType,
 			DestOrgID: metaData.DestOrgID, DestID: destination.DestID, DestType: destination.DestType,
-			Status: topic, InstanceID: metaData.InstanceID}
+			Status: topic, InstanceID: metaData.InstanceID, DataID: metaData.DataID}
 
 		// Store the notification records in storage as part of the object
 		if err := Store.UpdateNotificationRecord(notification); err != nil {
@@ -65,7 +79,7 @@ func prepareNotifications(topic string, metaData common.MetaData, destinations [
 		metaData.DestID = destination.DestID
 
 		notificationInfo := common.NotificationInfo{NotificationTopic: topic, DestType: metaData.DestType, DestID: metaData.DestID,
-			InstanceID: metaData.InstanceID, MetaData: &metaData}
+			InstanceID: metaData.InstanceID, DataID: metaData.DataID, MetaData: &metaData}
 		result = append(result, notificationInfo)
 	}
 	return result, nil
@@ -82,7 +96,7 @@ func PrepareUpdateNotification(metaData common.MetaData, destinations []common.D
 func PrepareObjectStatusNotification(metaData common.MetaData, status string) ([]common.NotificationInfo, common.SyncServiceError) {
 	notification := common.Notification{ObjectID: metaData.ObjectID, ObjectType: metaData.ObjectType,
 		DestOrgID: metaData.DestOrgID, DestID: metaData.OriginID, DestType: metaData.OriginType,
-		Status: status, InstanceID: metaData.InstanceID}
+		Status: status, InstanceID: metaData.InstanceID, DataID: metaData.DataID}
 
 	// Store the notification records in storage as part of the object
 	if err := Store.UpdateNotificationRecord(notification); err != nil {
@@ -90,7 +104,7 @@ func PrepareObjectStatusNotification(metaData common.MetaData, status string) ([
 	}
 
 	notificationInfo := common.NotificationInfo{NotificationTopic: status, DestType: metaData.OriginType, DestID: metaData.OriginID,
-		InstanceID: metaData.InstanceID, MetaData: &metaData}
+		InstanceID: metaData.InstanceID, DataID: metaData.DataID, MetaData: &metaData}
 	return []common.NotificationInfo{notificationInfo}, nil
 }
 
@@ -98,7 +112,7 @@ func PrepareObjectStatusNotification(metaData common.MetaData, status string) ([
 func SendNotifications(notifications []common.NotificationInfo) common.SyncServiceError {
 	for _, notification := range notifications {
 		if err := Comm.SendNotificationMessage(notification.NotificationTopic, notification.DestType, notification.DestID,
-			notification.InstanceID, notification.MetaData); err != nil {
+			notification.InstanceID, notification.DataID, notification.MetaData); err != nil {
 			return &Error{err.Error()}
 		}
 	}
@@ -127,7 +141,7 @@ func resendNotificationsForDestination(dest common.Destination, resendReceivedOb
 				continue
 			}
 
-			metaData, err := Store.RetrieveObject(n.DestOrgID, n.ObjectType, n.ObjectID)
+			metaData, status, err := Store.RetrieveObjectAndStatus(n.DestOrgID, n.ObjectType, n.ObjectID)
 			if err != nil {
 				message := fmt.Sprintf("Error in resendNotificationsForDestination. Error: %s\n", err)
 				if log.IsLogging(logger.ERROR) {
@@ -153,8 +167,12 @@ func resendNotificationsForDestination(dest common.Destination, resendReceivedOb
 
 			switch n.Status {
 			case common.Getdata:
+				if status != common.PartiallyReceived {
+					common.ObjectLocks.Unlock(lockIndex)
+					continue
+				}
 				common.ObjectLocks.Unlock(lockIndex)
-				dataChunksLocks.Lock(lockIndex)
+				Comm.LockDataChunks(lockIndex, metaData)
 				offsets := getOffsetsToResend(*n, *metaData)
 				for _, offset := range offsets {
 					if trace.IsLogging(logger.TRACE) {
@@ -167,7 +185,7 @@ func resendNotificationsForDestination(dest common.Destination, resendReceivedOb
 						break
 					}
 				}
-				dataChunksLocks.Unlock(lockIndex)
+				Comm.UnlockDataChunks(lockIndex, metaData)
 
 			case common.ReceivedByDestination:
 				fallthrough
@@ -187,12 +205,12 @@ func resendNotificationsForDestination(dest common.Destination, resendReceivedOb
 				common.ObjectLocks.Unlock(lockIndex)
 				metaData.DestType = n.DestType
 				metaData.DestID = n.DestID
-				err = Comm.SendNotificationMessage(common.Update, dest.DestType, dest.DestID, metaData.InstanceID, metaData)
+				err = Comm.SendNotificationMessage(common.Update, dest.DestType, dest.DestID, metaData.InstanceID, metaData.DataID, metaData)
 			default:
 				common.ObjectLocks.Unlock(lockIndex)
 				metaData.DestType = n.DestType
 				metaData.DestID = n.DestID
-				err = Comm.SendNotificationMessage(n.Status, n.DestType, n.DestID, n.InstanceID, metaData)
+				err = Comm.SendNotificationMessage(n.Status, n.DestType, n.DestID, n.InstanceID, n.DataID, metaData)
 			}
 			if err != nil {
 				message := fmt.Sprintf("Error in resendNotificationsForDestination. Error: %s\n", err)

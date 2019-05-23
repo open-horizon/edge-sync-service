@@ -36,6 +36,11 @@ func StartLeaderDetermination(theStore storage.Storage) {
 	store = theStore
 	isLeader = false
 
+	initializeLeadership()
+	startLeadershipPeriodicUpdate()
+}
+
+func initializeLeadership() {
 	gotLeadership, err := store.InsertInitialLeader(leaderID.String())
 
 	if err != nil {
@@ -57,7 +62,6 @@ func StartLeaderDetermination(theStore storage.Storage) {
 			}
 		}
 	}
-	startLeadershipPeriodicUpdate()
 }
 
 // CheckIfLeader checks if the current process is the leader
@@ -118,7 +122,9 @@ func startLeadershipPeriodicUpdate() {
 				} else {
 					_, heartbeatTimeout, lastHeartbeatTS, version, err := store.RetrieveLeader()
 					if err != nil {
-						if log.IsLogging(logger.ERROR) {
+						if storage.IsNotFound(err) {
+							initializeLeadership()
+						} else if log.IsLogging(logger.ERROR) {
 							log.Error("%s\n", err)
 						}
 					} else {

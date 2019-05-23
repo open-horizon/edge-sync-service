@@ -159,7 +159,7 @@ func TestNotifications(t *testing.T) {
 			}
 		}
 
-		if err := Store.StoreObject(row.metaData, []byte("data"), common.ReadyToSend); err != nil {
+		if _, err := Store.StoreObject(row.metaData, []byte("data"), common.ReadyToSend); err != nil {
 			t.Errorf("Failed to store object. Error: %s", err.Error())
 		}
 		notificationsInfo, err = PrepareObjectNotifications(row.metaData)
@@ -208,8 +208,8 @@ func TestNotifications(t *testing.T) {
 
 func TestActivateObjects(t *testing.T) {
 
-	activationTime1 := time.Now().Add(time.Second * 2).Format(time.RFC3339)
-	activationTime2 := time.Now().Add(time.Second * 5).Format(time.RFC3339)
+	activationTime1 := time.Now().Add(time.Second * 2).UTC().Format(time.RFC3339)
+	activationTime2 := time.Now().Add(time.Second * 5).UTC().Format(time.RFC3339)
 
 	tests := []struct {
 		metaData common.MetaData
@@ -245,7 +245,7 @@ func TestActivateObjects(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if err := Store.StoreObject(test.metaData, nil, common.ReadyToSend); err != nil {
+		if _, err := Store.StoreObject(test.metaData, nil, common.ReadyToSend); err != nil {
 			t.Errorf("Failed to store object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
 		}
 	}
@@ -265,7 +265,7 @@ func TestActivateObjects(t *testing.T) {
 		t.Errorf("RetrieveObjects failed. Error: %s\n", err.Error())
 	} else if len(objects) != 2 {
 		t.Errorf("RetrieveObjects returned %d objects instead of 2\n", len(objects))
-		t.Errorf("    The time is now: %s", time.Now().Format(time.RFC3339))
+		t.Errorf("    The time is now: %s", time.Now().UTC().Format(time.RFC3339))
 		for _, object := range objects {
 			t.Errorf("    Retrieved object:  %#v", object)
 		}

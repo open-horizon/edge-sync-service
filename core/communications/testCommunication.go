@@ -22,7 +22,7 @@ func (communication *TestComm) StopCommunication() common.SyncServiceError {
 
 // SendNotificationMessage sends a notification message from the CSS to the ESS or from the ESS to the CSS
 func (communication *TestComm) SendNotificationMessage(notificationTopic string, destType string,
-	destID string, instanceID int64, metaData *common.MetaData) common.SyncServiceError {
+	destID string, instanceID int64, dataID int64, metaData *common.MetaData) common.SyncServiceError {
 	return nil
 }
 
@@ -84,6 +84,16 @@ func (communication *TestComm) UpdateOrganization(org common.Organization, times
 // DeleteOrganization removes an organization
 func (communication *TestComm) DeleteOrganization(orgID string) common.SyncServiceError {
 	return nil
+}
+
+// LockDataChunks locks one of the data chunks locks
+func (communication *TestComm) LockDataChunks(index uint32, metadata *common.MetaData) {
+	// Noop on HTTP
+}
+
+// UnlockDataChunks unlocks one of the data chunks locks
+func (communication *TestComm) UnlockDataChunks(index uint32, metadata *common.MetaData) {
+	// Noop on HTTP
 }
 
 // SendFeedbackMessage sends a feedback message from the ESS to the CSS or from the CSS to the ESS

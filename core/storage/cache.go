@@ -56,7 +56,7 @@ func (store *Cache) PerformMaintenance() {
 }
 
 // StoreObject stores an object
-func (store *Cache) StoreObject(metaData common.MetaData, data []byte, status string) common.SyncServiceError {
+func (store *Cache) StoreObject(metaData common.MetaData, data []byte, status string) ([]common.StoreDestinationStatus, common.SyncServiceError) {
 	return store.Store.StoreObject(metaData, data, status)
 }
 
@@ -117,6 +117,17 @@ func (store *Cache) RetrieveUpdatedObjects(orgID string, objectType string, rece
 	return store.Store.RetrieveUpdatedObjects(orgID, objectType, received)
 }
 
+// RetrieveObjectsWithDestinationPolicy returns the list of all the objects that have a Destination Policy
+// If received is true, return objects marked as policy received
+func (store *Cache) RetrieveObjectsWithDestinationPolicy(orgID string, received bool) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	return store.Store.RetrieveObjectsWithDestinationPolicy(orgID, received)
+}
+
+// RetrieveObjectsWithDestinationPolicyByService returns the list of all the object Policies for a particular service
+func (store *Cache) RetrieveObjectsWithDestinationPolicyByService(orgID, arch, serviceName, version string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	return store.Store.RetrieveObjectsWithDestinationPolicyByService(orgID, arch, serviceName, version)
+}
+
 // RetrieveObjects returns the list of all the objects that need to be sent to the destination
 func (store *Cache) RetrieveObjects(orgID string, destType string, destID string, resend int) ([]common.MetaData, common.SyncServiceError) {
 	return store.Store.RetrieveObjects(orgID, destType, destID, resend)
@@ -157,6 +168,11 @@ func (store *Cache) MarkObjectDeleted(orgID string, objectType string, objectID 
 	return store.Store.MarkObjectDeleted(orgID, objectType, objectID)
 }
 
+// MarkDestinationPolicyReceived marks an object's destination policy as having been received
+func (store *Cache) MarkDestinationPolicyReceived(orgID string, objectType string, objectID string) common.SyncServiceError {
+	return store.Store.MarkDestinationPolicyReceived(orgID, objectType, objectID)
+}
+
 // ActivateObject marks object as active
 func (store *Cache) ActivateObject(orgID string, objectType string, objectID string) common.SyncServiceError {
 	return store.Store.ActivateObject(orgID, objectType, objectID)
@@ -189,8 +205,9 @@ func (store *Cache) GetObjectDestinations(metaData common.MetaData) ([]common.De
 }
 
 // UpdateObjectDeliveryStatus changes the object's delivery status for the destination
+// Returns true if the status is Deleted and all the destinations are in status Deleted
 func (store *Cache) UpdateObjectDeliveryStatus(status string, message string, orgID string, objectType string, objectID string,
-	destType string, destID string) common.SyncServiceError {
+	destType string, destID string) (bool, common.SyncServiceError) {
 	return store.Store.UpdateObjectDeliveryStatus(status, message, orgID, objectType, objectID, destType, destID)
 }
 
@@ -203,6 +220,19 @@ func (store *Cache) UpdateObjectDelivering(orgID string, objectType string, obje
 func (store *Cache) GetObjectDestinationsList(orgID string, objectType string,
 	objectID string) ([]common.StoreDestinationStatus, common.SyncServiceError) {
 	return store.Store.GetObjectDestinationsList(orgID, objectType, objectID)
+}
+
+// UpdateObjectDestinations updates object's destinations
+// Returns the meta data, object's status, an array of deleted destinations, and an array of added destinations
+func (store *Cache) UpdateObjectDestinations(orgID string, objectType string, objectID string, destinationsList []string) (*common.MetaData, string,
+	[]common.StoreDestinationStatus, []common.StoreDestinationStatus, common.SyncServiceError) {
+	return store.Store.UpdateObjectDestinations(orgID, objectType, objectID, destinationsList)
+}
+
+// GetNumberOfStoredObjects returns the number of objects received from the application that are
+// currently stored in this node's storage
+func (store *Cache) GetNumberOfStoredObjects() (uint32, common.SyncServiceError) {
+	return store.Store.GetNumberOfStoredObjects()
 }
 
 // AddWebhook stores a webhook for an object type
@@ -293,6 +323,11 @@ func (store *Cache) UpdateDestinationLastPingTime(destination common.Destination
 func (store *Cache) RemoveInactiveDestinations(lastTimestamp time.Time) {
 	store.Store.RemoveInactiveDestinations(lastTimestamp)
 	store.cacheDestinations()
+}
+
+// GetNumberOfDestinations returns the number of currently registered ESS nodes (for CSS)
+func (store *Cache) GetNumberOfDestinations() (uint32, common.SyncServiceError) {
+	return uint32(len(store.destinations)), nil
 }
 
 // RetrieveDestination retrieves a destination

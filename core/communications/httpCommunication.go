@@ -223,7 +223,7 @@ func (communication *HTTP) handleGetUpdates(writer http.ResponseWriter, request 
 }
 
 // SendNotificationMessage sends a notification message from the CSS to the ESS or from the ESS to the CSS
-func (communication *HTTP) SendNotificationMessage(notificationTopic string, destType string, destID string, instanceID int64,
+func (communication *HTTP) SendNotificationMessage(notificationTopic string, destType string, destID string, instanceID int64, dataID int64,
 	metaData *common.MetaData) common.SyncServiceError {
 	if common.Configuration.NodeType == common.CSS {
 		// Create pending notification to be sent as a response to a GET request
@@ -247,11 +247,11 @@ func (communication *HTTP) SendNotificationMessage(notificationTopic string, des
 		common.ObjectLocks.Lock(lockIndex)
 		defer common.ObjectLocks.Unlock(lockIndex)
 		notification := common.Notification{ObjectID: metaData.ObjectID, ObjectType: metaData.ObjectType,
-			DestOrgID: metaData.DestOrgID, DestID: destID, DestType: destType, Status: status, InstanceID: instanceID}
+			DestOrgID: metaData.DestOrgID, DestID: destID, DestType: destType, Status: status, InstanceID: instanceID, DataID: dataID}
 		return Store.UpdateNotificationRecord(notification)
 	}
 
-	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, instanceID, notificationTopic)
+	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, instanceID, dataID, notificationTopic)
 
 	var request *http.Request
 	var err error
@@ -280,26 +280,26 @@ func (communication *HTTP) SendNotificationMessage(notificationTopic string, des
 		switch notificationTopic {
 		case common.Update:
 			// Push the data
-			if metaData.Link == "" {
+			if metaData.Link == "" && !metaData.NoData && !metaData.MetaOnly {
 				if err = communication.pushData(metaData); err != nil {
 					return err
 				}
 			}
 			// Mark updated
 			if err = handleObjectUpdated(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID,
-				destType, destID, instanceID); err != nil {
+				destType, destID, instanceID, dataID); err != nil {
 				return err
 			}
 		case common.Delete:
 			return handleAckDelete(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID,
-				destType, destID, instanceID)
+				destType, destID, instanceID, dataID)
 		case common.Deleted:
 			return handleAckObjectDeleted(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID,
 				destType, destID, instanceID)
 		case common.Consumed:
-			return handleAckConsumed(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID)
+			return handleAckConsumed(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID, dataID)
 		case common.Received:
-			return handleAckObjectReceived(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID)
+			return handleAckObjectReceived(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID, dataID)
 		}
 		return nil
 	} else if response.StatusCode == http.StatusConflict {
@@ -312,9 +312,9 @@ func (communication *HTTP) SendNotificationMessage(notificationTopic string, des
 		case common.Deleted:
 			return handleAckObjectDeleted(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID)
 		case common.Consumed:
-			return handleAckConsumed(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID)
+			return handleAckConsumed(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID, dataID)
 		case common.Received:
-			return handleAckObjectReceived(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID)
+			return handleAckObjectReceived(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID, dataID)
 		}
 		return nil
 	}
@@ -457,11 +457,15 @@ func (communication *HTTP) GetData(metaData common.MetaData, offset int64) commo
 		return nil
 	}
 
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("In http.GetData %s %s", metaData.ObjectType, metaData.ObjectID)
+	}
+
 	if err := updateGetDataNotification(metaData, metaData.OriginType, metaData.OriginID, offset); err != nil {
 		return err
 	}
 
-	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, common.Data)
+	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, metaData.DataID, common.Data)
 	request, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return &Error{"Failed to create data request. Error: " + err.Error()}
@@ -589,7 +593,7 @@ func (communication *HTTP) Poll() bool {
 			}
 		case common.Consumed:
 			err = handleObjectConsumed(message.MetaData.DestOrgID, message.MetaData.ObjectType,
-				message.MetaData.ObjectID, message.MetaData.DestType, message.MetaData.DestID, message.MetaData.InstanceID)
+				message.MetaData.ObjectID, message.MetaData.DestType, message.MetaData.DestID, message.MetaData.InstanceID, message.MetaData.DataID)
 			if err != nil && !isIgnoredByHandler(err) && log.IsLogging(logger.ERROR) {
 				log.Error("Failed to handle object consumed. Error: %s\n", err)
 			}
@@ -603,7 +607,7 @@ func (communication *HTTP) Poll() bool {
 			}
 		case common.Received:
 			err = handleObjectReceived(message.MetaData.DestOrgID, message.MetaData.ObjectType,
-				message.MetaData.ObjectID, message.MetaData.DestType, message.MetaData.DestID, message.MetaData.InstanceID)
+				message.MetaData.ObjectID, message.MetaData.DestType, message.MetaData.DestID, message.MetaData.InstanceID, message.MetaData.DataID)
 			if err != nil && !isIgnoredByHandler(err) && log.IsLogging(logger.ERROR) {
 				log.Error("Failed to handle object received. Error: %s\n", err)
 			}
@@ -625,7 +629,7 @@ func (communication *HTTP) extractMetaData(request *http.Request) (*common.MetaD
 }
 
 func (communication *HTTP) extract(writer http.ResponseWriter, request *http.Request) (action string,
-	orgID string, objectType string, objectID string, destType string, destID string, instanceID int64, ok bool) {
+	orgID string, objectType string, objectID string, destType string, destID string, instanceID int64, dataID int64, ok bool) {
 	var err error
 	ok = false
 
@@ -646,7 +650,7 @@ func (communication *HTTP) extract(writer http.ResponseWriter, request *http.Req
 	if len(parts) == 2 {
 		orgID = parts[0]
 	} else {
-		if len(parts) != 5 {
+		if len(parts) != 5 && len(parts) != 6 {
 			writer.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -657,6 +661,13 @@ func (communication *HTTP) extract(writer http.ResponseWriter, request *http.Req
 		if err != nil {
 			writer.WriteHeader(http.StatusBadRequest)
 			return
+		}
+		if len(parts) == 6 {
+			dataID, err = strconv.ParseInt(parts[4], 10, 0)
+			if err != nil {
+				writer.WriteHeader(http.StatusBadRequest)
+				return
+			}
 		}
 	}
 	action = parts[index]
@@ -671,11 +682,13 @@ func (communication *HTTP) handleObjects(writer http.ResponseWriter, request *ht
 	}
 
 	if request.Method == http.MethodPut {
-		action, orgID, objectType, objectID, destType, destID, instanceID, ok := communication.extract(writer, request)
+		action, orgID, objectType, objectID, destType, destID, instanceID, dataID, ok := communication.extract(writer, request)
 		if !ok {
 			if log.IsLogging(logger.ERROR) {
 				log.Error("Error in HTTP handleObjects: failed to parse URL: %s", request.URL.Path)
 			}
+
+			writer.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		if trace.IsLogging(logger.DEBUG) {
@@ -703,18 +716,18 @@ func (communication *HTTP) handleObjects(writer http.ResponseWriter, request *ht
 				err = handleUpdate(*metaData, 1)
 			}
 		case common.Updated:
-			err = handleObjectUpdated(orgID, objectType, objectID, destType, destID, instanceID)
+			err = handleObjectUpdated(orgID, objectType, objectID, destType, destID, instanceID, dataID)
 		case common.Consumed:
-			err = handleObjectConsumed(orgID, objectType, objectID, destType, destID, instanceID)
+			err = handleObjectConsumed(orgID, objectType, objectID, destType, destID, instanceID, dataID)
 		case common.AckConsumed:
-			err = handleAckConsumed(orgID, objectType, objectID, destType, destID, instanceID)
+			err = handleAckConsumed(orgID, objectType, objectID, destType, destID, instanceID, dataID)
 		case common.Received:
-			err = handleObjectReceived(orgID, objectType, objectID, destType, destID, instanceID)
+			err = handleObjectReceived(orgID, objectType, objectID, destType, destID, instanceID, dataID)
 		case common.Feedback:
 
 			payload := feedbackMessage{}
 			if err = json.NewDecoder(request.Body).Decode(&payload); err == nil {
-				err = handleFeedback(orgID, objectType, objectID, destType, destID, instanceID, payload.Code, payload.RetryInterval, payload.Reason)
+				err = handleFeedback(orgID, objectType, objectID, destType, destID, instanceID, dataID, payload.Code, payload.RetryInterval, payload.Reason)
 			}
 
 		case common.Delete:
@@ -725,7 +738,7 @@ func (communication *HTTP) handleObjects(writer http.ResponseWriter, request *ht
 				err = handleDelete(*metaData)
 			}
 		case common.AckDelete:
-			err = handleAckDelete(orgID, objectType, objectID, destType, destID, instanceID)
+			err = handleAckDelete(orgID, objectType, objectID, destType, destID, instanceID, dataID)
 		case common.Deleted:
 			metaData, extractErr := communication.extractMetaData(request)
 			if extractErr != nil {
@@ -757,7 +770,7 @@ func (communication *HTTP) handleObjects(writer http.ResponseWriter, request *ht
 			communication.handleGetUpdates(writer, request)
 			return
 		}
-		action, orgID, objectType, objectID, destType, destID, instanceID, ok := communication.extract(writer, request)
+		action, orgID, objectType, objectID, destType, destID, instanceID, dataID, ok := communication.extract(writer, request)
 		if !ok {
 			return
 		}
@@ -765,7 +778,7 @@ func (communication *HTTP) handleObjects(writer http.ResponseWriter, request *ht
 			writer.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		communication.handleGetData(orgID, objectType, objectID, destType, destID, instanceID, writer, request)
+		communication.handleGetData(orgID, objectType, objectID, destType, destID, instanceID, dataID, writer, request)
 	} else {
 		writer.WriteHeader(http.StatusMethodNotAllowed)
 	}
@@ -808,7 +821,7 @@ func (communication *HTTP) handlePutData(orgID string, objectType string, object
 }
 
 func (communication *HTTP) handleGetData(orgID string, objectType string, objectID string,
-	destType string, destID string, instanceID int64, writer http.ResponseWriter, request *http.Request) {
+	destType string, destID string, instanceID int64, dataID int64, writer http.ResponseWriter, request *http.Request) {
 	lockIndex := common.HashStrings(orgID, objectType, objectID)
 	common.ObjectLocks.Lock(lockIndex)
 	defer common.ObjectLocks.Unlock(lockIndex)
@@ -828,7 +841,7 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 				SendErrorResponse(writer, err, "", 0)
 			}
 			notification := common.Notification{ObjectID: objectID, ObjectType: objectType,
-				DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.Data, InstanceID: instanceID}
+				DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.Data, InstanceID: instanceID, DataID: dataID}
 			Store.UpdateNotificationRecord(notification)
 		}
 	}
@@ -839,7 +852,7 @@ func (communication *HTTP) pushData(metaData *common.MetaData) common.SyncServic
 	common.ObjectLocks.RLock(lockIndex)
 	defer common.ObjectLocks.RUnlock(lockIndex)
 
-	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, common.Data)
+	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, metaData.DataID, common.Data)
 
 	var dataReader io.Reader
 	var err error
@@ -924,6 +937,16 @@ func (communication *HTTP) DeleteOrganization(orgID string) common.SyncServiceEr
 	return nil
 }
 
+// LockDataChunks locks one of the data chunks locks
+func (communication *HTTP) LockDataChunks(index uint32, metadata *common.MetaData) {
+	// Noop on HTTP
+}
+
+// UnlockDataChunks unlocks one of the data chunks locks
+func (communication *HTTP) UnlockDataChunks(index uint32, metadata *common.MetaData) {
+	// Noop on HTTP
+}
+
 // SendFeedbackMessage sends a feedback message from the ESS to the CSS or from the CSS to the ESS
 func (communication *HTTP) SendFeedbackMessage(code int, retryInterval int32, reason string, metaData *common.MetaData, sendToOrigin bool) common.SyncServiceError {
 	if common.Configuration.NodeType != common.ESS {
@@ -931,7 +954,7 @@ func (communication *HTTP) SendFeedbackMessage(code int, retryInterval int32, re
 		return nil
 	}
 
-	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, common.Feedback)
+	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, metaData.DataID, common.Feedback)
 
 	var request *http.Request
 
@@ -967,10 +990,10 @@ func (communication *HTTP) SendErrorMessage(err common.SyncServiceError, metaDat
 	return communication.SendFeedbackMessage(code, retryInterval, reason, metaData, sendToOrigin)
 }
 
-func buildObjectURL(orgID string, objectType string, objectID string, instanceID int64, topic string) string {
-	// common.HTTPCSSURL + objectRequestURL + orgID + "/" + objectType + "/" + objectID + "/" + instanceID + "/" + topic
+func buildObjectURL(orgID string, objectType string, objectID string, instanceID int64, dataID int64, topic string) string {
+	// common.HTTPCSSURL + objectRequestURL + orgID + "/" + objectType + "/" + objectID + "/" + instanceID + "/" + dataID + "/" + topic
 	var strBuilder strings.Builder
-	strBuilder.Grow(len(common.HTTPCSSURL) + len(objectRequestURL) + len(orgID) + len(objectType) + len(objectID) + len(topic) + 25)
+	strBuilder.Grow(len(common.HTTPCSSURL) + len(objectRequestURL) + len(orgID) + len(objectType) + len(objectID) + len(topic) + 45)
 	strBuilder.WriteString(common.HTTPCSSURL)
 	strBuilder.WriteString(objectRequestURL)
 	strBuilder.WriteString(orgID)
@@ -980,6 +1003,8 @@ func buildObjectURL(orgID string, objectType string, objectID string, instanceID
 	strBuilder.WriteString(objectID)
 	strBuilder.WriteByte('/')
 	strBuilder.WriteString(strconv.FormatInt(instanceID, 10))
+	strBuilder.WriteByte('/')
+	strBuilder.WriteString(strconv.FormatInt(dataID, 10))
 	strBuilder.WriteByte('/')
 	strBuilder.WriteString(topic)
 	return strBuilder.String()

@@ -242,19 +242,19 @@ func processMessage(messageInfo *messageHandlerInfo) {
 			}
 		}
 	case common.Updated:
-		err = handleObjectUpdated(meta.DestOrgID, meta.ObjectType, meta.ObjectID, meta.DestType, meta.DestID, meta.InstanceID)
+		err = handleObjectUpdated(meta.DestOrgID, meta.ObjectType, meta.ObjectID, meta.DestType, meta.DestID, meta.InstanceID, meta.DataID)
 	case common.Consumed:
-		err = handleObjectConsumed(meta.DestOrgID, meta.ObjectType, meta.ObjectID, meta.DestType, meta.DestID, meta.InstanceID)
+		err = handleObjectConsumed(meta.DestOrgID, meta.ObjectType, meta.ObjectID, meta.DestType, meta.DestID, meta.InstanceID, meta.DataID)
 	case common.AckConsumed:
-		err = handleAckConsumed(meta.DestOrgID, meta.ObjectType, meta.ObjectID, meta.OriginType, meta.OriginID, meta.InstanceID)
+		err = handleAckConsumed(meta.DestOrgID, meta.ObjectType, meta.ObjectID, meta.OriginType, meta.OriginID, meta.InstanceID, meta.DataID)
 	case common.Received:
-		err = handleObjectReceived(meta.DestOrgID, meta.ObjectType, meta.ObjectID, meta.DestType, meta.DestID, meta.InstanceID)
+		err = handleObjectReceived(meta.DestOrgID, meta.ObjectType, meta.ObjectID, meta.DestType, meta.DestID, meta.InstanceID, meta.DataID)
 	case common.AckReceived:
-		err = handleAckObjectReceived(meta.DestOrgID, meta.ObjectType, meta.ObjectID, meta.OriginType, meta.OriginID, meta.InstanceID)
+		err = handleAckObjectReceived(meta.DestOrgID, meta.ObjectType, meta.ObjectID, meta.OriginType, meta.OriginID, meta.InstanceID, meta.DataID)
 	case common.Delete:
 		err = handleDelete(messagePayload.Meta)
 	case common.AckDelete:
-		err = handleAckDelete(meta.DestOrgID, meta.ObjectType, meta.ObjectID, meta.DestType, meta.DestID, meta.InstanceID)
+		err = handleAckDelete(meta.DestOrgID, meta.ObjectType, meta.ObjectID, meta.DestType, meta.DestID, meta.InstanceID, meta.DataID)
 	case common.Deleted:
 		err = handleObjectDeleted(messagePayload.Meta)
 	case common.AckDeleted:
@@ -280,7 +280,7 @@ func processMessage(messageInfo *messageHandlerInfo) {
 			destType = meta.OriginType
 			destID = meta.OriginID
 		}
-		err = handleFeedback(meta.DestOrgID, meta.ObjectType, meta.ObjectID, destType, destID, meta.InstanceID, messagePayload.FeedbackCode,
+		err = handleFeedback(meta.DestOrgID, meta.ObjectType, meta.ObjectID, destType, destID, meta.InstanceID, meta.DataID, messagePayload.FeedbackCode,
 			messagePayload.RetryInterval, messagePayload.Reason)
 	default:
 		err = &Error{"Received message that doesn't match any subscription."}
@@ -1004,7 +1004,7 @@ func (communication *MQTT) publishCSSOutsideWIoTP(orgID string, destType string,
 }
 
 // SendNotificationMessage sends a notification message from the CSS to the ESS or from the ESS to the CSS
-func (communication *MQTT) SendNotificationMessage(notificationTopic string, destType string, destID string, instanceID int64,
+func (communication *MQTT) SendNotificationMessage(notificationTopic string, destType string, destID string, instanceID int64, dataID int64,
 	metaData *common.MetaData) common.SyncServiceError {
 	messagePayload := &messagePayload{Version: common.Version, Command: notificationTopic, Meta: *metaData}
 	messageJSON, err := json.Marshal(messagePayload)
@@ -1456,6 +1456,16 @@ func (communication *MQTT) checkForUpdates() {
 			}
 		}
 	}()
+}
+
+// LockDataChunks locks one of the data chunks locks
+func (communication *MQTT) LockDataChunks(index uint32, metadata *common.MetaData) {
+	dataChunksLocks.Lock(index)
+}
+
+// UnlockDataChunks unlocks one of the data chunks locks
+func (communication *MQTT) UnlockDataChunks(index uint32, metadata *common.MetaData) {
+	dataChunksLocks.Unlock(index)
 }
 
 // HandleRegAck handles a registration acknowledgement message from the CSS

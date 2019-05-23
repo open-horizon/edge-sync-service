@@ -46,6 +46,8 @@ var (
 	id             = flag.String("id", "", "The ID of the object/destination whose information will be shown")
 	objectType     = flag.String("type", "", "The type of the object whose information will be shown")
 	orgID          = flag.String("org", "", "Specify the organization ID to work with")
+	remove         = flag.Bool("remove", false, "Indicate that the specified user is to be removed from the ACL")
+	security       = flag.Bool("security", false, "Add/remove a user to/from an ACL or display all of the ACLs")
 	serverAddress  = flag.String("s", "localhost:8080", "Specify the address and port of the Cloud Sync Service")
 	serverProtocol = flag.String("p", "https", "Specify the protocol of the Cloud Sync Service")
 	appKey         = flag.String("key", "", "Specify the app key to be used when connecting to the Sync Service")
@@ -59,11 +61,15 @@ func main() {
 		fmt.Fprintln(os.Stderr,
 			"Usage: edge-sync-service-mgmt -h")
 		fmt.Fprintln(os.Stderr,
-			"                              -genCert -c <config file name>]")
+			"                      -genCert -c <config file name>]")
 		fmt.Fprintln(os.Stderr,
-			"                              [-p <protocol> -s] [host][:port] [-cert <CA certificate>] -org orgID -destinations")
+			"                      [-p <protocol> -s] [host][:port] [-cert <CA certificate>] -org orgID -show-destinations")
 		fmt.Fprintln(os.Stderr,
-			"                              [-p <protocol> -s] [host][:port] [-cert <CA certificate>] -org orgID -type <object type> -id <object ID>")
+			"                      [-p <protocol> -s] [host][:port] [-cert <CA certificate>] -org orgID -security [-remove] [-type <object type> -id <user ID>]")
+		fmt.Fprintln(os.Stderr,
+			"                      [-p <protocol> -s] [host][:port] [-cert <CA certificate>] -org orgID -security [-remove] [-dt <dest type> -id <user ID>]")
+		fmt.Fprintln(os.Stderr,
+			"                      [-p <protocol> -s] [host][:port] [-cert <CA certificate>] -org orgID -type <object type> -id <object ID>")
 		flag.PrintDefaults()
 		os.Exit(0)
 	}
@@ -78,6 +84,8 @@ func main() {
 
 	if *destinations {
 		showDestinations()
+	} else if *security {
+		workWithSecurity()
 	} else if len(*objectType) != 0 && len(*id) != 0 {
 		showObjectInfo()
 	} else if len(*destType) != 0 && len(*id) != 0 {
@@ -368,6 +376,87 @@ func showObjectInfo() {
 		}
 	} else {
 		fmt.Printf("No destinations for the object %s:%s\n", *objectType, *id)
+	}
+}
+
+func workWithSecurity() {
+	if len(*destType) == 0 && len(*objectType) == 0 {
+		syncClient, message := createSyncClient()
+		if message != "" {
+			fmt.Println(message)
+			os.Exit(1)
+		}
+
+		printACLsHelper("destination", syncClient.RetrieveAllDestinationACLs, syncClient.RetrieveDestinationACL)
+		fmt.Println()
+		printACLsHelper("object", syncClient.RetrieveAllObjectACLs, syncClient.RetrieveObjectACL)
+	} else {
+		if len(*id) == 0 {
+			fmt.Printf("To work with ACLs a username must be specified using the -id command line parameter\n")
+			os.Exit(1)
+		}
+
+		syncClient, message := createSyncClient()
+		if message != "" {
+			fmt.Println(message)
+			os.Exit(1)
+		}
+
+		action := "remove"
+		aclType := "destination"
+		var err error
+		if *remove {
+			if len(*destType) != 0 {
+				err = syncClient.RemoveUsersFromDestinationACL(*destType, []string{*id})
+			} else {
+				err = syncClient.RemoveUsersFromObjectACL(*objectType, []string{*id})
+				aclType = "object"
+			}
+		} else {
+			action = "add"
+			if len(*destType) != 0 {
+				err = syncClient.AddUsersToDestinationACL(*destType, []string{*id})
+			} else {
+				err = syncClient.AddUsersToObjectACL(*objectType, []string{*id})
+				aclType = "object"
+			}
+		}
+		if err != nil {
+			fmt.Printf("Failed to %s %s from the %s ACL %s. Error: %s\n", action, *id, aclType, *destType, err)
+		}
+	}
+}
+
+func printACLsHelper(aclType string, allACLsGetter func() ([]string, error), aclGetter func(string) ([]string, error)) {
+	acls, err := allACLsGetter()
+
+	if err != nil {
+		fmt.Printf("Failed to retrieve all of the %s ACLs. Error: %s\n", aclType, err)
+		return
+	}
+	if len(acls) == 0 {
+		fmt.Printf("There are no %s ACLs\n", aclType)
+		return
+	}
+	fmt.Printf("%s ACLs:\n", aclType)
+	for _, acl := range acls {
+		usernames, err := aclGetter(acl)
+		if err != nil {
+			fmt.Printf("Failed to retrieve the %s ACL %s. Error: %s\n", aclType, acl, err)
+			return
+		}
+		fmt.Printf("    %s:", acl)
+		for index, user := range usernames {
+			if 0 == index%8 {
+				if index != 0 {
+					fmt.Printf(",")
+				}
+				fmt.Printf("\n        %s", user)
+			} else {
+				fmt.Printf(", %s", user)
+			}
+		}
+		fmt.Println()
 	}
 }
 

@@ -67,13 +67,13 @@ func (communication *Wrapper) selectCommunicator(protocol string, orgID string, 
 }
 
 // SendNotificationMessage sends a notification message from the CSS to the ESS or from the ESS to the CSS
-func (communication *Wrapper) SendNotificationMessage(notificationTopic string, destType string, destID string, instanceID int64,
+func (communication *Wrapper) SendNotificationMessage(notificationTopic string, destType string, destID string, instanceID int64, dataID int64,
 	metaData *common.MetaData) common.SyncServiceError {
 	comm, err := communication.selectCommunicator("", metaData.DestOrgID, destType, destID)
 	if err != nil {
 		return err
 	}
-	return comm.SendNotificationMessage(notificationTopic, destType, destID, instanceID, metaData)
+	return comm.SendNotificationMessage(notificationTopic, destType, destID, instanceID, dataID, metaData)
 }
 
 // SendFeedbackMessage sends a feedback message from the ESS to the CSS or from the CSS to the ESS
@@ -199,4 +199,40 @@ func (communication *Wrapper) DeleteOrganization(orgID string) common.SyncServic
 		return nil
 	}
 	return communication.mqttComm.DeleteOrganization(orgID)
+}
+
+// LockDataChunks locks one of the data chunks locks
+func (communication *Wrapper) LockDataChunks(index uint32, metadata *common.MetaData) {
+	var comm Communicator
+	var err error
+
+	if metadata == nil {
+		comm = communication.mqttComm
+	} else {
+		comm, err = communication.selectCommunicator("", metadata.DestOrgID, metadata.OriginType, metadata.OriginID)
+		if err != nil {
+			comm = communication.mqttComm
+		}
+	}
+	if comm != nil {
+		comm.LockDataChunks(index, metadata)
+	}
+}
+
+// UnlockDataChunks unlocks one of the data chunks locks
+func (communication *Wrapper) UnlockDataChunks(index uint32, metadata *common.MetaData) {
+	var comm Communicator
+	var err error
+
+	if metadata == nil {
+		comm = communication.mqttComm
+	} else {
+		comm, err = communication.selectCommunicator("", metadata.DestOrgID, metadata.OriginType, metadata.OriginID)
+		if err != nil {
+			comm = communication.mqttComm
+		}
+	}
+	if comm != nil {
+		comm.UnlockDataChunks(index, metadata)
+	}
 }

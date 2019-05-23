@@ -13,7 +13,8 @@ type TestAuthenticate struct {
 
 // Authenticate  authenticates a particular HTTP request and indicates
 // whether it is an edge node, org admin, or plain user. Also returned is the
-// user's org and identitity. An edge node's identity is destType/destID
+// user's org and identitity. An edge node's identity is destType/destID. A
+// service's identity is serviceOrg/arch/version/serviceName.
 //
 // Note: This Authenticate implementation is for running the tests. App secrets
 //      are ignored. App keys for APIs are of the form, userID@orgID. It supports
@@ -21,6 +22,8 @@ type TestAuthenticate struct {
 //          testerUser - A regular user
 //          testerAdmin - An admin of the specified orgID
 //          testSyncAdmin - An admin of the Sync Service
+//          testerService1 - A service
+//          testerService2 - A service
 //      Edge node app keys are of the form orgID/destType/destID
 func (auth *TestAuthenticate) Authenticate(request *http.Request) (int, string, string) {
 	appKey, _, ok := request.BasicAuth()
@@ -47,6 +50,13 @@ func (auth *TestAuthenticate) Authenticate(request *http.Request) (int, string, 
 		code = AuthAdmin
 	} else if user == "testerSyncAdmin" {
 		code = AuthSyncAdmin
+	} else if user == "testerService1" {
+		code = AuthService
+		// serviceOrg/arch/version/serviceName
+		user = "plover/amd64/0.0.1/testerService1"
+	} else if user == "testerService2" {
+		code = AuthService
+		user = "plover/amd64/0.0.1/testerService2"
 	} else {
 		code = AuthFailed
 	}

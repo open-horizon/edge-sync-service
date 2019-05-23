@@ -10,6 +10,10 @@ func TestMongoStorageObjects(t *testing.T) {
 	testStorageObjects(common.Mongo, t)
 }
 
+func TestMongoStorageObjectsWithPolicy(t *testing.T) {
+	testStorageObjectsWithPolicy(common.Mongo, t)
+}
+
 func TestMongoStorageObjectActivation(t *testing.T) {
 	testStorageObjectActivation(common.Mongo, t)
 }

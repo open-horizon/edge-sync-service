@@ -45,7 +45,7 @@ var notificationChunks map[string]notificationChunksInfo
 
 func init() {
 	notificationChunks = make(map[string]notificationChunksInfo)
-	dataChunksLocks = *common.NewLocks()
+	dataChunksLocks = *common.NewLocks("notification")
 }
 
 // CSS: handle ESS registration
@@ -246,6 +246,7 @@ func handleUpdate(metaData common.MetaData, maxInflightChunks int) common.SyncSe
 	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 	common.ObjectLocks.Lock(lockIndex)
 
+	notificationDataID := int64(-1)
 	if notification, err := Store.RetrieveNotificationRecord(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID,
 		metaData.OriginType, metaData.OriginID); err == nil && notification != nil {
 		if notification.InstanceID >= metaData.InstanceID {
@@ -257,7 +258,7 @@ func handleUpdate(metaData common.MetaData, maxInflightChunks int) common.SyncSe
 			common.ObjectLocks.Unlock(lockIndex)
 
 			// Send ack to prevent resends of this notification
-			Comm.SendNotificationMessage(common.Updated, metaData.OriginType, metaData.OriginID, metaData.InstanceID,
+			Comm.SendNotificationMessage(common.Updated, metaData.OriginType, metaData.OriginID, metaData.InstanceID, metaData.DataID,
 				&metaData)
 
 			return &ignoredByHandler{}
@@ -265,15 +266,18 @@ func handleUpdate(metaData common.MetaData, maxInflightChunks int) common.SyncSe
 		Store.DeleteNotificationRecords(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID,
 			metaData.OriginType, metaData.OriginID)
 		removeNotificationChunksInfo(metaData, metaData.OriginType, metaData.OriginID)
+		notificationDataID = notification.DataID
 	}
 
 	status := common.PartiallyReceived
-	if metaData.Link != "" || metaData.NoData || metaData.MetaOnly {
+	// For new objects notification.DataID will be -1, so we will send getdata for MetaOnly.
+	// metaData.DataID will be 0 for the old code versions, we don't want to ask for data in this case.
+	if metaData.Link != "" || metaData.NoData || (metaData.MetaOnly && (metaData.DataID == notificationDataID || metaData.DataID == 0)) {
 		status = common.CompletelyReceived
 	}
 
 	// Store the object
-	if err := Store.StoreObject(metaData, nil, status); err != nil {
+	if _, err := Store.StoreObject(metaData, nil, status); err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
 		return &notificationHandlerError{fmt.Sprintf("Error in handleUpdate: failed to store object. Error: %s\n", err)}
 	}
@@ -290,13 +294,13 @@ func handleUpdate(metaData common.MetaData, maxInflightChunks int) common.SyncSe
 	common.ObjectLocks.Unlock(lockIndex)
 
 	// Call Notification module to send notification to object’s sender
-	if err := Comm.SendNotificationMessage(common.Updated, metaData.OriginType, metaData.OriginID, metaData.InstanceID,
+	if err := Comm.SendNotificationMessage(common.Updated, metaData.OriginType, metaData.OriginID, metaData.InstanceID, metaData.DataID,
 		&metaData); err != nil {
 		return &notificationHandlerError{fmt.Sprintf("Error in handleUpdate: failed to send notification. Error: %s\n", err)}
 	}
 
-	dataChunksLocks.Lock(lockIndex)
-	defer dataChunksLocks.Unlock(lockIndex)
+	Comm.LockDataChunks(lockIndex, &metaData)
+	defer Comm.UnlockDataChunks(lockIndex, &metaData)
 	if metaData.ChunkSize <= 0 || metaData.ObjectSize <= 0 {
 		if err := Comm.GetData(metaData, 0); err != nil {
 			return err
@@ -316,7 +320,7 @@ func handleUpdate(metaData common.MetaData, maxInflightChunks int) common.SyncSe
 
 // Handle a notification that an object's update was received by the other side
 func handleObjectUpdated(orgID string, objectType string, objectID string, destType string, destID string,
-	instanceID int64) common.SyncServiceError {
+	instanceID int64, dataID int64) common.SyncServiceError {
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Handling object updated of %s %s\n", objectType, objectID)
 	}
@@ -339,14 +343,14 @@ func handleObjectUpdated(orgID string, objectType string, objectID string, destT
 
 	Store.UpdateNotificationRecord(
 		common.Notification{ObjectID: objectID, ObjectType: objectType,
-			DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.Updated, InstanceID: instanceID})
+			DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.Updated, InstanceID: instanceID, DataID: dataID})
 
 	return nil
 }
 
 // Handle a notification that an object's update was consumed by the other side
 func handleObjectConsumed(orgID string, objectType string, objectID string, destType string, destID string,
-	instanceID int64) common.SyncServiceError {
+	instanceID int64, dataID int64) common.SyncServiceError {
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Handling object consumed of %s %s\n", objectType, objectID)
 	}
@@ -379,9 +383,9 @@ func handleObjectConsumed(orgID string, objectType string, objectID string, dest
 		}
 		common.ObjectLocks.Unlock(lockIndex)
 		// Send ack to prevent future resends of this notification
-		Comm.SendNotificationMessage(common.AckConsumed, destType, destID, instanceID,
+		Comm.SendNotificationMessage(common.AckConsumed, destType, destID, instanceID, dataID,
 			&common.MetaData{ObjectType: objectType, ObjectID: objectID, DestOrgID: orgID, DestType: destType, DestID: destID,
-				OriginType: common.Configuration.DestinationType, OriginID: common.Configuration.DestinationID, InstanceID: instanceID})
+				OriginType: common.Configuration.DestinationType, OriginID: common.Configuration.DestinationID, InstanceID: instanceID, DataID: dataID})
 		return &ignoredByHandler{}
 	}
 
@@ -429,7 +433,7 @@ func handleObjectConsumed(orgID string, objectType string, objectID string, dest
 		removeNotificationChunksInfo(*metaData, metaData.OriginType, metaData.OriginID)
 	} else {
 		// Mark that the object was consumed by this destination
-		err = Store.UpdateObjectDeliveryStatus(common.Consumed, "", orgID, objectType, objectID, destType, destID)
+		_, err = Store.UpdateObjectDeliveryStatus(common.Consumed, "", orgID, objectType, objectID, destType, destID)
 		if err != nil && log.IsLogging(logger.ERROR) {
 			log.Error("Error in handleObjectConsumed: failed to mark object as delivered to the destination. Error: %s\n", err)
 		}
@@ -437,7 +441,7 @@ func handleObjectConsumed(orgID string, objectType string, objectID string, dest
 		if err := Store.UpdateNotificationRecord(
 			common.Notification{ObjectID: objectID, ObjectType: objectType,
 				DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.ConsumedByDestination,
-				InstanceID: instanceID},
+				InstanceID: instanceID, DataID: dataID},
 		); err != nil {
 			common.ObjectLocks.Unlock(lockIndex)
 			return &notificationHandlerError{fmt.Sprintf("Error in handleObjectConsumed: failed to update notification record. Error: %s\n", err)}
@@ -447,7 +451,7 @@ func handleObjectConsumed(orgID string, objectType string, objectID string, dest
 	common.ObjectLocks.Unlock(lockIndex)
 
 	// Send ack
-	if err := Comm.SendNotificationMessage(common.AckConsumed, destType, destID, instanceID, metaData); err != nil {
+	if err := Comm.SendNotificationMessage(common.AckConsumed, destType, destID, instanceID, dataID, metaData); err != nil {
 		return &notificationHandlerError{fmt.Sprintf("Error in handleObjectConsumed: failed to send notification. Error: %s\n",
 			err)}
 	}
@@ -456,7 +460,7 @@ func handleObjectConsumed(orgID string, objectType string, objectID string, dest
 }
 
 // Handle a notification that an object's was marked as consumed by the other side
-func handleAckConsumed(orgID string, objectType string, objectID string, destType string, destID string, instanceID int64) common.SyncServiceError {
+func handleAckConsumed(orgID string, objectType string, objectID string, destType string, destID string, instanceID int64, dataID int64) common.SyncServiceError {
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Handling ack consumed of %s %s\n", objectType, objectID)
 	}
@@ -480,7 +484,7 @@ func handleAckConsumed(orgID string, objectType string, objectID string, destTyp
 	// Mark the notification as ackconsumed
 	if err := Store.UpdateNotificationRecord(
 		common.Notification{ObjectID: objectID, ObjectType: objectType,
-			DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.AckConsumed, InstanceID: instanceID},
+			DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.AckConsumed, InstanceID: instanceID, DataID: dataID},
 	); err != nil {
 		return &notificationHandlerError{fmt.Sprintf("Error in handleAckConsumed: failed to update notification record. Error: %s\n", err)}
 	}
@@ -503,7 +507,7 @@ func handleAckConsumed(orgID string, objectType string, objectID string, destTyp
 
 // Handle a notification that an object's update was received by the other side
 func handleObjectReceived(orgID string, objectType string, objectID string, destType string, destID string,
-	instanceID int64) common.SyncServiceError {
+	instanceID int64, dataID int64) common.SyncServiceError {
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Handling object received of %s %s\n", objectType, objectID)
 	}
@@ -531,21 +535,21 @@ func handleObjectReceived(orgID string, objectType string, objectID string, dest
 		}
 		common.ObjectLocks.Unlock(lockIndex)
 		// Send ack to prevent future resends of this notification
-		Comm.SendNotificationMessage(common.AckReceived, destType, destID, instanceID,
+		Comm.SendNotificationMessage(common.AckReceived, destType, destID, instanceID, dataID,
 			&common.MetaData{ObjectType: objectType, ObjectID: objectID, DestOrgID: orgID, DestType: destType, DestID: destID,
-				OriginType: common.Configuration.DestinationType, OriginID: common.Configuration.DestinationID, InstanceID: instanceID})
+				OriginType: common.Configuration.DestinationType, OriginID: common.Configuration.DestinationID, InstanceID: instanceID, DataID: dataID})
 		return &ignoredByHandler{}
 	}
 
 	// Mark that the object was delivered to this destination
-	err = Store.UpdateObjectDeliveryStatus(common.Delivered, "", orgID, objectType, objectID, destType, destID)
+	_, err = Store.UpdateObjectDeliveryStatus(common.Delivered, "", orgID, objectType, objectID, destType, destID)
 	if err != nil && log.IsLogging(logger.ERROR) {
 		log.Error("Error in handleObjectReceived: failed to mark object as delivered to the destination. Error: %s\n", err)
 	}
 	// Mark the corresponding update notification as "received by destination"
 	if err := Store.UpdateNotificationRecord(
 		common.Notification{ObjectID: objectID, ObjectType: objectType,
-			DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.ReceivedByDestination, InstanceID: instanceID},
+			DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.ReceivedByDestination, InstanceID: instanceID, DataID: dataID},
 	); err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
 		return &notificationHandlerError{fmt.Sprintf("Error in handleObjectReceived: failed to update notification record. Error: %s\n", err)}
@@ -554,7 +558,7 @@ func handleObjectReceived(orgID string, objectType string, objectID string, dest
 	common.ObjectLocks.Unlock(lockIndex)
 
 	// Send ack
-	if err := Comm.SendNotificationMessage(common.AckReceived, destType, destID, instanceID, metaData); err != nil {
+	if err := Comm.SendNotificationMessage(common.AckReceived, destType, destID, instanceID, dataID, metaData); err != nil {
 		return &notificationHandlerError{fmt.Sprintf("Error in handleObjectReceived: failed to send notification. Error: %s\n",
 			err)}
 	}
@@ -563,7 +567,7 @@ func handleObjectReceived(orgID string, objectType string, objectID string, dest
 }
 
 // Handle a notification that an object's was marked as received by the other side
-func handleAckObjectReceived(orgID string, objectType string, objectID string, destType string, destID string, instanceID int64) common.SyncServiceError {
+func handleAckObjectReceived(orgID string, objectType string, objectID string, destType string, destID string, instanceID int64, dataID int64) common.SyncServiceError {
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Handling ack received of %s %s\n", objectType, objectID)
 	}
@@ -587,7 +591,7 @@ func handleAckObjectReceived(orgID string, objectType string, objectID string, d
 	// Mark the notification as ackreceived
 	if err := Store.UpdateNotificationRecord(
 		common.Notification{ObjectID: objectID, ObjectType: objectType,
-			DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.AckReceived, InstanceID: instanceID},
+			DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.AckReceived, InstanceID: instanceID, DataID: dataID},
 	); err != nil {
 		return &notificationHandlerError{fmt.Sprintf("Error in handleAckObjectReceived: failed to update notification record. Error: %s\n", err)}
 	}
@@ -609,7 +613,7 @@ func handleDelete(metaData common.MetaData) common.SyncServiceError {
 		if common.Configuration.NodeType == common.ESS && storage.IsNotFound(err) {
 			// Failed to update, object doesn't exist, on ESS recreate it (without data)
 			metaData.Deleted = true
-			if err := Store.StoreObject(metaData, nil, common.ObjDeleted); err != nil {
+			if _, err := Store.StoreObject(metaData, nil, common.ObjDeleted); err != nil {
 				common.ObjectLocks.Unlock(lockIndex)
 				return &notificationHandlerError{fmt.Sprintf("Error in handleDelete: failed to recreate deleted object. Error: %s\n", err)}
 			}
@@ -644,13 +648,13 @@ func handleDelete(metaData common.MetaData) common.SyncServiceError {
 
 	if sendDeleted {
 		if err := Comm.SendNotificationMessage(common.Deleted, metaData.OriginType, metaData.OriginID,
-			metaData.InstanceID, &metaData); err != nil {
+			metaData.InstanceID, metaData.DataID, &metaData); err != nil {
 			return &notificationHandlerError{fmt.Sprintf("Error in handleDelete: failed to send notification. Error: %s\n", err)}
 		}
 	}
 
 	// Send ack
-	if err := Comm.SendNotificationMessage(common.AckDelete, metaData.OriginType, metaData.OriginID, metaData.InstanceID,
+	if err := Comm.SendNotificationMessage(common.AckDelete, metaData.OriginType, metaData.OriginID, metaData.InstanceID, metaData.DataID,
 		&metaData); err != nil {
 		return &notificationHandlerError{fmt.Sprintf("Error in handleDelete: failed to send notification. Error: %s\n", err)}
 	}
@@ -659,7 +663,7 @@ func handleDelete(metaData common.MetaData) common.SyncServiceError {
 }
 
 // Handle a notification that an object was marked as deleted by the other side
-func handleAckDelete(orgID string, objectType string, objectID string, destType string, destID string, instanceID int64) common.SyncServiceError {
+func handleAckDelete(orgID string, objectType string, objectID string, destType string, destID string, instanceID int64, dataID int64) common.SyncServiceError {
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Handling ack delete of %s %s\n", objectType, objectID)
 	}
@@ -684,18 +688,25 @@ func handleAckDelete(orgID string, objectType string, objectID string, destType 
 	// Mark the notification as ackdelete
 	if err := Store.UpdateNotificationRecord(
 		common.Notification{ObjectID: objectID, ObjectType: objectType,
-			DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.AckDelete, InstanceID: instanceID},
+			DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.AckDelete, InstanceID: instanceID, DataID: dataID},
 	); err != nil {
 		return &notificationHandlerError{fmt.Sprintf("Error in handleAckDelete: failed to update notification record. Error: %s\n", err)}
 	}
 
-	// Delete the object
-	metaData, err := Store.RetrieveObject(orgID, objectType, objectID)
-	if err == nil && metaData != nil {
-		return storage.DeleteStoredObject(Store, *metaData)
+	// Mark object destination status as deleted by the destination
+	deleteObject, err := Store.UpdateObjectDeliveryStatus(common.Deleted, "", orgID, objectType, objectID, destType, destID)
+	if err == nil && deleteObject {
+		if trace.IsLogging(logger.TRACE) {
+			trace.Trace("Deleting object %s:%s:%s\n", orgID, objectType, objectID)
+		}
+		// Delete the object
+		metaData, err := Store.RetrieveObject(orgID, objectType, objectID)
+		if err == nil && metaData != nil {
+			return storage.DeleteStoredObject(Store, *metaData)
+		}
+		return &notificationHandlerError{fmt.Sprintf("Error in handleAckDelete: failed to find object. Error: %s\n", err)}
 	}
-
-	return &notificationHandlerError{fmt.Sprintf("Error in handleAckDelete: failed to find object. Error: %s\n", err)}
+	return nil
 }
 
 // Handle a notification that an object was deleted by the other side
@@ -721,21 +732,21 @@ func handleObjectDeleted(metaData common.MetaData) common.SyncServiceError {
 		}
 		common.ObjectLocks.Unlock(lockIndex)
 		// Send ack to prevent future resends of this notification
-		Comm.SendNotificationMessage(common.AckDeleted, metaData.DestType, metaData.DestID, metaData.InstanceID, &metaData)
+		Comm.SendNotificationMessage(common.AckDeleted, metaData.DestType, metaData.DestID, metaData.InstanceID, metaData.DataID, &metaData)
 		return &ignoredByHandler{}
 	}
 
 	// Delete the notification
-	err = Store.DeleteNotificationRecords(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, "", "")
+	err = Store.DeleteNotificationRecords(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestType, metaData.DestID)
 	if err != nil && log.IsLogging(logger.ERROR) {
-		log.Error("Error in handleAckConsumed: failed to delete notification records. Error: %s\n", err)
+		log.Error("Error in handleObjectDeleted: failed to delete notification records. Error: %s\n", err)
 	}
 	removeNotificationChunksInfo(metaData, metaData.OriginType, metaData.OriginID)
 
 	common.ObjectLocks.Unlock(lockIndex)
 
 	// Send ack
-	if err := Comm.SendNotificationMessage(common.AckDeleted, metaData.DestType, metaData.DestID, metaData.InstanceID,
+	if err := Comm.SendNotificationMessage(common.AckDeleted, metaData.DestType, metaData.DestID, metaData.InstanceID, metaData.DataID,
 		&metaData); err != nil {
 		return &notificationHandlerError{fmt.Sprintf("Error in handleObjectDeleted: failed to send notification. Error: %s\n", err)}
 	}
@@ -821,7 +832,7 @@ func handleAckResend() common.SyncServiceError {
 
 // Handle a feedback notification
 func handleFeedback(orgID string, objectType string, objectID string, destType string, destID string,
-	instanceID int64, code int, retryInterval int32, reason string) common.SyncServiceError {
+	instanceID int64, dataID int64, code int, retryInterval int32, reason string) common.SyncServiceError {
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Handling feedback of %s %s\n", objectType, objectID)
 	}
@@ -849,7 +860,7 @@ func handleFeedback(orgID string, objectType string, objectID string, destType s
 		if common.IsErrorFeedback(code) {
 			status = common.Error
 		}
-		err = Store.UpdateObjectDeliveryStatus(status, reason, orgID, objectType, objectID, destType, destID)
+		_, err = Store.UpdateObjectDeliveryStatus(status, reason, orgID, objectType, objectID, destType, destID)
 		if err != nil && log.IsLogging(logger.ERROR) {
 			log.Error("Error in handleFeedback: failed to update destination status. Error: %s\n", err)
 		}
@@ -864,7 +875,7 @@ func handleFeedback(orgID string, objectType string, objectID string, destType s
 			if err := Store.UpdateNotificationRecord(
 				common.Notification{ObjectID: objectID, ObjectType: objectType,
 					DestOrgID: orgID, DestID: destID, DestType: destType, Status: status,
-					InstanceID: instanceID, ResendTime: resendTime},
+					InstanceID: instanceID, ResendTime: resendTime, DataID: dataID},
 			); err != nil {
 				return &notificationHandlerError{fmt.Sprintf("Error in handleFeedback: failed to update notification record. Error: %s\n", err)}
 			}
@@ -885,8 +896,8 @@ func handleData(dataMessage []byte) (*common.MetaData, common.SyncServiceError) 
 	}
 
 	lockIndex := common.HashStrings(orgID, objectType, objectID)
-	dataChunksLocks.Lock(lockIndex)
-	defer dataChunksLocks.Unlock(lockIndex)
+	Comm.LockDataChunks(lockIndex, nil)
+	defer Comm.UnlockDataChunks(lockIndex, nil)
 
 	common.ObjectLocks.Lock(lockIndex)
 
@@ -1023,7 +1034,7 @@ func handleGetData(metaData common.MetaData, offset int64) common.SyncServiceErr
 	if err := Store.UpdateNotificationRecord(
 		common.Notification{ObjectID: metaData.ObjectID, ObjectType: metaData.ObjectType,
 			DestOrgID: metaData.DestOrgID, DestID: metaData.DestID, DestType: metaData.DestType,
-			Status: common.Data, InstanceID: metaData.InstanceID},
+			Status: common.Data, InstanceID: metaData.InstanceID, DataID: metaData.DataID},
 	); err != nil {
 		common.ObjectLocks.RUnlock(lockIndex)
 		return &notificationHandlerError{fmt.Sprintf("Error in handleData: failed to update notification record. Error: %s\n", err)}
@@ -1397,7 +1408,7 @@ func updateNotificationChunkInfo(createNotification bool, metaData common.MetaDa
 			err := Store.UpdateNotificationRecord(
 				common.Notification{ObjectID: metaData.ObjectID, ObjectType: metaData.ObjectType,
 					DestOrgID: metaData.DestOrgID, DestID: destID, DestType: destType,
-					Status: common.Getdata, InstanceID: metaData.InstanceID})
+					Status: common.Getdata, InstanceID: metaData.InstanceID, DataID: metaData.DataID})
 			if err != nil {
 				return &notificationHandlerError{fmt.Sprintf("Failed to update notification record. Error: %s\n", err)}
 			}

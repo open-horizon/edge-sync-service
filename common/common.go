@@ -113,6 +113,57 @@ type Destination struct {
 	CodeVersion string `json:"codeVersion" bson:"code-version"`
 }
 
+// PolicyProperty is a property in a policy
+// swagger:model
+type PolicyProperty struct {
+	// Name is the name of the property
+	//   required: true
+	Name string `json:"name" bson:"name"`
+
+	// Value is the value of the property
+	//   required: true
+	Value interface{} `json:"value" bson:"value"`
+
+	// Type is the type of the property.
+	// It is only required where the system can't interpret the value correctly by context.
+	//   required: false
+	Type string `json:"type" bson:"type"`
+}
+
+// ServiceID contains the ID of a service to which an object may have affinity for
+// NOTE: If the order of the fields changes here, please update the query in
+//       mongoStorage.go RetrieveObjectsWithDestinationPolicyByService.
+// swagger:model
+type ServiceID struct {
+	// OrgID is the organization ID of the service
+	OrgID string `json:"orgID" bson:"org-id"`
+
+	// Arch is the architecture of the service
+	Arch string `json:"arch" bson:"arch"`
+
+	// ServiceName is the name of the service
+	ServiceName string `json:"serviceName" bson:"service-name"`
+
+	// Version is the version of the service
+	Version string `json:"version" bson:"version"`
+}
+
+// Policy describes a policy made up of a set of properties and constraints
+// swagger:model
+type Policy struct {
+	// Properties is the set of properties for a particular policy
+	Properties []PolicyProperty `json:"properties" bson:"properties"`
+
+	// Constraints is a set of expressions that form the constraints for the policy
+	Constraints []string `json:"constraints" bson:"constraints"`
+
+	// Services is the list of services this object has affinity for
+	Services []ServiceID `json:"services" bson:"services"`
+
+	// Timestamp indicates when the policy was last updated (result of time.Now().UnixNano())
+	Timestamp int64 `json:"timestamp" bson:"timestamp"`
+}
+
 // MetaData is the metadata that identifies and defines the sync service object.
 // Every object includes metadata (mandatory) and data (optional). The metadata and data can be updated independently.
 // Each sync service node (ESS) has an address that is composed of the node's ID, Type, and Organization.
@@ -147,6 +198,11 @@ type MetaData struct {
 	// When a DestinationsList is provided DestType and DestID must be omitted.
 	// This field is ignored when working with ESS (the destination is always the CSS).
 	DestinationsList []string `json:"destinationsList" bson:"destinations-list"`
+
+	// DestinationPolicy is the policy specification that should be used to distribute this object
+	// to the appropriate set of destinations.
+	// When a DestinationPolicy is provided DestinationsList, DestType, and DestID must be omitted.
+	DestinationPolicy *Policy `json:"destinationPolicy" bson:"destination-policy"`
 
 	// Expiration is a timestamp/date indicating when the object expires.
 	// When the object expires it is automatically deleted.
@@ -212,17 +268,21 @@ type MetaData struct {
 	// Read only field, should not be set by users.
 	OriginID string `json:"originID" bson:"origin-id"`
 
-	// Deleted is a flag indicating to applications polling for updates that this object has been deleted.
-	// Read only field, should not be set by users.
-	Deleted bool `json:"deleted" bson:"deleted"`
-
 	// OriginType is the type of origin of the object. Set by the internal code.
 	// Read only field, should not be set by users.
 	OriginType string `json:"originType" bson:"origin-type"`
 
+	// Deleted is a flag indicating to applications polling for updates that this object has been deleted.
+	// Read only field, should not be set by users.
+	Deleted bool `json:"deleted" bson:"deleted"`
+
 	// InstanceID is an internal instance ID.
 	// This field should not be set by users.
 	InstanceID int64 `json:"instanceID" bson:"instance-id"`
+
+	// DataID is an internal data ID.
+	// This field should not be set by users.
+	DataID int64 `json:"dataID" bson:"data-id"`
 
 	// ObjectSize is an internal field indicating the size of the object's data.
 	// This field should not be set by users.
@@ -249,6 +309,7 @@ type Notification struct {
 	DestType   string `json:"destinationType" bson:"destination-type"`
 	Status     string `json:"status" bson:"status"`
 	InstanceID int64  `json:"instanceID" bson:"instance-id"`
+	DataID     int64  `json:"dataID" bson:"data-id"`
 	ResendTime int64  `json:"resendTime" bson:"resend-time"`
 }
 
@@ -268,6 +329,7 @@ type StoreDestinationStatus struct {
 //   delivering - indicates that the object is being delivered to this destination
 //   delivered - indicates that the object was delivered to this destination
 //   consumed - indicates that the object was consumed by this destination
+//   deleted - indicates that this destination acknowledged the deletion of the object
 //   error - indicates that a feedback error message was received from this destination
 // swagger:model
 type DestinationsStatus struct {
@@ -294,6 +356,7 @@ type DestinationsStatus struct {
 //   delivering - indicates that the object is being delivered
 //   delivered - indicates that the object was delivered
 //   consumed - indicates that the object was consumed
+//   deleted - indicates that this destination acknowledged the deletion of the object
 //   error - indicates that a feedback error message was received
 // swagger:model
 type ObjectStatus struct {
@@ -311,6 +374,27 @@ type ObjectStatus struct {
 	// Status is the object status for this destination
 	//   required: true
 	Status string `json:"status"`
+}
+
+// ObjectDestinationPolicy contains information about an object that has a Destination Policy.
+// swagger:model
+type ObjectDestinationPolicy struct {
+	// OrgID is the organization ID of the object (an object belongs to exactly one organization).
+	//   required: true
+	OrgID string `json:"orgID"`
+
+	// ObjectType is the type of the object.
+	// The type is used to group multiple objects, for example when checking for object updates.
+	//   required: true
+	ObjectType string `json:"objectType"`
+
+	// ObjectID is a unique identifier of the object
+	//   required: true
+	ObjectID string `json:"objectID"`
+
+	// DestinationPolicy is the policy specification that should be used to distribute this object
+	// to the appropriate set of destinations.
+	DestinationPolicy Policy `json:"destinationPolicy"`
 }
 
 // Organization contains organization's information
@@ -353,6 +437,7 @@ type NotificationInfo struct {
 	DestType          string
 	DestID            string
 	InstanceID        int64
+	DataID            int64
 	MetaData          *MetaData
 }
 
@@ -407,6 +492,7 @@ const (
 	Delivered  = "delivered"
 	// Consumed (defined above)
 	// Error (defined above)
+	// Deleted (defined above)
 )
 
 // Feedback codes
@@ -506,11 +592,12 @@ func HashStrings(strings ...string) uint32 {
 type Locks struct {
 	numberOfLocks uint32
 	locks         []sync.RWMutex
+	name          string
 }
 
 // NewLocks initializes object locks
-func NewLocks() *Locks {
-	locks := Locks{}
+func NewLocks(name string) *Locks {
+	locks := Locks{name: name}
 	if Configuration.NodeType == ESS {
 		locks.numberOfLocks = 256
 	} else {
@@ -526,7 +613,7 @@ var ObjectLocks Locks
 
 // InitObjectLocks initializes ObjectLocks
 func InitObjectLocks() {
-	ObjectLocks = *NewLocks()
+	ObjectLocks = *NewLocks("object")
 }
 
 // Lock locks the object
