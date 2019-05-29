@@ -468,7 +468,7 @@ func (store *BoltStorage) RetrieveObjects(orgID string, destType string, destID 
 	}
 
 	function := func(object boltObject) (*boltObject, common.SyncServiceError) {
-		if orgID == object.Meta.DestOrgID &&
+		if object.Meta.DestinationPolicy == nil && orgID == object.Meta.DestOrgID &&
 			(object.Meta.DestType == "" || object.Meta.DestType == destType) &&
 			(object.Meta.DestID == "" || object.Meta.DestID == destID) {
 			status := common.Pending

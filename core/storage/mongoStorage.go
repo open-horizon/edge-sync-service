@@ -697,6 +697,9 @@ OUTER:
 
 		metaDatas := make([]common.MetaData, 0)
 		for _, r := range result {
+			if r.MetaData.DestinationPolicy != nil {
+				continue
+			}
 			if (r.MetaData.DestType == "" || r.MetaData.DestType == destType) &&
 				(r.MetaData.DestID == "" || r.MetaData.DestID == destID) {
 				status := common.Pending
