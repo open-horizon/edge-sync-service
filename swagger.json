@@ -779,7 +779,7 @@
       "put": {
         "description": "Set the list of sync service (ESS) nodes to be the destinations of the object of the specified object type and object ID.\nThis is a CSS only API.",
         "consumes": [
-          "application/octet-stream"
+          "application/json"
         ],
         "produces": [
           "text/plain"
@@ -814,8 +814,10 @@
             "in": "body",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "binary"
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           }
         ],
