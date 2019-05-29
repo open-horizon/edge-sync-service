@@ -779,7 +779,7 @@
       "put": {
         "description": "Set the list of sync service (ESS) nodes to be the destinations of the object of the specified object type and object ID.\nThis is a CSS only API.",
         "consumes": [
-          "application/octet-stream"
+          "application/json"
         ],
         "produces": [
           "text/plain"
@@ -814,8 +814,10 @@
             "in": "body",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "binary"
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           }
         ],
@@ -1800,6 +1802,14 @@
         "destinationPolicy": {
           "$ref": "#/definitions/Policy"
         },
+        "destinations": {
+          "description": "Destinations is the list of the object's current destinations",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DestinationsStatus"
+          },
+          "x-go-name": "Destinations"
+        },
         "objectID": {
           "description": "ObjectID is a unique identifier of the object",
           "type": "string",
@@ -1961,7 +1971,7 @@
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
     },
     "ServiceID": {
-      "description": "ServiceID contains the ID of a service to which an object may have affinity for\nNOTE: If the order of the fields changes here, please update the query in\nmongoStorage.go RetrieveObjectsWithDestinationPolicyByService.",
+      "description": "ServiceID contains the ID of a service to which an object may have affinity for",
       "type": "object",
       "properties": {
         "arch": {

@@ -206,7 +206,9 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 	objectsCollection.EnsureIndexKey("metadata.destination-org-id")
 	err = objectsCollection.EnsureIndex(
 		mgo.Index{
-			Key:        []string{"metadata.destination-policy.services"},
+			Key: []string{
+				"metadata.destination-policy.services.org-id",
+				"metadata.destination-policy.services.service-name"},
 			Unique:     false,
 			DropDups:   false,
 			Background: false,
@@ -661,14 +663,10 @@ func (store *MongoStorage) RetrieveObjectsWithDestinationPolicy(orgID string, re
 }
 
 // RetrieveObjectsWithDestinationPolicyByService returns the list of all the object Policies for a particular service
-func (store *MongoStorage) RetrieveObjectsWithDestinationPolicyByService(orgID, arch, serviceName, version string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
-	// The order of the fields in the following query seems to be important.
-	// DO NOT replace the bson.D with a bson.M
+func (store *MongoStorage) RetrieveObjectsWithDestinationPolicyByService(orgID, serviceName string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
 	query := bson.M{
-		"metadata.destination-policy.services": bson.D{
-			{Name: "org-id", Value: orgID}, {Name: "arch", Value: arch},
-			{Name: "service-name", Value: serviceName}, {Name: "version", Value: version},
-		},
+		"metadata.destination-policy.services.org-id":       orgID,
+		"metadata.destination-policy.services.service-name": serviceName,
 	}
 
 	return store.retrievePolicies(query)
@@ -697,6 +695,9 @@ OUTER:
 
 		metaDatas := make([]common.MetaData, 0)
 		for _, r := range result {
+			if r.MetaData.DestinationPolicy != nil {
+				continue
+			}
 			if (r.MetaData.DestType == "" || r.MetaData.DestType == destType) &&
 				(r.MetaData.DestID == "" || r.MetaData.DestID == destID) {
 				status := common.Pending

@@ -627,6 +627,16 @@ func testPingAndRegisterNew(storageType string, t *testing.T) {
 		{common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "pingorg",
 			DestID: "dev1", DestType: "device", OriginID: "123", OriginType: "type2"},
 			common.NotReadyToSend, nil},
+		{common.MetaData{ObjectID: "4", ObjectType: "type1", DestOrgID: "pingorg",
+			OriginID: "123", OriginType: "type2", DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "a", Value: float64(1)},
+					{Name: "b", Value: "zxcv"},
+					{Name: "c", Value: true, Type: "bool"},
+				},
+				Constraints: []string{"Plover=34", "asdf=true"},
+			}},
+			common.ReadyToSend, []byte("hello")},
 	}
 
 	for _, test := range tests {
@@ -684,6 +694,12 @@ func testPingAndRegisterNew(storageType string, t *testing.T) {
 			tests[2].metaData.ObjectID, tests[2].metaData.DestType, tests[2].metaData.DestID)
 		if err == nil && notification != nil {
 			t.Errorf("Created notification for NotReadyToSend object")
+		}
+
+		notification, err = Store.RetrieveNotificationRecord(tests[3].metaData.DestOrgID, tests[3].metaData.ObjectType,
+			tests[3].metaData.ObjectID, dest.DestType, dest.DestID)
+		if err == nil && notification != nil {
+			t.Errorf("Created notification for object with policy")
 		}
 
 		storedDests, err := Store.GetObjectDestinationsList(tests[0].metaData.DestOrgID, tests[0].metaData.ObjectType,

@@ -838,7 +838,7 @@ func testObjectWithPolicyAPI(store storage.Storage, t *testing.T) {
 			len(policyInfo), len(tests)-objectsMarkedReceived, len(tests), objectsMarkedReceived)
 	}
 
-	policyInfo, err = ListObjectsWithDestinationPolicyByService("myorg777", "amd64", "plony", "1.0.0")
+	policyInfo, err = ListObjectsWithDestinationPolicyByService("myorg777", "plony")
 	if err != nil {
 		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
 	}
