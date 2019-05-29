@@ -131,8 +131,6 @@ type PolicyProperty struct {
 }
 
 // ServiceID contains the ID of a service to which an object may have affinity for
-// NOTE: If the order of the fields changes here, please update the query in
-//       mongoStorage.go RetrieveObjectsWithDestinationPolicyByService.
 // swagger:model
 type ServiceID struct {
 	// OrgID is the organization ID of the service
@@ -395,6 +393,9 @@ type ObjectDestinationPolicy struct {
 	// DestinationPolicy is the policy specification that should be used to distribute this object
 	// to the appropriate set of destinations.
 	DestinationPolicy Policy `json:"destinationPolicy"`
+
+	//Destinations is the list of the object's current destinations
+	Destinations []DestinationsStatus `json:"destinations"`
 }
 
 // Organization contains organization's information

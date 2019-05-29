@@ -142,7 +142,9 @@ func (store *MongoStorage) retrievePolicies(query interface{}) ([]common.ObjectD
 
 	selectedFields := bson.M{"metadata.destination-org-id": bson.ElementString,
 		"metadata.object-type": bson.ElementString, "metadata.object-id": bson.ElementString,
-		"metadata.destination-policy": bson.ElementDocument}
+		"metadata.destination-policy": bson.ElementDocument,
+		"destinations":                bson.ElementArray,
+	}
 	if err := store.fetchAll(objects, query, selectedFields, &results); err != nil {
 		switch err {
 		case mgo.ErrNotFound:
@@ -154,9 +156,16 @@ func (store *MongoStorage) retrievePolicies(query interface{}) ([]common.ObjectD
 
 	objects := make([]common.ObjectDestinationPolicy, len(results))
 	for index, oneResult := range results {
+		destinationList := make([]common.DestinationsStatus, len(oneResult.Destinations))
+		for destIndex, destination := range oneResult.Destinations {
+			destinationList[destIndex] = common.DestinationsStatus{
+				DestType: destination.Destination.DestType, DestID: destination.Destination.DestID,
+				Status: destination.Status, Message: destination.Message,
+			}
+		}
 		objects[index] = common.ObjectDestinationPolicy{
 			OrgID: oneResult.MetaData.DestOrgID, ObjectType: oneResult.MetaData.ObjectType, ObjectID: oneResult.MetaData.ObjectID,
-			DestinationPolicy: *oneResult.MetaData.DestinationPolicy,
+			DestinationPolicy: *oneResult.MetaData.DestinationPolicy, Destinations: destinationList,
 		}
 	}
 	return objects, nil

@@ -427,15 +427,22 @@ func (store *BoltStorage) RetrieveObjectsWithDestinationPolicy(orgID string, rec
 }
 
 // RetrieveObjectsWithDestinationPolicyByService returns the list of all the object Policies for a particular service
-func (store *BoltStorage) RetrieveObjectsWithDestinationPolicyByService(orgID, arch, serviceName, version string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+func (store *BoltStorage) RetrieveObjectsWithDestinationPolicyByService(orgID, serviceName string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
 	result := make([]common.ObjectDestinationPolicy, 0)
 	function := func(object boltObject) {
 		if object.Meta.DestinationPolicy != nil {
 			for _, service := range object.Meta.DestinationPolicy.Services {
-				if orgID == service.OrgID && arch == service.Arch && serviceName == service.ServiceName && version == service.Version {
+				if orgID == service.OrgID && serviceName == service.ServiceName {
+					destinationList := make([]common.DestinationsStatus, len(object.Destinations))
+					for index, destination := range object.Destinations {
+						destinationList[index] = common.DestinationsStatus{
+							DestType: destination.Destination.DestType, DestID: destination.Destination.DestID,
+							Status: destination.Status, Message: destination.Message,
+						}
+					}
 					result = append(result, common.ObjectDestinationPolicy{
 						OrgID: object.Meta.DestOrgID, ObjectType: object.Meta.ObjectType, ObjectID: object.Meta.ObjectID,
-						DestinationPolicy: *object.Meta.DestinationPolicy,
+						DestinationPolicy: *object.Meta.DestinationPolicy, Destinations: destinationList,
 					})
 				}
 			}

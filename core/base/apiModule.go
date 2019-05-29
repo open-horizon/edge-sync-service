@@ -278,17 +278,17 @@ func ListObjectsWithDestinationPolicy(orgID string, received bool) ([]common.Obj
 
 // ListObjectsWithDestinationPolicyByService provides a list of objects that have a DestinationPolicy and are
 // associated with a service
-func ListObjectsWithDestinationPolicyByService(orgID, arch, serviceName, version string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+func ListObjectsWithDestinationPolicyByService(orgID, serviceName string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
 	apiLock.RLock()
 	defer apiLock.RUnlock()
 
 	common.HealthStatus.ClientRequestReceived()
 
-	objects, err := store.RetrieveObjectsWithDestinationPolicyByService(orgID, arch, serviceName, version)
+	objects, err := store.RetrieveObjectsWithDestinationPolicyByService(orgID, serviceName)
 
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("In ListObjectsWithDestinationPolicyByService. Get %s/%s/%s/%s. Returned %d objects\n",
-			orgID, arch, serviceName, version, len(objects))
+		trace.Debug("In ListObjectsWithDestinationPolicyByService. Get %s/%s. Returned %d objects\n",
+			orgID, serviceName, len(objects))
 	}
 
 	return objects, err

@@ -124,8 +124,8 @@ func (store *Cache) RetrieveObjectsWithDestinationPolicy(orgID string, received 
 }
 
 // RetrieveObjectsWithDestinationPolicyByService returns the list of all the object Policies for a particular service
-func (store *Cache) RetrieveObjectsWithDestinationPolicyByService(orgID, arch, serviceName, version string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
-	return store.Store.RetrieveObjectsWithDestinationPolicyByService(orgID, arch, serviceName, version)
+func (store *Cache) RetrieveObjectsWithDestinationPolicyByService(orgID, serviceName string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	return store.Store.RetrieveObjectsWithDestinationPolicyByService(orgID, serviceName)
 }
 
 // RetrieveObjects returns the list of all the objects that need to be sent to the destination

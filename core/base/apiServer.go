@@ -1355,20 +1355,16 @@ func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWr
 	}
 
 	serviceOrgID := ""
-	serviceArch := ""
 	serviceName := ""
-	serviceVersion := ""
 	serviceID := request.URL.Query().Get("service")
 	if serviceID != "" {
-		parts := strings.SplitN(serviceID, "/", 4)
-		if len(parts) < 4 || len(parts[0]) == 0 || len(parts[1]) == 0 || len(parts[2]) == 0 || len(parts[3]) == 0 {
+		parts := strings.SplitN(serviceID, "/", 2)
+		if len(parts) < 2 || len(parts[0]) == 0 || len(parts[1]) == 0 {
 			writer.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		serviceOrgID = parts[0]
-		serviceArch = parts[1]
-		serviceVersion = parts[2]
-		serviceName = parts[3]
+		serviceName = parts[1]
 	}
 
 	var objects []common.ObjectDestinationPolicy
@@ -1382,10 +1378,10 @@ func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWr
 		objects, err = ListObjectsWithDestinationPolicy(orgID, received)
 	} else {
 		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("In handleObjects. List DestinationPolicy, service %s/%s/%s/%s\n",
-				serviceOrgID, serviceArch, serviceName, serviceVersion)
+			trace.Debug("In handleObjects. List DestinationPolicy, service %s/%s/\n",
+				serviceOrgID, serviceName)
 		}
-		objects, err = ListObjectsWithDestinationPolicyByService(serviceOrgID, serviceArch, serviceName, serviceVersion)
+		objects, err = ListObjectsWithDestinationPolicyByService(serviceOrgID, serviceName)
 	}
 
 	if err != nil {
