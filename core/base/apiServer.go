@@ -1010,7 +1010,7 @@ func handleObjectDestinations(orgID string, objectType string, objectID string, 
 		// ---
 		//
 		// consumes:
-		// - application/octet-stream
+		// - application/json
 		//
 		// produces:
 		// - text/plain
@@ -1036,8 +1036,9 @@ func handleObjectDestinations(orgID string, objectType string, objectID string, 
 		//   description: The object's destination list
 		//   required: true
 		//   schema:
-		//     type: string
-		//     format: binary
+		//      type: array
+		//      items:
+		//         type: string
 		//
 		// responses:
 		//   '204':
