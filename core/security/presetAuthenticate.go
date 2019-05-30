@@ -81,7 +81,7 @@ func (auth *PresetAuthenticate) Start() {
 // Authenticate  authenticates a particular HTTP request and indicates
 // whether it is an edge node, org admin, or plain user. Also returned is the
 // user's org and identitity. An edge node's identity is destType/destID. A
-// service's identity is serviceOrg/arch/version/serviceName.
+// service's identity is serviceOrg/version/serviceName.
 func (auth *PresetAuthenticate) Authenticate(request *http.Request) (int, string, string) {
 	appKey, appSecret, ok := request.BasicAuth()
 	if !ok {
