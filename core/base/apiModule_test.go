@@ -87,6 +87,71 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 			"updateObject didn't check that autoDelete is set for object without destinations list or dest ID"},
 		{"myorg777", "type1", "123456", common.MetaData{ObjectID: "12345", ObjectType: "type1", DestOrgID: "myorg777", MetaOnly: true}, []byte("data"),
 			"updateObject didn't check that the data is empty for meta only update"},
+		{"myorg777", "type1", "123456",
+			common.MetaData{ObjectID: "123456", ObjectType: "type1", DestOrgID: "myorg777",
+				DestinationPolicy: &common.Policy{
+					Properties: []common.PolicyProperty{
+						{Value: float64(1)},
+					},
+					Constraints: []string{"Plover=34", "asdf=true"},
+				},
+			}, nil, "UpdateObject didn't check that the property name was missing",
+		},
+		{"myorg777", "type1", "123456",
+			common.MetaData{ObjectID: "123456", ObjectType: "type1", DestOrgID: "myorg777",
+				DestinationPolicy: &common.Policy{
+					Properties: []common.PolicyProperty{
+						{Name: "", Value: float64(1)},
+					},
+					Constraints: []string{"Plover=34", "asdf=true"},
+				},
+			}, nil, "UpdateObject didn't check that the property name was empty",
+		},
+		{"myorg777", "type1", "123456",
+			common.MetaData{ObjectID: "123456", ObjectType: "type1", DestOrgID: "myorg777",
+				DestinationPolicy: &common.Policy{
+					Services: []common.ServiceID{
+						{OrgID: "plover", Arch: "amd64", ServiceName: "tester"},
+					},
+				},
+			}, nil, "UpdateObject didn't check that the service ID's version was empty",
+		},
+		{"myorg777", "type1", "123456",
+			common.MetaData{ObjectID: "123456", ObjectType: "type1", DestOrgID: "myorg777",
+				DestinationPolicy: &common.Policy{
+					Services: []common.ServiceID{
+						{OrgID: "plover", Arch: "amd64", Version: "1.0.0"},
+					},
+				},
+			}, nil, "UpdateObject didn't check that the service ID's service name was empty",
+		},
+		{"myorg777", "type1", "123456",
+			common.MetaData{ObjectID: "123456", ObjectType: "type1", DestOrgID: "myorg777",
+				DestinationPolicy: &common.Policy{
+					Services: []common.ServiceID{
+						{OrgID: "plover", ServiceName: "tester", Version: "1.0.0"},
+					},
+				},
+			}, nil, "UpdateObject didn't check that the service ID's architecture was empty",
+		},
+		{"myorg777", "type1", "123456",
+			common.MetaData{ObjectID: "123456", ObjectType: "type1", DestOrgID: "myorg777",
+				DestinationPolicy: &common.Policy{
+					Services: []common.ServiceID{
+						{Arch: "amd64", ServiceName: "tester", Version: "1.0.0"},
+					},
+				},
+			}, nil, "UpdateObject didn't check that the service ID's orgID was empty",
+		},
+		{"myorg777", "type1", "123456",
+			common.MetaData{ObjectID: "123456", ObjectType: "type1", DestOrgID: "myorg777",
+				DestinationPolicy: &common.Policy{
+					Services: []common.ServiceID{
+						{OrgID: "plover", Arch: "amd64", ServiceName: "tester", Version: "[1.0.0"},
+					},
+				},
+			}, nil, "UpdateObject didn't check that the service ID's version was invalid",
+		},
 	}
 
 	if err := store.Init(); err != nil {
@@ -670,6 +735,19 @@ func testObjectWithPolicyAPI(store storage.Storage, t *testing.T) {
 				},
 			},
 		}, false, nil},
+		{common.MetaData{ObjectID: "5", ObjectType: "type1", DestOrgID: "myorg001",
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "j", Value: float64(42.0)},
+					{Name: "k", Value: "ghjk"},
+					{Name: "l", Value: float64(613)},
+				},
+				Constraints: []string{"il=71", "rtyu=\"edcrfv\""},
+				Services: []common.ServiceID{
+					{OrgID: "myorg777", Arch: "amd64", ServiceName: "plony", Version: "1.0.0"},
+				},
+			},
+		}, false, nil},
 	}
 
 	destinations := []common.Destination{
@@ -786,7 +864,7 @@ func testObjectWithPolicyAPI(store storage.Storage, t *testing.T) {
 	if err != nil {
 		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
 	}
-	if len(policyInfo) != len(tests) {
+	if len(policyInfo) != len(tests)-1 {
 		t.Errorf("Received %d objects with a destination policy. Expected %d\n", len(policyInfo), len(tests))
 	}
 
@@ -805,16 +883,16 @@ func testObjectWithPolicyAPI(store storage.Storage, t *testing.T) {
 	if err != nil {
 		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
 	}
-	if len(policyInfo) != len(tests)-objectsMarkedReceived {
+	if len(policyInfo) != len(tests)-1-objectsMarkedReceived {
 		t.Errorf("Received %d objects with a destination policy. Expected %d. Total %d. Received %d\n",
-			len(policyInfo), len(tests)-objectsMarkedReceived, len(tests), objectsMarkedReceived)
+			len(policyInfo), len(tests)-objectsMarkedReceived, len(tests)-1, objectsMarkedReceived)
 	}
 
 	policyInfo, err = ListObjectsWithDestinationPolicy("myorg000", true)
 	if err != nil {
 		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
 	}
-	if len(policyInfo) != len(tests) {
+	if len(policyInfo) != len(tests)-1 {
 		t.Errorf("Received %d objects with a destination policy. Expected %d\n", len(policyInfo), len(tests))
 	}
 
@@ -833,12 +911,12 @@ func testObjectWithPolicyAPI(store storage.Storage, t *testing.T) {
 	if err != nil {
 		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
 	}
-	if len(policyInfo) != len(tests)-objectsMarkedReceived {
+	if len(policyInfo) != len(tests)-1-objectsMarkedReceived {
 		t.Errorf("Received %d objects with a destination policy. Expected %d. Total %d. Received %d\n",
 			len(policyInfo), len(tests)-objectsMarkedReceived, len(tests), objectsMarkedReceived)
 	}
 
-	policyInfo, err = ListObjectsWithDestinationPolicyByService("myorg777", "plony")
+	policyInfo, err = ListObjectsWithDestinationPolicyByService("myorg000", "myorg777", "plony")
 	if err != nil {
 		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
 	}

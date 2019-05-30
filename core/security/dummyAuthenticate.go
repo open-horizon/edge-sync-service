@@ -51,7 +51,7 @@ func (auth *DummyAuthenticate) Start() {
 // Authenticate  authenticates a particular HTTP request and indicates
 // whether it is an edge node, org admin, or plain user. Also returned is the
 // user's org and identitity. An edge node's identity is destType/destID. A
-// service's identity is serviceOrg/arch/version/serviceName.
+// service's identity is serviceOrg/version/serviceName.
 //
 // Note: This Authenticate implementation is for development use. App secrets
 //      are ignored. App keys for APIs are of the form, userID@orgID or

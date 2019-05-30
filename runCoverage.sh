@@ -7,9 +7,10 @@ cd cmd/edge-sync-service
 rm coverage.out
 echo "mode: set" >> coverage.out
 
-PACKAGE_BASE=github.com/open-horizon/edge-sync-service/core
+PACKAGE_BASE=github.com/open-horizon/edge-sync-service
 
-for PKG in ${PACKAGE_BASE}/base ${PACKAGE_BASE}/communications ${PACKAGE_BASE}/dataURI ${PACKAGE_BASE}/security ${PACKAGE_BASE}/storage; do
+for PKG in ${PACKAGE_BASE}/common ${PACKAGE_BASE}/core/base ${PACKAGE_BASE}/core/communications \
+           ${PACKAGE_BASE}/core/dataURI ${PACKAGE_BASE}/core/security ${PACKAGE_BASE}/core/storage; do
 
     go test -v -cover ${PKG} -coverprofile=coverage.tmp.out
     rc=$?

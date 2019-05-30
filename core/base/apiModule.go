@@ -78,12 +78,34 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 		return &common.InvalidRequest{Message: "Both destinations list and destination type are specified"}
 	}
 
-	if metaData.DestinationPolicy != nil && metaData.DestType != "" {
-		return &common.InvalidRequest{Message: "Both destination policy and destination type are specified"}
-	}
+	if metaData.DestinationPolicy != nil {
+		if metaData.DestType != "" {
+			return &common.InvalidRequest{Message: "Both destination policy and destination type are specified"}
+		}
 
-	if metaData.DestinationPolicy != nil && metaData.DestinationsList != nil {
-		return &common.InvalidRequest{Message: "Both destination policy and destination list are specified"}
+		if metaData.DestinationsList != nil {
+			return &common.InvalidRequest{Message: "Both destination policy and destination list are specified"}
+		}
+
+		properties := metaData.DestinationPolicy.Properties
+		for _, property := range properties {
+			if len(property.Name) == 0 {
+				return &common.InvalidRequest{Message: "A property in the DestinationPolicy must have a name"}
+			}
+		}
+
+		services := metaData.DestinationPolicy.Services
+		for _, service := range services {
+			if len(service.OrgID) == 0 || len(service.Arch) == 0 || len(service.ServiceName) == 0 || len(service.Version) == 0 {
+				return &common.InvalidRequest{
+					Message: "A service in a DestinationPolicy must have an organization ID, architecture, service name, and version specified"}
+			}
+
+			if _, err := common.ParseSemVerRange(service.Version); err != nil {
+				return &common.InvalidRequest{
+					Message: fmt.Sprintf("A service in the DestinationPolicy has an invalid version `%s`", service.Version)}
+			}
+		}
 	}
 
 	if metaData.AutoDelete && metaData.DestinationsList == nil && metaData.DestID == "" {
@@ -278,13 +300,13 @@ func ListObjectsWithDestinationPolicy(orgID string, received bool) ([]common.Obj
 
 // ListObjectsWithDestinationPolicyByService provides a list of objects that have a DestinationPolicy and are
 // associated with a service
-func ListObjectsWithDestinationPolicyByService(orgID, serviceName string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+func ListObjectsWithDestinationPolicyByService(orgID, serviceOrgID, serviceName string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
 	apiLock.RLock()
 	defer apiLock.RUnlock()
 
 	common.HealthStatus.ClientRequestReceived()
 
-	objects, err := store.RetrieveObjectsWithDestinationPolicyByService(orgID, serviceName)
+	objects, err := store.RetrieveObjectsWithDestinationPolicyByService(orgID, serviceOrgID, serviceName)
 
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In ListObjectsWithDestinationPolicyByService. Get %s/%s. Returned %d objects\n",

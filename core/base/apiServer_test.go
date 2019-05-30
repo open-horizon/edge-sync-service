@@ -473,53 +473,66 @@ func TestPolicies(t *testing.T) {
 
 	common.Configuration.OrgID = "myorgPolicy"
 
-	metaData1 := common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorgPolicy", NoData: true,
-		DestinationPolicy: &common.Policy{
-			Properties: []common.PolicyProperty{
-				{Name: "a", Value: float64(1)},
-				{Name: "b", Value: "zxcv"},
-				{Name: "c", Value: true, Type: "bool"},
+	testData := []common.MetaData{
+		common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorgPolicy", NoData: true,
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "a", Value: float64(1)},
+					{Name: "b", Value: "zxcv"},
+					{Name: "c", Value: true, Type: "bool"},
+				},
+				Constraints: []string{"Plover=34", "asdf=true"},
+				Services: []common.ServiceID{
+					{OrgID: "plover", Arch: "amd64", ServiceName: "testerService1", Version: "0.0.1"},
+				},
 			},
-			Constraints: []string{"Plover=34", "asdf=true"},
-			Services: []common.ServiceID{
-				{OrgID: "plover", Arch: "amd64", ServiceName: "testerService1", Version: "0.0.1"},
-			}}}
-
-	if _, err := store.StoreObject(metaData1, nil, common.CompletelyReceived); err != nil {
-		t.Errorf("StoreObject failed: %s", err.Error())
+		},
+		common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "myorgPolicy", NoData: true,
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "a", Value: float64(1)},
+					{Name: "b", Value: "zxcv"},
+					{Name: "c", Value: true, Type: "bool"},
+				},
+				Constraints: []string{"Plover=34", "asdf=true"},
+				Services: []common.ServiceID{
+					{OrgID: "plover", Arch: "amd64", ServiceName: "testerService1", Version: "0.0.1"},
+					{OrgID: "plover", Arch: "amd64", ServiceName: "testerService2", Version: "[0.0.1, 0.1.0)"},
+				},
+			},
+		},
+		common.MetaData{ObjectID: "2a", ObjectType: "type1", DestOrgID: "myorgPolicy", NoData: true,
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "a", Value: float64(1)},
+					{Name: "b", Value: "zxcv"},
+					{Name: "c", Value: true, Type: "bool"},
+				},
+				Constraints: []string{"Plover=34", "asdf=true"},
+				Services: []common.ServiceID{
+					{OrgID: "plover", Arch: "amd64", ServiceName: "testerService2", Version: "[0.1.0, INFINITY)"},
+				},
+			},
+		},
+		common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "myorgPolicy", NoData: true,
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "a", Value: float64(1)},
+					{Name: "b", Value: "zxcv"},
+					{Name: "c", Value: true, Type: "bool"},
+				},
+				Constraints: []string{"Plover=34", "asdf=true"},
+				Services: []common.ServiceID{
+					{OrgID: "plover", Arch: "amd64", ServiceName: "testerService3", Version: "0.0.1"},
+				},
+			},
+		},
 	}
 
-	metaData2 := common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "myorgPolicy", NoData: true,
-		DestinationPolicy: &common.Policy{
-			Properties: []common.PolicyProperty{
-				{Name: "a", Value: float64(1)},
-				{Name: "b", Value: "zxcv"},
-				{Name: "c", Value: true, Type: "bool"},
-			},
-			Constraints: []string{"Plover=34", "asdf=true"},
-			Services: []common.ServiceID{
-				{OrgID: "plover", Arch: "amd64", ServiceName: "testerService1", Version: "0.0.1"},
-				{OrgID: "plover", Arch: "amd64", ServiceName: "testerService2", Version: "0.0.1"},
-			}}}
-
-	if _, err := store.StoreObject(metaData2, nil, common.CompletelyReceived); err != nil {
-		t.Errorf("StoreObject failed: %s", err.Error())
-	}
-
-	metaData3 := common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "myorgPolicy", NoData: true,
-		DestinationPolicy: &common.Policy{
-			Properties: []common.PolicyProperty{
-				{Name: "a", Value: float64(1)},
-				{Name: "b", Value: "zxcv"},
-				{Name: "c", Value: true, Type: "bool"},
-			},
-			Constraints: []string{"Plover=34", "asdf=true"},
-			Services: []common.ServiceID{
-				{OrgID: "plover", Arch: "amd64", ServiceName: "testerService3", Version: "0.0.1"},
-			}}}
-
-	if _, err := store.StoreObject(metaData3, nil, common.CompletelyReceived); err != nil {
-		t.Errorf("StoreObject failed: %s", err.Error())
+	for _, metaData := range testData {
+		if _, err := store.StoreObject(metaData, nil, common.CompletelyReceived); err != nil {
+			t.Errorf("StoreObject failed: %s", err.Error())
+		}
 	}
 
 	tests := []struct {
@@ -539,18 +552,23 @@ func TestPolicies(t *testing.T) {
 
 		{http.MethodGet, "testerService1@myorgPolicy", "myorgPolicy", "type1", "2", http.StatusOK, 0, 5},
 		{http.MethodGet, "testerService2@myorgPolicy", "myorgPolicy", "type1", "2", http.StatusOK, 0, 6},
-		{http.MethodGet, "kuku@myorgPolicy", "myorgPolicy", "type1", "2", http.StatusForbidden, 0, 7},
-		{http.MethodGet, "testerUser@myorgPolicy", "myorgPolicy", "type1", "2", http.StatusOK, 0, 8},
+		{http.MethodGet, "testerService2b@myorgPolicy", "myorgPolicy", "type1", "2", http.StatusForbidden, 0, 7},
+		{http.MethodGet, "kuku@myorgPolicy", "myorgPolicy", "type1", "2", http.StatusForbidden, 0, 8},
+		{http.MethodGet, "testerUser@myorgPolicy", "myorgPolicy", "type1", "2", http.StatusOK, 0, 9},
 
-		{http.MethodGet, "testerService1@myorgPolicy", "myorgPolicy", "type1", "3", http.StatusForbidden, 0, 9},
-		{http.MethodGet, "testerService2@myorgPolicy", "myorgPolicy", "type1", "3", http.StatusForbidden, 0, 10},
-		{http.MethodGet, "kuku@myorgPolicy", "myorgPolicy", "type1", "3", http.StatusForbidden, 0, 11},
-		{http.MethodGet, "testerUser@myorgPolicy", "myorgPolicy", "type1", "3", http.StatusOK, 0, 12},
+		{http.MethodGet, "testerService2@myorgPolicy", "myorgPolicy", "type1", "2a", http.StatusForbidden, 0, 10},
+		{http.MethodGet, "testerService2b@myorgPolicy", "myorgPolicy", "type1", "2a", http.StatusOK, 0, 11},
 
-		{http.MethodGet, "testerService1@myorgPolicy", "myorgPolicy", "type1", "", http.StatusOK, 2, 13},
-		{http.MethodGet, "testerService2@myorgPolicy", "myorgPolicy", "type1", "", http.StatusOK, 1, 14},
-		{http.MethodGet, "kuku@myorgPolicy", "myorgPolicy", "type1", "", http.StatusForbidden, 0, 15},
-		{http.MethodGet, "testerUser@myorgPolicy", "myorgPolicy", "type1", "", http.StatusOK, 3, 16},
+		{http.MethodGet, "testerService1@myorgPolicy", "myorgPolicy", "type1", "3", http.StatusForbidden, 0, 12},
+		{http.MethodGet, "testerService2@myorgPolicy", "myorgPolicy", "type1", "3", http.StatusForbidden, 0, 13},
+		{http.MethodGet, "kuku@myorgPolicy", "myorgPolicy", "type1", "3", http.StatusForbidden, 0, 14},
+		{http.MethodGet, "testerUser@myorgPolicy", "myorgPolicy", "type1", "3", http.StatusOK, 0, 15},
+
+		{http.MethodGet, "testerService1@myorgPolicy", "myorgPolicy", "type1", "", http.StatusOK, 2, 15},
+		{http.MethodGet, "testerService2@myorgPolicy", "myorgPolicy", "type1", "", http.StatusOK, 1, 17},
+		{http.MethodGet, "testerService2b@myorgPolicy", "myorgPolicy", "type1", "", http.StatusOK, 1, 18},
+		{http.MethodGet, "kuku@myorgPolicy", "myorgPolicy", "type1", "", http.StatusForbidden, 0, 19},
+		{http.MethodGet, "testerUser@myorgPolicy", "myorgPolicy", "type1", "", http.StatusOK, 4, 20},
 	}
 	for _, test := range tests {
 		urlString := test.objectType
@@ -564,8 +582,8 @@ func TestPolicies(t *testing.T) {
 
 		handleObjects(writer, request)
 		if writer.statusCode != test.expectedHTTPStatus {
-			t.Errorf("handleObjects of %s returned a status of %d instead of %d for test %d under %s\n", urlString, writer.statusCode,
-				test.expectedHTTPStatus, test.testID, test.appKey)
+			t.Errorf("handleObjects of %s returned a status of %d instead of %d for test %d under %s\n",
+				urlString, writer.statusCode, test.expectedHTTPStatus, test.testID, test.appKey)
 		}
 		if writer.statusCode == http.StatusOK && test.objectID == "" {
 			decoder := json.NewDecoder(&writer.body)
@@ -574,7 +592,8 @@ func TestPolicies(t *testing.T) {
 				t.Errorf("Failed to unmarshall objects. Error: %s\n", err)
 			} else {
 				if len(data) != test.expectedCount {
-					t.Errorf("Fetched %d objects instead of %d", test.expectedCount, len(data))
+					t.Errorf("Fetched %d objects instead of %d for test %d under %s",
+						len(data), test.expectedCount, test.testID, test.appKey)
 				}
 			}
 		}

@@ -329,7 +329,7 @@ func (store *InMemoryStorage) RetrieveObjectsWithDestinationPolicy(orgID string,
 }
 
 // RetrieveObjectsWithDestinationPolicyByService returns the list of all the object Policies for a particular service
-func (store *InMemoryStorage) RetrieveObjectsWithDestinationPolicyByService(orgID, serviceName string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+func (store *InMemoryStorage) RetrieveObjectsWithDestinationPolicyByService(orgID, serviceOrgID, serviceName string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
 	return nil, nil
 }
 

@@ -663,9 +663,10 @@ func (store *MongoStorage) RetrieveObjectsWithDestinationPolicy(orgID string, re
 }
 
 // RetrieveObjectsWithDestinationPolicyByService returns the list of all the object Policies for a particular service
-func (store *MongoStorage) RetrieveObjectsWithDestinationPolicyByService(orgID, serviceName string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+func (store *MongoStorage) RetrieveObjectsWithDestinationPolicyByService(orgID, serviceOrgID, serviceName string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
 	query := bson.M{
-		"metadata.destination-policy.services.org-id":       orgID,
+		"metadata.destination-org-id":                       orgID,
+		"metadata.destination-policy.services.org-id":       serviceOrgID,
 		"metadata.destination-policy.services.service-name": serviceName,
 	}
 

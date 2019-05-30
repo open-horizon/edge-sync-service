@@ -52,11 +52,14 @@ func (auth *TestAuthenticate) Authenticate(request *http.Request) (int, string, 
 		code = AuthSyncAdmin
 	} else if user == "testerService1" {
 		code = AuthService
-		// serviceOrg/arch/version/serviceName
-		user = "plover/amd64/0.0.1/testerService1"
+		// serviceOrg/version/serviceName
+		user = "plover/0.0.1/testerService1"
 	} else if user == "testerService2" {
 		code = AuthService
-		user = "plover/amd64/0.0.1/testerService2"
+		user = "plover/0.0.1/testerService2"
+	} else if user == "testerService2b" {
+		code = AuthService
+		user = "plover/0.1.0/testerService2"
 	} else {
 		code = AuthFailed
 	}

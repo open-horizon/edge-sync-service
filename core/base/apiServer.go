@@ -1381,7 +1381,7 @@ func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWr
 			trace.Debug("In handleObjects. List DestinationPolicy, service %s/%s/\n",
 				serviceOrgID, serviceName)
 		}
-		objects, err = ListObjectsWithDestinationPolicyByService(serviceOrgID, serviceName)
+		objects, err = ListObjectsWithDestinationPolicyByService(orgID, serviceOrgID, serviceName)
 	}
 
 	if err != nil {
@@ -2116,14 +2116,21 @@ func canServiceAccessObject(serviceID string, metadata *common.MetaData) bool {
 		return true
 	}
 	// serviceOrgID/arch/version/serviceName
-	parts := strings.SplitN(serviceID, "/", 4)
-	if len(parts) < 4 {
+	parts := strings.SplitN(serviceID, "/", 3)
+	if len(parts) < 3 {
 		return false
 	}
 	for _, service := range metadata.DestinationPolicy.Services {
-		if parts[0] == service.OrgID && parts[1] == service.Arch &&
-			parts[2] == service.Version && parts[3] == service.ServiceName {
-			return true
+		if parts[0] == service.OrgID && parts[2] == service.ServiceName {
+			if policySemVerRange, err := common.ParseSemVerRange(service.Version); err != nil {
+				return false
+			} else if serviceSemVer, err := common.ParseSemVer(parts[1]); err != nil {
+				return false
+			} else {
+				if policySemVerRange.IsInRange(serviceSemVer) {
+					return true
+				}
+			}
 		}
 	}
 	return false
