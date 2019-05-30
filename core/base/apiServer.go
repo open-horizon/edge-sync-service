@@ -1381,7 +1381,7 @@ func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWr
 			trace.Debug("In handleObjects. List DestinationPolicy, service %s/%s/\n",
 				serviceOrgID, serviceName)
 		}
-		objects, err = ListObjectsWithDestinationPolicyByService(serviceOrgID, serviceName)
+		objects, err = ListObjectsWithDestinationPolicyByService(orgID, serviceOrgID, serviceName)
 	}
 
 	if err != nil {
