@@ -191,7 +191,7 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 
 	for _, row := range invalidObjects {
 		err := UpdateObject(row.orgID, row.objectType, row.objectID, row.metaData, nil)
-		if err == nil {
+		if err == nil && row.message != "" {
 			t.Errorf(row.message)
 		}
 	}

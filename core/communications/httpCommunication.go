@@ -219,7 +219,9 @@ func (communication *HTTP) handleGetUpdates(writer http.ResponseWriter, request 
 	}
 	writer.Header().Add("Content-Type", "application/json")
 	writer.WriteHeader(http.StatusOK)
-	writer.Write(body)
+	if _, err := writer.Write(body); err != nil && log.IsLogging(logger.ERROR) {
+		log.Error("Failed to write response body, error: " + err.Error())
+	}
 }
 
 // SendNotificationMessage sends a notification message from the CSS to the ESS or from the ESS to the CSS

@@ -1341,13 +1341,19 @@ func parseDataMessage(message []byte) (orgID string, objectType string, objectID
 			if err != nil {
 				return
 			}
-			messageReader.Seek(int64(fieldLength), os.SEEK_CUR)
+			_, err = messageReader.Seek(int64(fieldLength), os.SEEK_CUR)
+			if err != nil {
+				return
+			}
 
 		default:
 			if trace.IsLogging(logger.TRACE) {
 				trace.Trace("parseDataMessage encoutered an unrecognized field of type: %d, the Type/Length/Value is ignored\n", fieldType)
 			}
-			messageReader.Seek(int64(fieldLength), os.SEEK_CUR)
+			_, err = messageReader.Seek(int64(fieldLength), os.SEEK_CUR)
+			if err != nil {
+				return
+			}
 		}
 	}
 

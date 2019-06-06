@@ -187,7 +187,9 @@ func handleDestinations(writer http.ResponseWriter, request *http.Request) {
 				} else {
 					writer.Header().Add(contentType, applicationJSON)
 					writer.WriteHeader(http.StatusOK)
-					writer.Write(data)
+					if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+						log.Error("Failed to write response body, error: " + err.Error())
+					}
 				}
 			}
 		}
@@ -248,7 +250,9 @@ func handleDestinations(writer http.ResponseWriter, request *http.Request) {
 				} else {
 					writer.Header().Add(contentType, applicationJSON)
 					writer.WriteHeader(http.StatusOK)
-					writer.Write(data)
+					if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+						log.Error("Failed to write response body, error: " + err.Error())
+					}
 				}
 			}
 		}
@@ -498,7 +502,9 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 				} else {
 					writer.Header().Add(contentType, applicationJSON)
 					writer.WriteHeader(http.StatusOK)
-					writer.Write(data)
+					if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+						log.Error("Failed to write response body, error: " + err.Error())
+					}
 				}
 			}
 		}
@@ -930,7 +936,9 @@ func handleObjectStatus(orgID string, objectType string, objectID string, writer
 			} else {
 				writer.Header().Add(contentType, "plain/text")
 				writer.WriteHeader(http.StatusOK)
-				writer.Write([]byte(status))
+				if _, err := writer.Write([]byte(status)); err != nil && log.IsLogging(logger.ERROR) {
+					log.Error("Failed to write response body, error: " + err.Error())
+				}
 			}
 		}
 	} else {
@@ -995,7 +1003,9 @@ func handleObjectDestinations(orgID string, objectType string, objectID string, 
 				} else {
 					writer.Header().Add(contentType, applicationJSON)
 					writer.WriteHeader(http.StatusOK)
-					writer.Write([]byte(destinations))
+					if _, err := writer.Write([]byte(destinations)); err != nil && log.IsLogging(logger.ERROR) {
+						log.Error("Failed to write response body, error: " + err.Error())
+					}
 				}
 			}
 		}
@@ -1277,7 +1287,9 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 			} else {
 				writer.Header().Add(contentType, applicationJSON)
 				writer.WriteHeader(http.StatusOK)
-				writer.Write(data)
+				if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+					log.Error("Failed to write response body, error: " + err.Error())
+				}
 			}
 		}
 	}
@@ -1418,7 +1430,9 @@ func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWr
 			} else {
 				writer.Header().Add(contentType, applicationJSON)
 				writer.WriteHeader(http.StatusOK)
-				writer.Write(data)
+				if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+					log.Error("Failed to write response body, error: " + err.Error())
+				}
 			}
 		}
 	}
@@ -1634,7 +1648,9 @@ func handleGetOrganizations(writer http.ResponseWriter, request *http.Request) {
 			} else {
 				writer.Header().Add(contentType, applicationJSON)
 				writer.WriteHeader(http.StatusOK)
-				writer.Write(data)
+				if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+					log.Error("Failed to write response body, error: " + err.Error())
+				}
 			}
 		}
 	}
@@ -1983,7 +1999,9 @@ func handleACLGet(aclType string, orgID string, parts []string, writer http.Resp
 		} else {
 			writer.Header().Add(contentType, applicationJSON)
 			writer.WriteHeader(http.StatusOK)
-			writer.Write(data)
+			if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+				log.Error("Failed to write response body, error: " + err.Error())
+			}
 		}
 	}
 }
@@ -2247,6 +2265,8 @@ func handleHealth(writer http.ResponseWriter, request *http.Request) {
 	} else {
 		writer.Header().Add(contentType, applicationJSON)
 		writer.WriteHeader(http.StatusOK)
-		writer.Write(data)
+		if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+			log.Error("Failed to write response body, error: " + err.Error())
+		}
 	}
 }

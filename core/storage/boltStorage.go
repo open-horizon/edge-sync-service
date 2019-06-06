@@ -74,7 +74,7 @@ func (store *BoltStorage) Init() common.SyncServiceError {
 
 	path := common.Configuration.PersistenceRootPath + "/sync/db/"
 
-	err := os.MkdirAll(path, 0755)
+	err := os.MkdirAll(path, 0750)
 	if err != nil {
 		return err
 	}
@@ -158,7 +158,7 @@ func (store *BoltStorage) Init() common.SyncServiceError {
 	} else {
 		path = common.Configuration.PersistenceRootPath + "/sync/local/"
 	}
-	err = os.MkdirAll(path, 0755)
+	err = os.MkdirAll(path, 0750)
 	store.localDataPath = "file://" + path
 	if err == nil {
 		common.HealthStatus.ReconnectedToDatabase()
@@ -197,7 +197,11 @@ func (store *BoltStorage) PerformMaintenance() {
 
 // Cleanup erase the on disk Bolt database
 func (store *BoltStorage) Cleanup() {
-	os.Remove(common.Configuration.PersistenceRootPath + "/sync/db/sync.db")
+	if err := os.Remove(common.Configuration.PersistenceRootPath + "/sync/db/sync.db"); err != nil {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("Failed to remove Bolt database")
+		}
+	}
 }
 
 // StoreObject stores an object

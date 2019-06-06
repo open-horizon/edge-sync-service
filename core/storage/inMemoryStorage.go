@@ -49,7 +49,7 @@ func (store *InMemoryStorage) Init() common.SyncServiceError {
 	persistedTimeBase := currentTimeInSeconds
 
 	dir := common.Configuration.PersistenceRootPath + "/sync/local/"
-	err := os.MkdirAll(dir, 0755)
+	err := os.MkdirAll(dir, 0750)
 	if err == nil {
 		path := dir + "persisted-data"
 		persisted := store.readPersistedTimebase(path)

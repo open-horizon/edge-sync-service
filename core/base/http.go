@@ -87,7 +87,9 @@ func startHTTPServer(ipAddress string, registerHandlers bool, swaggerFile string
 			} else {
 				socketFile = common.Configuration.PersistenceRootPath + common.Configuration.ListeningAddress
 			}
-			os.Remove(socketFile)
+			if err := os.Remove(socketFile); err != nil && !os.IsNotExist(err) {
+				return &common.SetupError{Message: fmt.Sprintf("Failed to remove Unix Socket listening. Error: %s", err)}
+			}
 			unixAddress, err := net.ResolveUnixAddr("unix", socketFile)
 			if err != nil {
 				return &common.SetupError{Message: fmt.Sprintf("Failed to setup Unix Socket listening. Error: %s", err)}
@@ -144,10 +146,18 @@ func startHTTPServerHelper(secure bool, listener net.Listener) {
 
 func stopHTTPServing() {
 	if common.Configuration.UnsecureListeningPort != 0 {
-		unsecureHTTPServer.Shutdown(context.Background())
+		if err := unsecureHTTPServer.Shutdown(context.Background()); err != nil {
+			if log.IsLogging(logger.ERROR) {
+				log.Error(err.Error())
+			}
+		}
 	}
 	if len(common.Configuration.ServerCertificate) != 0 {
-		secureHTTPServer.Shutdown(context.Background())
+		if err := secureHTTPServer.Shutdown(context.Background()); err != nil {
+			if log.IsLogging(logger.ERROR) {
+				log.Error(err.Error())
+			}
+		}
 	}
 }
 
