@@ -167,7 +167,7 @@ func setupCertificates() bool {
 	last := strings.LastIndex(cert, "/")
 	if last != -1 {
 		fullCertDir := cert[:last]
-		if err = os.MkdirAll(fullCertDir, 0755); err != nil {
+		if err = os.MkdirAll(fullCertDir, 0750); err != nil {
 			fmt.Printf("Failed to create the directory %s. error: %s\n", fullCertDir, err)
 			return false
 		}
@@ -219,8 +219,17 @@ func setupCertificates() bool {
 		return false
 	}
 
-	pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
-	certOut.Close()
+	if err = pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes}); err != nil {
+		fmt.Printf("Failed to encode the certificate. Error: %s\n", err)
+	}
+	if closeErr := certOut.Close(); closeErr != nil {
+		fmt.Printf("Failed to close the certificate PEM file (%s). Error: %s\n", cert, closeErr)
+		return false
+	}
+	if err != nil {
+		// Close succeeded
+		return false
+	}
 
 	keyOut, err := os.OpenFile(key, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
@@ -228,8 +237,17 @@ func setupCertificates() bool {
 		return false
 	}
 
-	pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
-	keyOut.Close()
+	if err = pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}); err != nil {
+		fmt.Printf("Failed to encode the key. Error: %s\n", err)
+	}
+	if closeErr := keyOut.Close(); err != nil {
+		fmt.Printf("Failed to close the key PEM file (%s). Error: %s\n", key, closeErr)
+		return false
+	}
+	if err != nil {
+		// Close succeeded
+		return false
+	}
 
 	fmt.Printf("Created server certificate at %s\n", cert)
 	return true

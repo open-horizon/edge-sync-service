@@ -67,7 +67,10 @@ func main() {
 	}
 
 	// Start the embedded sync client (no parameters are used)
-	os.Setenv("NODE_TYPE", "CSS")
+	err = os.Setenv("NODE_TYPE", "CSS")
+	if err != nil && V > none {
+		fmt.Printf("Failed to set NODE_TYPE to CSS, error: %s\n", err)
+	}
 	syncClient := client.NewSyncServiceClient("", "", 0)
 	syncClient.SetOrgID(*orgID)
 
@@ -141,7 +144,10 @@ func receiveFile(syncClient *client.SyncServiceClient, object *client.ObjectMeta
 			}
 			return
 		}
-		file.Close()
+		err = file.Close()
+		if err != nil && V > none {
+			fmt.Printf("Failed to close the file at DestinationDataURI %s. Error: %s\n", uri.Path, err)
+		}
 		ok = true
 	} else {
 		if len(*destDir) > 0 && !filepath.IsAbs(path) {
@@ -154,26 +160,37 @@ func receiveFile(syncClient *client.SyncServiceClient, object *client.ObjectMeta
 				fmt.Printf("Failed to open the file %s for writing. Error: %s\n", path, err)
 			}
 			return
-		} else {
-			tmpFile := file.Name()
-			if syncClient.FetchObjectData(object, file) {
-				file.Close()
-				err = os.Rename(tmpFile, path)
-				if err != nil {
-					os.Remove(tmpFile)
-					if V > none {
-						fmt.Printf(" Failed to rename temporary file %s to target file %s\n", tmpFile, path)
-					}
-					return
-				} else {
-					ok = true
+		}
+		tmpFile := file.Name()
+		if syncClient.FetchObjectData(object, file) {
+			err = file.Close()
+			if err != nil && V > none {
+				fmt.Printf("Failed to close the file %s. Error: %s\n", tmpFile, err)
+			}
+			err = os.Rename(tmpFile, path)
+			if err != nil {
+				err = os.Remove(tmpFile)
+				if err != nil && V > none {
+					fmt.Printf("Failed to remove the file %s. Error: %s\n", tmpFile, err)
 				}
-			} else {
-				file.Close()
-				os.Remove(tmpFile)
 				if V > none {
-					fmt.Printf(" FetchObjectData failed, file %s\n", path)
+					fmt.Printf(" Failed to rename temporary file %s to target file %s\n", tmpFile, path)
 				}
+				return
+			}
+			ok = true
+
+		} else {
+			err = file.Close()
+			if err != nil && V > none {
+				fmt.Printf("Failed to close the file %s. Error: %s\n", file.Name(), err)
+			}
+			err = os.Remove(tmpFile)
+			if err != nil && V > none {
+				fmt.Printf("Failed to remove the file %s. Error: %s\n", tmpFile, err)
+			}
+			if V > none {
+				fmt.Printf(" FetchObjectData failed, file %s\n", path)
 			}
 		}
 	}

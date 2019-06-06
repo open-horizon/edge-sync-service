@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -79,7 +80,7 @@ func main() {
 
 	if *webhook {
 		http.HandleFunc("/updates", handleUpdate)
-		listener, err := net.Listen("tcp", ":0")
+		listener, err := net.Listen("tcp", "localhost:0")
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
@@ -96,7 +97,11 @@ func main() {
 	fmt.Printf("Press the Enter key to exit\n")
 
 	buffer := make([]byte, 10)
-	os.Stdin.Read(buffer)
+	err := errors.New("")
+	for err != nil {
+		// Keep reading untill it succeeds
+		_, err = os.Stdin.Read(buffer)
+	}
 }
 
 func fileReceiver(syncClient *client.SyncServiceClient, updatesChannel chan *client.ObjectMetaData) {
@@ -134,7 +139,9 @@ func receiveFile(syncClient *client.SyncServiceClient, object *client.ObjectMeta
 	} else {
 		tmpFile := filepath.Join(fDir, file.Name())
 		if syncClient.FetchObjectData(object, file) {
-			file.Close()
+			if err = file.Close(); err != nil {
+				fmt.Printf("Failed to close the file\n")
+			}
 			err = os.Rename(tmpFile, path)
 			if err != nil {
 				fmt.Printf(" Failed to rename temporary file %s to target file %s\n", tmpFile, path)
@@ -147,11 +154,15 @@ func receiveFile(syncClient *client.SyncServiceClient, object *client.ObjectMeta
 				}
 			}
 		} else {
-			file.Close()
-			os.Remove(tmpFile)
+			if err = file.Close(); err != nil {
+				fmt.Printf("Failed to close the file\n")
+			}
+			if err = os.Remove(tmpFile); err != nil {
+				fmt.Printf("Failed to remove the temporary file %s\n", tmpFile)
+			}
 			fmt.Printf(" FetchObjectData failed, file %s\n", path)
 		}
-		
+
 	}
 }
 

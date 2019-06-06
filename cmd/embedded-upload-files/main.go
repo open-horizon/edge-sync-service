@@ -4,6 +4,7 @@ package main
 // The files are read from a source directory, sent to the destination, and deleted once the destination acknowledges that the files have been received.
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -19,7 +20,7 @@ import (
 
 var (
 	help       *bool
-	auth       = flag.Bool("auth", false, "Specify whether to use authentication.")	
+	auth       = flag.Bool("auth", false, "Specify whether to use authentication.")
 	srcDir     = flag.String("sD", "./files2send/", "Spesify the source directory to watch for files to send.")
 	delAfter   = flag.Bool("delete", false, "Delete the sent files after being consumed by the other side.")
 	appKey     = flag.String("key", "sampleKey", "Specify the app key to be used when connecting to the Sync Service")
@@ -104,7 +105,10 @@ func main() {
 	}
 
 	// Start the embedded sync client (no parameters are used)
-	os.Setenv("NODE_TYPE", "ESS")
+	err = os.Setenv("NODE_TYPE", "ESS")
+	if err != nil && V > none {
+		fmt.Printf("Failed to set NODE_TYPE to ESS, error: %s\n", err)
+	}
 	syncClient = client.NewSyncServiceClient("", "", 0)
 
 	destType = common.Configuration.DestinationType
@@ -130,7 +134,11 @@ func main() {
 	go watchDir(sd)
 
 	buffer := make([]byte, 10)
-	os.Stdin.Read(buffer)
+	err = errors.New("")
+	for err != nil {
+		// Keep reading untill it succeeds
+		_, err = os.Stdin.Read(buffer)
+	}
 	if V > none {
 		fmt.Println(" Stoping...")
 	}
@@ -156,7 +164,10 @@ func watchDir(sd *os.File) {
 				} else {
 					time.Sleep(100 * time.Millisecond)
 				}
-				sd.Seek(0, 0)
+				if _, err = sd.Seek(0, os.SEEK_SET); err != nil {
+					fmt.Printf("Failed to get the list of files in the given source directory (%s). Error: %s\n", *srcDir, err)
+					goOn = false
+				}
 				continue
 			} else {
 				fmt.Printf("Failed to get the list of files in the given source directory (%s). Error: %s\n", *srcDir, err)
@@ -178,12 +189,12 @@ func watchDir(sd *os.File) {
 				objInfo.fileInfo = fileInfo
 				objInfo.meta = nil
 				objInfo.start = curTime()
-				objInfo.status = fileSent				
+				objInfo.status = fileSent
 			} else {
 				objInfo = &ObjectInfo{fileInfo, nil, filepath.Join(*srcDir, fileName), curTime(), fileSent}
 				mapLock.Lock()
 				objInfoMap[fileName] = objInfo
-				mapLock.Unlock()				
+				mapLock.Unlock()
 			}
 			if V > high {
 				fmt.Printf(" file %s is put in chan for sending\n", fileName)
@@ -193,12 +204,15 @@ func watchDir(sd *os.File) {
 			objInfo.start = curTime()
 			if *delAfter {
 				objInfo.status = fileDeleted
-				os.Remove(objInfo.filePath)
+				err := os.Remove(objInfo.filePath)
+				if err != nil && !os.IsNotExist(err) && V > none {
+					fmt.Printf("Failed to delete the file %s. Error: %s\n", objInfo.filePath, err)
+				}
 				if V > high {
 					fmt.Printf(" file %s is deleted\n", fileName)
 				}
 			} else {
-				objInfo.status = markDeleted				
+				objInfo.status = markDeleted
 				if V > high {
 					fmt.Printf(" file %s is marked as deleted\n", fileName)
 				}
