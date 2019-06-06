@@ -235,13 +235,19 @@ func (store *BoltStorage) StoreObject(metaData common.MetaData, data []byte, sta
 				// On ESS we remove the data of consumed objects, therefore we can't accept "meta only" updates
 				return object, &Error{"Can't update only the meta data of consumed object"}
 			}
+			if (object.Meta.DestinationPolicy == nil && metaData.DestinationPolicy != nil) ||
+				(object.Meta.DestinationPolicy != nil && metaData.DestinationPolicy == nil) {
+				return object, &Error{"Can't update the existence of Destination Policy"}
+			}
 			metaData.DataID = object.Meta.DataID // Keep the previous data id
 			object.Meta = metaData
 			object.Status = status
 			object.PolicyReceived = false
 			object.RemainingConsumers = metaData.ExpectedConsumers
 			object.RemainingReceivers = metaData.ExpectedConsumers
-			object.Destinations = dests
+			if metaData.DestinationPolicy == nil {
+				object.Destinations = dests
+			}
 			return object, nil
 		}
 		err := store.updateObjectHelper(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, function)
@@ -276,6 +282,7 @@ func (store *BoltStorage) StoreObject(metaData common.MetaData, data []byte, sta
 		return err
 	})
 
+		}
 	return deletedDests, err
 }
 

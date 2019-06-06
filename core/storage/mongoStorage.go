@@ -309,44 +309,26 @@ func (store *MongoStorage) StoreObject(metaData common.MetaData, data []byte, st
 		}
 	}
 
-	if metaData.MetaOnly {
-		err := store.update(objects, bson.M{"_id": id},
-			bson.M{
-				"$set": bson.M{
-					"metadata.destination-id":     metaData.DestID,
-					"metadata.destination-type":   metaData.DestType,
-					"metadata.destination-list":   metaData.DestinationsList,
-					"metadata.destination-policy": metaData.DestinationPolicy,
-					"metadata.expiration":         metaData.Expiration,
-					"metadata.version":            metaData.Version,
-					"metadata.description":        metaData.Description,
-					"metadata.link":               metaData.Link,
-					"metadata.inactive":           metaData.Inactive,
-					"metadata.activation-time":    metaData.ActivationTime,
-					"metadata.no-data":            metaData.NoData,
-					"metadata.meta-only":          metaData.MetaOnly,
-					"metadata.data-uri":           metaData.DestinationDataURI,
-					"metadata.source-data-uri":    metaData.SourceDataURI,
-					"metadata.consumers":          metaData.ExpectedConsumers,
-					"metadata.autodelete":         metaData.AutoDelete,
-					"metadata.origin-id":          metaData.OriginID,
-					"metadata.origin-type":        metaData.OriginType,
-					"metadata.instance-id":        metaData.InstanceID,
-
-					"status": status, "destinations": dests,
-					"policy-received":     false,
-					"remaining-consumers": metaData.ExpectedConsumers,
-					"remaining-receivers": metaData.ExpectedConsumers},
-				"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}}})
-		if err == nil {
-			return deletedDests, nil
+	existingObject := &object{}
+	if err := store.fetchOne(objects, bson.M{"_id": id}, nil, existingObject); err != nil {
+		if err != mgo.ErrNotFound {
+			return nil, &Error{fmt.Sprintf("Failed to retrieve object's status. Error: %s.", err)}
 		}
-		switch err {
-		case mgo.ErrNotFound:
-			// Insert the object
-			break
-		default:
-			return nil, &Error{fmt.Sprintf("Failed to update object. Error: %s.", err)}
+		existingObject = nil
+	}
+
+	if existingObject != nil {
+		if (metaData.DestinationPolicy != nil && existingObject.MetaData.DestinationPolicy == nil) ||
+			(metaData.DestinationPolicy == nil && existingObject.MetaData.DestinationPolicy != nil) {
+			return nil, &Error{"Can't update the existence of Destination Policy"}
+		}
+		if metaData.MetaOnly {
+			metaData.DataID = existingObject.MetaData.DataID
+			metaData.ObjectSize = existingObject.MetaData.ObjectSize
+			metaData.ChunkSize = existingObject.MetaData.ChunkSize
+		}
+		if metaData.DestinationPolicy != nil {
+			dests = existingObject.Destinations
 		}
 	}
 
