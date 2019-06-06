@@ -324,7 +324,24 @@ func ListObjectsWithDestinationPolicyByService(orgID, serviceOrgID, serviceName 
 
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In ListObjectsWithDestinationPolicyByService. Get %s/%s. Returned %d objects\n",
-			orgID, serviceName, len(objects))
+			serviceOrgID, serviceName, len(objects))
+	}
+
+	return objects, err
+}
+
+// ListObjectsWithDestinationPolicyUpdatedSince provides a list of objects that have a DestinationPolicy that has been updated since the specified time
+func ListObjectsWithDestinationPolicyUpdatedSince(orgID string, since int64) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	apiLock.RLock()
+	defer apiLock.RUnlock()
+
+	common.HealthStatus.ClientRequestReceived()
+
+	objects, err := store.RetrieveObjectsWithDestinationPolicyUpdatedSince(orgID, since)
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In ListObjectsWithDestinationPolicyByService. Get %s since %d. Returned %d objects\n",
+			orgID, since, len(objects))
 	}
 
 	return objects, err

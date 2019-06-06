@@ -333,6 +333,11 @@ func (store *InMemoryStorage) RetrieveObjectsWithDestinationPolicyByService(orgI
 	return nil, nil
 }
 
+// RetrieveObjectsWithDestinationPolicyUpdatedSince returns the list of all the objects that have a Destination Policy updated since the specified time
+func (store *InMemoryStorage) RetrieveObjectsWithDestinationPolicyUpdatedSince(orgID string, since int64) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	return nil, nil
+}
+
 // RetrieveObjects returns the list of all the objects that need to be sent to the destination
 func (store *InMemoryStorage) RetrieveObjects(orgID string, destType string, destID string, resend int) ([]common.MetaData, common.SyncServiceError) {
 	store.lock()

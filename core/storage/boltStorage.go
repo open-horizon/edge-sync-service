@@ -268,21 +268,34 @@ func (store *BoltStorage) StoreObject(metaData common.MetaData, data []byte, sta
 			return nil, err
 		}
 	}
-	object := boltObject{Meta: metaData, Status: status, PolicyReceived: false,
+	newObject := boltObject{Meta: metaData, Status: status, PolicyReceived: false,
 		RemainingConsumers: metaData.ExpectedConsumers, RemainingReceivers: metaData.ExpectedConsumers,
 		DataPath: dataPath, Destinations: dests}
-	encoded, err := json.Marshal(object)
-	if err != nil {
-		return nil, err
-	}
 
-	id := getObjectCollectionID(metaData)
-	err = store.db.Update(func(tx *bolt.Tx) error {
-		err = tx.Bucket(objectsBucket).Put([]byte(id), []byte(encoded))
-		return err
-	})
-
+	function := func(object boltObject) (boltObject, common.SyncServiceError) {
+		if (object.Meta.DestinationPolicy == nil && metaData.DestinationPolicy != nil) ||
+			(object.Meta.DestinationPolicy != nil && metaData.DestinationPolicy == nil) {
+			return object, &Error{"Can't update the existence of Destination Policy"}
 		}
+		if metaData.DestinationPolicy != nil {
+			newObject.Destinations = object.Destinations
+		}
+		return newObject, nil
+	}
+	err := store.updateObjectHelper(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, function)
+	if err == notFound {
+		// Not found, insert
+		encoded, err := json.Marshal(newObject)
+		if err != nil {
+			return nil, err
+		}
+		id := getObjectCollectionID(metaData)
+		err = store.db.Update(func(tx *bolt.Tx) error {
+			err = tx.Bucket(objectsBucket).Put([]byte(id), []byte(encoded))
+			return err
+		})
+		return deletedDests, err
+	}
 	return deletedDests, err
 }
 
@@ -421,10 +434,7 @@ func (store *BoltStorage) RetrieveObjectsWithDestinationPolicy(orgID string, rec
 	function := func(object boltObject) {
 		if orgID == object.Meta.DestOrgID && object.Meta.DestinationPolicy != nil &&
 			(received || !object.PolicyReceived) {
-			result = append(result, common.ObjectDestinationPolicy{
-				OrgID: orgID, ObjectType: object.Meta.ObjectType, ObjectID: object.Meta.ObjectID,
-				DestinationPolicy: *object.Meta.DestinationPolicy,
-			})
+			result = append(result, createObjectDestinationPolicy(object))
 		}
 	}
 	if err := store.retrieveObjectsHelper(function); err != nil {
@@ -440,19 +450,24 @@ func (store *BoltStorage) RetrieveObjectsWithDestinationPolicyByService(orgID, s
 		if orgID == object.Meta.DestOrgID && object.Meta.DestinationPolicy != nil {
 			for _, service := range object.Meta.DestinationPolicy.Services {
 				if serviceOrgID == service.OrgID && serviceName == service.ServiceName {
-					destinationList := make([]common.DestinationsStatus, len(object.Destinations))
-					for index, destination := range object.Destinations {
-						destinationList[index] = common.DestinationsStatus{
-							DestType: destination.Destination.DestType, DestID: destination.Destination.DestID,
-							Status: destination.Status, Message: destination.Message,
-						}
-					}
-					result = append(result, common.ObjectDestinationPolicy{
-						OrgID: object.Meta.DestOrgID, ObjectType: object.Meta.ObjectType, ObjectID: object.Meta.ObjectID,
-						DestinationPolicy: *object.Meta.DestinationPolicy, Destinations: destinationList,
-					})
+					result = append(result, createObjectDestinationPolicy(object))
 				}
 			}
+		}
+	}
+	if err := store.retrieveObjectsHelper(function); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// RetrieveObjectsWithDestinationPolicyUpdatedSince returns the list of all the objects that have a Destination Policy updated since the specified time
+func (store *BoltStorage) RetrieveObjectsWithDestinationPolicyUpdatedSince(orgID string, since int64) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	result := make([]common.ObjectDestinationPolicy, 0)
+	function := func(object boltObject) {
+		if orgID == object.Meta.DestOrgID && object.Meta.DestinationPolicy != nil &&
+			object.Meta.DestinationPolicy.Timestamp >= since {
+			result = append(result, createObjectDestinationPolicy(object))
 		}
 	}
 	if err := store.retrieveObjectsHelper(function); err != nil {

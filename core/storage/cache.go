@@ -128,6 +128,11 @@ func (store *Cache) RetrieveObjectsWithDestinationPolicyByService(orgID, service
 	return store.Store.RetrieveObjectsWithDestinationPolicyByService(orgID, serviceOrgID, serviceName)
 }
 
+// RetrieveObjectsWithDestinationPolicyUpdatedSince returns the list of all the objects that have a Destination Policy updated since the specified time
+func (store *Cache) RetrieveObjectsWithDestinationPolicyUpdatedSince(orgID string, since int64) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	return store.Store.RetrieveObjectsWithDestinationPolicyUpdatedSince(orgID, since)
+}
+
 // RetrieveObjects returns the list of all the objects that need to be sent to the destination
 func (store *Cache) RetrieveObjects(orgID string, destType string, destID string, resend int) ([]common.MetaData, common.SyncServiceError) {
 	return store.Store.RetrieveObjects(orgID, destType, destID, resend)

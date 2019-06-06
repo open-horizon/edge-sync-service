@@ -76,6 +76,9 @@ type Storage interface {
 	// RetrieveObjectsWithDestinationPolicyByService returns the list of all the object Policies for a particular service
 	RetrieveObjectsWithDestinationPolicyByService(orgID, serviceOrgID, serviceName string) ([]common.ObjectDestinationPolicy, common.SyncServiceError)
 
+	// RetrieveObjectsWithDestinationPolicyUpdatedSince returns the list of all the objects that have a Destination Policy updated since the specified time
+	RetrieveObjectsWithDestinationPolicyUpdatedSince(orgID string, since int64) ([]common.ObjectDestinationPolicy, common.SyncServiceError)
+
 	// Return the list of all the objects that need to be sent to the destination
 	RetrieveObjects(orgID string, destType string, destID string, resend int) ([]common.MetaData, common.SyncServiceError)
 

@@ -1317,7 +1317,13 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 //   description: The ID of the service (orgID/architecture/version/serviceName) to which objects have affinity,
 //        whose Destination Policy should be fetched.
 //   required: false
-//   type: boolean
+//   type: string
+// - name: since
+//   in: query
+//   description: Objects that have a Destination Policy which was updated since the specified UTC time in nanoseconds should be fetched.
+//   required: false
+//   type: integer
+//   format: int64
 //
 // responses:
 //   '200':
@@ -1367,10 +1373,27 @@ func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWr
 		serviceName = parts[1]
 	}
 
+	since := int64(0)
+	sinceString := request.URL.Query().Get("since")
+	if sinceString != "" {
+		var err error
+		since, err = strconv.ParseInt(sinceString, 10, 64)
+		if err != nil || since < 1 {
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+	}
+
 	var objects []common.ObjectDestinationPolicy
 	var err error
 
-	if serviceName == "" {
+	if since != 0 {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In handleObjects. List DestinationPolicy, orgID %s. since %d\n",
+				orgID, since)
+		}
+		objects, err = ListObjectsWithDestinationPolicyUpdatedSince(orgID, since)
+	} else if serviceName == "" {
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleObjects. List DestinationPolicy, orgID %s. Include received %t\n",
 				orgID, received)
@@ -1378,8 +1401,8 @@ func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWr
 		objects, err = ListObjectsWithDestinationPolicy(orgID, received)
 	} else {
 		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("In handleObjects. List DestinationPolicy, service %s/%s/\n",
-				serviceOrgID, serviceName)
+			trace.Debug("In handleObjects. List DestinationPolicy, orgID %s, service %s/%s/\n",
+				orgID, serviceOrgID, serviceName)
 		}
 		objects, err = ListObjectsWithDestinationPolicyByService(orgID, serviceOrgID, serviceName)
 	}

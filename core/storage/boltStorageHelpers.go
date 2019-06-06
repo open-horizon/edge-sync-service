@@ -461,6 +461,20 @@ func (store *BoltStorage) retrieveACLHelper(retrieve func(boltACL)) common.SyncS
 	return err
 }
 
+func createObjectDestinationPolicy(object boltObject) common.ObjectDestinationPolicy {
+	destinationList := make([]common.DestinationsStatus, len(object.Destinations))
+	for index, destination := range object.Destinations {
+		destinationList[index] = common.DestinationsStatus{
+			DestType: destination.Destination.DestType, DestID: destination.Destination.DestID,
+			Status: destination.Status, Message: destination.Message,
+		}
+	}
+	return common.ObjectDestinationPolicy{
+		OrgID: object.Meta.DestOrgID, ObjectType: object.Meta.ObjectType, ObjectID: object.Meta.ObjectID,
+		DestinationPolicy: *object.Meta.DestinationPolicy, Destinations: destinationList,
+	}
+}
+
 func (store *BoltStorage) lock() {
 	<-store.lockChannel
 }

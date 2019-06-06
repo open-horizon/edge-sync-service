@@ -207,8 +207,25 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 	err = objectsCollection.EnsureIndex(
 		mgo.Index{
 			Key: []string{
+				"metadata.destination-org-id",
 				"metadata.destination-policy.services.org-id",
-				"metadata.destination-policy.services.service-name"},
+				"metadata.destination-policy.services.service-name",
+			},
+			Name:       "syncObjects-destination-policy.services.service-id",
+			Unique:     false,
+			DropDups:   false,
+			Background: false,
+			Sparse:     true,
+		})
+	if err != nil {
+		log.Error("Failed to create an index on %s. Error: %s", objects, err)
+	}
+	err = objectsCollection.EnsureIndex(
+		mgo.Index{
+			Key: []string{
+				"metadata.destination-org-id",
+				"metadata.destination-policy.timestamp",
+			},
 			Unique:     false,
 			DropDups:   false,
 			Background: false,
@@ -650,6 +667,16 @@ func (store *MongoStorage) RetrieveObjectsWithDestinationPolicyByService(orgID, 
 		"metadata.destination-org-id":                       orgID,
 		"metadata.destination-policy.services.org-id":       serviceOrgID,
 		"metadata.destination-policy.services.service-name": serviceName,
+	}
+
+	return store.retrievePolicies(query)
+}
+
+// RetrieveObjectsWithDestinationPolicyUpdatedSince returns the list of all the objects that have a Destination Policy updated since the specified time
+func (store *MongoStorage) RetrieveObjectsWithDestinationPolicyUpdatedSince(orgID string, since int64) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	query := bson.M{
+		"metadata.destination-org-id":           orgID,
+		"metadata.destination-policy.timestamp": bson.M{"$gte": since},
 	}
 
 	return store.retrievePolicies(query)
