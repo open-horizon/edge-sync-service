@@ -51,7 +51,7 @@ func setupCertificates() error {
 			return err
 		}
 
-		if err = os.MkdirAll(common.Configuration.PersistenceRootPath+certDir, 0755); err != nil {
+		if err = os.MkdirAll(common.Configuration.PersistenceRootPath+certDir, 0750); err != nil {
 			return nil
 		}
 
@@ -96,16 +96,28 @@ func setupCertificates() error {
 			return err
 		}
 
-		pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
-		certOut.Close()
+		err = pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
+		if closeErr := certOut.Close(); closeErr != nil {
+			return closeErr
+		}
+		if err != nil {
+			// Close succeeded
+			return err
+		}
 
 		keyOut, err := os.OpenFile(keyFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 		if err != nil {
 			return err
 		}
 
-		pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
-		keyOut.Close()
+		err = pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
+		if closeErr := keyOut.Close(); closeErr != nil {
+			return closeErr
+		}
+		if err != nil {
+			// Close succeeded
+			return err
+		}
 
 		if log.IsLogging(logger.INFO) {
 			log.Info("Created server certificate at %s\n", certFile)

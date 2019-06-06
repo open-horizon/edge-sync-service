@@ -187,7 +187,9 @@ func handleDestinations(writer http.ResponseWriter, request *http.Request) {
 				} else {
 					writer.Header().Add(contentType, applicationJSON)
 					writer.WriteHeader(http.StatusOK)
-					writer.Write(data)
+					if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+						log.Error("Failed to write response body, error: " + err.Error())
+					}
 				}
 			}
 		}
@@ -248,7 +250,9 @@ func handleDestinations(writer http.ResponseWriter, request *http.Request) {
 				} else {
 					writer.Header().Add(contentType, applicationJSON)
 					writer.WriteHeader(http.StatusOK)
-					writer.Write(data)
+					if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+						log.Error("Failed to write response body, error: " + err.Error())
+					}
 				}
 			}
 		}
@@ -285,7 +289,7 @@ func handleResend(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	code, _, _ := security.Authenticate(request)
-	if code != security.AuthAdmin && code != security.AuthUser {
+	if code != security.AuthAdmin && code != security.AuthUser && code != security.AuthSyncAdmin {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
 		return
@@ -498,7 +502,9 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 				} else {
 					writer.Header().Add(contentType, applicationJSON)
 					writer.WriteHeader(http.StatusOK)
-					writer.Write(data)
+					if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+						log.Error("Failed to write response body, error: " + err.Error())
+					}
 				}
 			}
 		}
@@ -930,7 +936,9 @@ func handleObjectStatus(orgID string, objectType string, objectID string, writer
 			} else {
 				writer.Header().Add(contentType, "plain/text")
 				writer.WriteHeader(http.StatusOK)
-				writer.Write([]byte(status))
+				if _, err := writer.Write([]byte(status)); err != nil && log.IsLogging(logger.ERROR) {
+					log.Error("Failed to write response body, error: " + err.Error())
+				}
 			}
 		}
 	} else {
@@ -995,7 +1003,9 @@ func handleObjectDestinations(orgID string, objectType string, objectID string, 
 				} else {
 					writer.Header().Add(contentType, applicationJSON)
 					writer.WriteHeader(http.StatusOK)
-					writer.Write([]byte(destinations))
+					if _, err := writer.Write([]byte(destinations)); err != nil && log.IsLogging(logger.ERROR) {
+						log.Error("Failed to write response body, error: " + err.Error())
+					}
 				}
 			}
 		}
@@ -1277,7 +1287,9 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 			} else {
 				writer.Header().Add(contentType, applicationJSON)
 				writer.WriteHeader(http.StatusOK)
-				writer.Write(data)
+				if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+					log.Error("Failed to write response body, error: " + err.Error())
+				}
 			}
 		}
 	}
@@ -1317,7 +1329,13 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 //   description: The ID of the service (orgID/architecture/version/serviceName) to which objects have affinity,
 //        whose Destination Policy should be fetched.
 //   required: false
-//   type: boolean
+//   type: string
+// - name: since
+//   in: query
+//   description: Objects that have a Destination Policy which was updated since the specified UTC time in nanoseconds should be fetched.
+//   required: false
+//   type: integer
+//   format: int64
 //
 // responses:
 //   '200':
@@ -1337,7 +1355,7 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWriter,
 	request *http.Request) {
 	code, userOrgID, _ := security.Authenticate(request)
-	if code != security.AuthAdmin || userOrgID != orgID {
+	if code != security.AuthSyncAdmin && (code != security.AuthAdmin || userOrgID != orgID) {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
 		return
@@ -1367,10 +1385,27 @@ func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWr
 		serviceName = parts[1]
 	}
 
+	since := int64(0)
+	sinceString := request.URL.Query().Get("since")
+	if sinceString != "" {
+		var err error
+		since, err = strconv.ParseInt(sinceString, 10, 64)
+		if err != nil || since < 1 {
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+	}
+
 	var objects []common.ObjectDestinationPolicy
 	var err error
 
-	if serviceName == "" {
+	if since != 0 {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In handleObjects. List DestinationPolicy, orgID %s. since %d\n",
+				orgID, since)
+		}
+		objects, err = ListObjectsWithDestinationPolicyUpdatedSince(orgID, since)
+	} else if serviceName == "" {
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleObjects. List DestinationPolicy, orgID %s. Include received %t\n",
 				orgID, received)
@@ -1378,8 +1413,8 @@ func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWr
 		objects, err = ListObjectsWithDestinationPolicy(orgID, received)
 	} else {
 		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("In handleObjects. List DestinationPolicy, service %s/%s/\n",
-				serviceOrgID, serviceName)
+			trace.Debug("In handleObjects. List DestinationPolicy, orgID %s, service %s/%s/\n",
+				orgID, serviceOrgID, serviceName)
 		}
 		objects, err = ListObjectsWithDestinationPolicyByService(orgID, serviceOrgID, serviceName)
 	}
@@ -1395,7 +1430,9 @@ func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWr
 			} else {
 				writer.Header().Add(contentType, applicationJSON)
 				writer.WriteHeader(http.StatusOK)
-				writer.Write(data)
+				if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+					log.Error("Failed to write response body, error: " + err.Error())
+				}
 			}
 		}
 	}
@@ -1611,7 +1648,9 @@ func handleGetOrganizations(writer http.ResponseWriter, request *http.Request) {
 			} else {
 				writer.Header().Add(contentType, applicationJSON)
 				writer.WriteHeader(http.StatusOK)
-				writer.Write(data)
+				if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+					log.Error("Failed to write response body, error: " + err.Error())
+				}
 			}
 		}
 	}
@@ -1742,7 +1781,7 @@ func handleSecurity(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	code, userOrg, _ := security.Authenticate(request)
-	if code == security.AuthFailed || code != security.AuthAdmin {
+	if code == security.AuthFailed || (code != security.AuthAdmin && code != security.AuthSyncAdmin) {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
 		return
@@ -1757,7 +1796,7 @@ func handleSecurity(writer http.ResponseWriter, request *http.Request) {
 	orgID := parts[1]
 	parts = parts[2:]
 
-	if userOrg != orgID {
+	if code != security.AuthSyncAdmin && userOrg != orgID {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
 		return
@@ -1960,7 +1999,9 @@ func handleACLGet(aclType string, orgID string, parts []string, writer http.Resp
 		} else {
 			writer.Header().Add(contentType, applicationJSON)
 			writer.WriteHeader(http.StatusOK)
-			writer.Write(data)
+			if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+				log.Error("Failed to write response body, error: " + err.Error())
+			}
 		}
 	}
 }
@@ -2224,6 +2265,8 @@ func handleHealth(writer http.ResponseWriter, request *http.Request) {
 	} else {
 		writer.Header().Add(contentType, applicationJSON)
 		writer.WriteHeader(http.StatusOK)
-		writer.Write(data)
+		if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+			log.Error("Failed to write response body, error: " + err.Error())
+		}
 	}
 }

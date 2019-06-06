@@ -152,6 +152,36 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 				},
 			}, nil, "UpdateObject didn't check that the service ID's version was invalid",
 		},
+		{"myorg%777", "type1", "123456", common.MetaData{ObjectID: "123456", ObjectType: "type1", DestOrgID: "myorg%777", MetaOnly: true}, nil,
+			"updateObject didn't check that the validity of organization id"},
+		{"myorg777", "type1&", "123456", common.MetaData{ObjectID: "123456", ObjectType: "type1&", DestOrgID: "myorg777", MetaOnly: true}, nil,
+			"updateObject didn't check that the validity of object type"},
+		{"myorg777", "type1", "123456:", common.MetaData{ObjectID: "123456:", ObjectType: "type1", DestOrgID: "myorg777", MetaOnly: true}, nil,
+			"updateObject didn't check that the validity of object id"},
+		{"myorg777", "type1", "123456", common.MetaData{ObjectID: "123456", ObjectType: "type1", DestOrgID: "myorg777", MetaOnly: true, DestType: "%^&+"}, nil,
+			"updateObject didn't check that the validity of destination type"},
+		{"myorg777", "type1", "777", common.MetaData{ObjectID: "777", ObjectType: "type1", DestOrgID: "myorg777",
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "a", Value: float64(1)},
+					{Name: "b", Value: "zxcv"},
+					{Name: "c", Value: true, Type: "bool"},
+				},
+				Constraints: []string{"Plover=34", "asdf=true"},
+			}}, nil, ""},
+		{"myorg777", "type1", "777", common.MetaData{ObjectID: "777", ObjectType: "type1", DestOrgID: "myorg777", MetaOnly: true}, nil,
+			"updateObject didn't check that the object had a policy and the update doesn't"},
+		{"myorg777", "type1", "888", common.MetaData{ObjectID: "888", ObjectType: "type1", DestOrgID: "myorg777", MetaOnly: true}, nil,
+			""},
+		{"myorg777", "type1", "88", common.MetaData{ObjectID: "888", ObjectType: "type1", DestOrgID: "myorg777",
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "a", Value: float64(1)},
+					{Name: "b", Value: "zxcv"},
+					{Name: "c", Value: true, Type: "bool"},
+				},
+				Constraints: []string{"Plover=34", "asdf=true"},
+			}}, nil, "updateObject didn't check that the object didn't have a policy and the update does"},
 	}
 
 	if err := store.Init(); err != nil {
@@ -161,7 +191,7 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 
 	for _, row := range invalidObjects {
 		err := UpdateObject(row.orgID, row.objectType, row.objectID, row.metaData, nil)
-		if err == nil {
+		if err == nil && row.message != "" {
 			t.Errorf(row.message)
 		}
 	}

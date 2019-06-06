@@ -909,6 +909,43 @@ func testRegisterAsNew(storageType string, t *testing.T) {
 	}
 }
 
+func TestRegisterDestinationValidity(t *testing.T) {
+	common.Configuration.NodeType = common.ESS
+
+	var err error
+	Store, err = setUpStorage(common.Mongo)
+	if err != nil {
+		t.Errorf(err.Error())
+		return
+	}
+	defer Store.Stop()
+
+	Comm = &TestComm{}
+	if err := Comm.StartCommunication(); err != nil {
+		t.Errorf("Failed to start communication. Error: %s", err.Error())
+	}
+
+	tests := []struct {
+		dest common.Destination
+	}{
+		{common.Destination{DestOrgID: "testorg", DestType: "device%", DestID: "dev1", Communication: common.MQTTProtocol}},
+		{common.Destination{DestOrgID: "testorg", DestType: "device", DestID: "dev1//", Communication: common.MQTTProtocol}},
+		{common.Destination{DestOrgID: "testorg", DestType: "device[", DestID: "dev1}", Communication: common.MQTTProtocol}},
+	}
+
+	for _, test := range tests {
+		if err := handleRegisterNew(test.dest, false); err == nil {
+			t.Errorf("handleRegisterNew registered destination with invalid type (%s) or id (%s)", test.dest.DestType, test.dest.DestID)
+		}
+		if err := handleRegistration(test.dest, false); err == nil {
+			t.Errorf("handleRegistration handled destination with invalid type (%s) or id (%s)", test.dest.DestType, test.dest.DestID)
+		}
+		if err := handlePing(test.dest); err == nil {
+			t.Errorf("handlePing handled destination with invalid type (%s) or id (%s)", test.dest.DestType, test.dest.DestID)
+		}
+	}
+}
+
 func setUpStorage(storageType string) (storage.Storage, error) {
 	var store storage.Storage
 	if storageType == common.InMemory {

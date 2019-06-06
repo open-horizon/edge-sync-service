@@ -54,6 +54,10 @@ func handleRegistration(dest common.Destination, persistentStorage bool) common.
 		return &notificationHandlerError{"ESS cannot register other services"}
 	}
 
+	if !common.IsValidName(dest.DestType) || !common.IsValidName(dest.DestID) {
+		return &notificationHandlerError{("Error in handleRegistration: destination contains invalid characters")}
+	}
+
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Handling registration of %s %s\n", dest.DestType, dest.DestID)
 	}
@@ -96,6 +100,10 @@ func handleRegistration(dest common.Destination, persistentStorage bool) common.
 func handleRegisterNew(dest common.Destination, persistentStorage bool) common.SyncServiceError {
 	if common.Configuration.NodeType == common.ESS {
 		return &notificationHandlerError{"ESS cannot register other services"}
+	}
+
+	if !common.IsValidName(dest.DestType) || !common.IsValidName(dest.DestID) {
+		return &notificationHandlerError{("Error in handleRegisterNew: destination contains invalid characters")}
 	}
 
 	if trace.IsLogging(logger.TRACE) {
@@ -146,6 +154,10 @@ func handleRegisterNew(dest common.Destination, persistentStorage bool) common.S
 func handlePing(dest common.Destination) common.SyncServiceError {
 	if common.Configuration.NodeType == common.ESS {
 		return &notificationHandlerError{"ESS received ping"}
+	}
+
+	if !common.IsValidName(dest.DestType) || !common.IsValidName(dest.DestID) {
+		return &notificationHandlerError{("Error in handlePing: destination contains invalid characters")}
 	}
 
 	if trace.IsLogging(logger.TRACE) {
@@ -1329,13 +1341,19 @@ func parseDataMessage(message []byte) (orgID string, objectType string, objectID
 			if err != nil {
 				return
 			}
-			messageReader.Seek(int64(fieldLength), os.SEEK_CUR)
+			_, err = messageReader.Seek(int64(fieldLength), os.SEEK_CUR)
+			if err != nil {
+				return
+			}
 
 		default:
 			if trace.IsLogging(logger.TRACE) {
 				trace.Trace("parseDataMessage encoutered an unrecognized field of type: %d, the Type/Length/Value is ignored\n", fieldType)
 			}
-			messageReader.Seek(int64(fieldLength), os.SEEK_CUR)
+			_, err = messageReader.Seek(int64(fieldLength), os.SEEK_CUR)
+			if err != nil {
+				return
+			}
 		}
 	}
 

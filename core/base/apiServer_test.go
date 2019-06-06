@@ -302,6 +302,38 @@ func testHandleObjectHelper(nodeType string, storageType string, t *testing.T) {
 		{http.MethodGet, "testerUser@myorg222", "myorg222", "type3", "2", "", nil, nil, http.StatusNotFound, nil, 70},
 		{http.MethodPut, "testerUser@myorg222", "myorg222", "type3", "", "", nil, nil, http.StatusNoContent,
 			&webhookUpdate{Action: "register", URL: "http://abc"}, 71},
+
+		{http.MethodPut, "testerSyncAdmin@myorg222", "myorg222", "type4", "1", "",
+			&common.MetaData{ObjectID: "1", ObjectType: "type4", DestOrgID: "myorg222", DestID: "dev1", DestType: "device2"},
+			[]byte("abc"), http.StatusNoContent, nil, 62},
+		{http.MethodGet, "testerSyncAdmin@myorg222", "myorg222", "type4", "1", "",
+			&common.MetaData{ObjectID: "1", ObjectType: "type4", DestOrgID: "myorg222", DestID: "dev1", DestType: "device2"},
+			[]byte("abc"), http.StatusOK, nil, 63},
+		{http.MethodPut, "testerSyncAdmin@myorg222", "myorg222", "type4", "1", "activate", nil, nil, http.StatusNoContent, nil, 64},
+		{http.MethodGet, "testerSyncAdmin@myorg222", "myorg222", "type4", "1", "status", nil, nil, http.StatusOK, nil, 65},
+		{http.MethodGet, "testerSyncAdmin@myorg222", "myorg222", "type4", "1", "destinations", nil, nil, http.StatusOK, nil, 66},
+		{http.MethodDelete, "testerSyncAdmin@myorg222", "myorg222", "type4", "1", "", nil, nil, http.StatusNoContent, nil, 67},
+		{http.MethodPut, "testerSyncAdmin@myorg222", "myorg222", "type4", "1", "deleted", nil, nil, http.StatusNoContent, nil, 68},
+		{http.MethodGet, "testerSyncAdmin@myorg222", "myorg222", "type4", "", "", nil, nil, http.StatusOK, nil, 69},
+		{http.MethodGet, "testerSyncAdmin@myorg222", "myorg222", "type4", "2", "", nil, nil, http.StatusNotFound, nil, 70},
+		{http.MethodPut, "testerSyncAdmin@myorg222", "myorg222", "type4", "", "", nil, nil, http.StatusNoContent,
+			&webhookUpdate{Action: "register", URL: "http://abc"}, 71},
+
+		{http.MethodPut, "testerSyncAdmin@myorg223", "myorg222", "type5", "1", "",
+			&common.MetaData{ObjectID: "1", ObjectType: "type5", DestOrgID: "myorg222", DestID: "dev1", DestType: "device2"},
+			[]byte("abc"), http.StatusNoContent, nil, 62},
+		{http.MethodGet, "testerSyncAdmin@myorg223", "myorg222", "type5", "1", "",
+			&common.MetaData{ObjectID: "1", ObjectType: "type5", DestOrgID: "myorg222", DestID: "dev1", DestType: "device2"},
+			[]byte("abc"), http.StatusOK, nil, 63},
+		{http.MethodPut, "testerSyncAdmin@myorg223", "myorg222", "type5", "1", "activate", nil, nil, http.StatusNoContent, nil, 64},
+		{http.MethodGet, "testerSyncAdmin@myorg223", "myorg222", "type5", "1", "status", nil, nil, http.StatusOK, nil, 65},
+		{http.MethodGet, "testerSyncAdmin@myorg223", "myorg222", "type5", "1", "destinations", nil, nil, http.StatusOK, nil, 66},
+		{http.MethodDelete, "testerSyncAdmin@myorg223", "myorg222", "type5", "1", "", nil, nil, http.StatusNoContent, nil, 67},
+		{http.MethodPut, "testerSyncAdmin@myorg223", "myorg222", "type5", "1", "deleted", nil, nil, http.StatusNoContent, nil, 68},
+		{http.MethodGet, "testerSyncAdmin@myorg223", "myorg222", "type5", "", "", nil, nil, http.StatusOK, nil, 69},
+		{http.MethodGet, "testerSyncAdmin@myorg223", "myorg222", "type5", "2", "", nil, nil, http.StatusNotFound, nil, 70},
+		{http.MethodPut, "testerSyncAdmin@myorg223", "myorg222", "type5", "", "", nil, nil, http.StatusNoContent,
+			&webhookUpdate{Action: "register", URL: "http://abc"}, 71},
 	}
 
 	destInfo := []struct {
@@ -466,14 +498,161 @@ func testInvalidURLs(storageType string, t *testing.T) {
 }
 
 func TestPolicies(t *testing.T) {
-	if status := testAPIServerSetup(common.ESS, common.Mongo); status != "" {
+	if status := testAPIServerSetup(common.ESS, common.InMemory); status != "" {
 		t.Errorf(status)
 	}
 	defer communications.Store.Stop()
 
 	common.Configuration.OrgID = "myorgPolicy"
 
+	_, _, err := loadTestPolicyData(common.ESS, "myorgPolicy")
+	if err != nil {
+		t.Errorf("StoreObject failed: %s", err.Error())
+	}
+
+	tests := []struct {
+		method             string
+		appKey             string
+		orgID              string
+		objectType         string
+		objectID           string
+		expectedHTTPStatus int
+		expectedCount      int
+		testID             int
+	}{
+		{http.MethodGet, "testerService1@myorgPolicy", "myorgPolicy", "type1", "1", http.StatusOK, 0, 1},
+		{http.MethodGet, "testerService2@myorgPolicy", "myorgPolicy", "type1", "1", http.StatusForbidden, 0, 2},
+		{http.MethodGet, "kuku@myorgPolicy", "myorgPolicy", "type1", "1", http.StatusForbidden, 0, 3},
+		{http.MethodGet, "testerUser@myorgPolicy", "myorgPolicy", "type1", "1", http.StatusOK, 0, 4},
+
+		{http.MethodGet, "testerService1@myorgPolicy", "myorgPolicy", "type1", "2", http.StatusOK, 0, 5},
+		{http.MethodGet, "testerService2@myorgPolicy", "myorgPolicy", "type1", "2", http.StatusOK, 0, 6},
+		{http.MethodGet, "testerService2b@myorgPolicy", "myorgPolicy", "type1", "2", http.StatusForbidden, 0, 7},
+		{http.MethodGet, "kuku@myorgPolicy", "myorgPolicy", "type1", "2", http.StatusForbidden, 0, 8},
+		{http.MethodGet, "testerUser@myorgPolicy", "myorgPolicy", "type1", "2", http.StatusOK, 0, 9},
+
+		{http.MethodGet, "testerService2@myorgPolicy", "myorgPolicy", "type1", "2a", http.StatusForbidden, 0, 10},
+		{http.MethodGet, "testerService2b@myorgPolicy", "myorgPolicy", "type1", "2a", http.StatusOK, 0, 11},
+
+		{http.MethodGet, "testerService1@myorgPolicy", "myorgPolicy", "type1", "3", http.StatusForbidden, 0, 12},
+		{http.MethodGet, "testerService2@myorgPolicy", "myorgPolicy", "type1", "3", http.StatusForbidden, 0, 13},
+		{http.MethodGet, "kuku@myorgPolicy", "myorgPolicy", "type1", "3", http.StatusForbidden, 0, 14},
+		{http.MethodGet, "testerUser@myorgPolicy", "myorgPolicy", "type1", "3", http.StatusOK, 0, 15},
+
+		{http.MethodGet, "testerService1@myorgPolicy", "myorgPolicy", "type1", "", http.StatusOK, 2, 16},
+		{http.MethodGet, "testerService2@myorgPolicy", "myorgPolicy", "type1", "", http.StatusOK, 1, 17},
+		{http.MethodGet, "testerService2b@myorgPolicy", "myorgPolicy", "type1", "", http.StatusOK, 1, 18},
+		{http.MethodGet, "kuku@myorgPolicy", "myorgPolicy", "type1", "", http.StatusForbidden, 0, 19},
+		{http.MethodGet, "testerUser@myorgPolicy", "myorgPolicy", "type1", "", http.StatusOK, 4, 20},
+	}
+	for _, test := range tests {
+		urlString := test.objectType
+		if test.objectID != "" {
+			urlString = urlString + "/" + test.objectID
+		}
+
+		writer := newAPIServerTestResponseWriter()
+		request, _ := http.NewRequest(test.method, urlString, nil)
+		request.SetBasicAuth(test.appKey, "")
+
+		handleObjects(writer, request)
+		if writer.statusCode != test.expectedHTTPStatus {
+			t.Errorf("handleObjects of %s returned a status of %d instead of %d for test %d under %s\n",
+				urlString, writer.statusCode, test.expectedHTTPStatus, test.testID, test.appKey)
+		}
+		if writer.statusCode == http.StatusOK && test.objectID == "" {
+			decoder := json.NewDecoder(&writer.body)
+			var data []common.MetaData
+			if err := decoder.Decode(&data); err != nil {
+				t.Errorf("Failed to unmarshall objects. Error: %s\n", err)
+			} else {
+				if len(data) != test.expectedCount {
+					t.Errorf("Fetched %d objects instead of %d for test %d under %s",
+						len(data), test.expectedCount, test.testID, test.appKey)
+				}
+			}
+		}
+	}
+}
+
+func TestObjectsWithPolicyUpdatedSince(t *testing.T) {
+	testObjectsWithPolicyUpdatedSinceHelper(common.Mongo, t)
+	testObjectsWithPolicyUpdatedSinceHelper(common.Bolt, t)
+}
+
+func testObjectsWithPolicyUpdatedSinceHelper(storageProvider string, t *testing.T) {
+	if status := testAPIServerSetup(common.CSS, storageProvider); status != "" {
+		t.Errorf(status)
+	}
+	defer communications.Store.Stop()
+
+	since, totalCount, err := loadTestPolicyData(common.CSS, "")
+	if err != nil {
+		t.Errorf("StoreObject failed: %s", err.Error())
+	}
+
+	tests := []struct {
+		method             string
+		orgID              string
+		since              int64
+		expectedHTTPStatus int
+		expectedCount      int
+		testID             int
+	}{
+		// Must be first test
+		{http.MethodGet, "myorgPolicy", -1, http.StatusOK, 1, 0},
+		// Must be second test
+		{http.MethodGet, "myorgPolicy", 1, http.StatusOK, -1, 1},
+		{http.MethodGet, "myorgPolicy1", 1, http.StatusOK, 1, 2},
+		{http.MethodGet, "myorgPolicy", 0, http.StatusBadRequest, 0, 3},
+		{http.MethodPut, "myorgPolicy", 1, http.StatusMethodNotAllowed, 0, 4},
+		{http.MethodGet, "myorgPolicy2", 1, http.StatusNotFound, 0, 5},
+	}
+
+	tests[0].since = since
+	tests[1].expectedCount = totalCount - 1
+
+	for _, test := range tests {
+		urlString := fmt.Sprintf("%s?destination_policy=true&since=%d", test.orgID, test.since)
+		writer := newAPIServerTestResponseWriter()
+		request, _ := http.NewRequest(test.method, urlString, nil)
+		request.SetBasicAuth("testerAdmin@"+test.orgID, "")
+
+		handleObjects(writer, request)
+		if writer.statusCode != test.expectedHTTPStatus {
+			t.Errorf("handleObjects of %s returned a status of %d instead of %d for test %d\n",
+				urlString, writer.statusCode, test.expectedHTTPStatus, test.testID)
+		}
+		if writer.statusCode == http.StatusOK {
+			decoder := json.NewDecoder(&writer.body)
+			var data []common.ObjectDestinationPolicy
+			if err := decoder.Decode(&data); err != nil {
+				t.Errorf("Failed to unmarshall objects. Error: %s\n", err)
+			} else {
+				if len(data) != test.expectedCount {
+					t.Errorf("Fetched %d objects instead of %d for test %d",
+						len(data), test.expectedCount, test.testID)
+				}
+			}
+		}
+	}
+}
+
+func loadTestPolicyData(nodeType string, orgID string) (int64, int, error) {
 	testData := []common.MetaData{
+		common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorgPolicy1", NoData: true,
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "a", Value: float64(1)},
+					{Name: "b", Value: "zxcv"},
+					{Name: "c", Value: true, Type: "bool"},
+				},
+				Constraints: []string{"Plover=34", "asdf=true"},
+				Services: []common.ServiceID{
+					{OrgID: "plover", Arch: "amd64", ServiceName: "testerService1", Version: "0.0.1"},
+				},
+			},
+		},
 		common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorgPolicy", NoData: true,
 			DestinationPolicy: &common.Policy{
 				Properties: []common.PolicyProperty{
@@ -529,75 +708,21 @@ func TestPolicies(t *testing.T) {
 		},
 	}
 
+	var since int64
+
 	for _, metaData := range testData {
+		if nodeType == common.ESS && metaData.DestOrgID != orgID {
+			continue
+		}
+		since = time.Now().UTC().UnixNano()
+		time.Sleep(10 * time.Millisecond)
+
 		if _, err := store.StoreObject(metaData, nil, common.CompletelyReceived); err != nil {
-			t.Errorf("StoreObject failed: %s", err.Error())
+			return 0, 0, err
 		}
 	}
 
-	tests := []struct {
-		method             string
-		appKey             string
-		orgID              string
-		objectType         string
-		objectID           string
-		expectedHTTPStatus int
-		expectedCount      int
-		testID             int
-	}{
-		{http.MethodGet, "testerService1@myorgPolicy", "myorgPolicy", "type1", "1", http.StatusOK, 0, 1},
-		{http.MethodGet, "testerService2@myorgPolicy", "myorgPolicy", "type1", "1", http.StatusForbidden, 0, 2},
-		{http.MethodGet, "kuku@myorgPolicy", "myorgPolicy", "type1", "1", http.StatusForbidden, 0, 3},
-		{http.MethodGet, "testerUser@myorgPolicy", "myorgPolicy", "type1", "1", http.StatusOK, 0, 4},
-
-		{http.MethodGet, "testerService1@myorgPolicy", "myorgPolicy", "type1", "2", http.StatusOK, 0, 5},
-		{http.MethodGet, "testerService2@myorgPolicy", "myorgPolicy", "type1", "2", http.StatusOK, 0, 6},
-		{http.MethodGet, "testerService2b@myorgPolicy", "myorgPolicy", "type1", "2", http.StatusForbidden, 0, 7},
-		{http.MethodGet, "kuku@myorgPolicy", "myorgPolicy", "type1", "2", http.StatusForbidden, 0, 8},
-		{http.MethodGet, "testerUser@myorgPolicy", "myorgPolicy", "type1", "2", http.StatusOK, 0, 9},
-
-		{http.MethodGet, "testerService2@myorgPolicy", "myorgPolicy", "type1", "2a", http.StatusForbidden, 0, 10},
-		{http.MethodGet, "testerService2b@myorgPolicy", "myorgPolicy", "type1", "2a", http.StatusOK, 0, 11},
-
-		{http.MethodGet, "testerService1@myorgPolicy", "myorgPolicy", "type1", "3", http.StatusForbidden, 0, 12},
-		{http.MethodGet, "testerService2@myorgPolicy", "myorgPolicy", "type1", "3", http.StatusForbidden, 0, 13},
-		{http.MethodGet, "kuku@myorgPolicy", "myorgPolicy", "type1", "3", http.StatusForbidden, 0, 14},
-		{http.MethodGet, "testerUser@myorgPolicy", "myorgPolicy", "type1", "3", http.StatusOK, 0, 15},
-
-		{http.MethodGet, "testerService1@myorgPolicy", "myorgPolicy", "type1", "", http.StatusOK, 2, 15},
-		{http.MethodGet, "testerService2@myorgPolicy", "myorgPolicy", "type1", "", http.StatusOK, 1, 17},
-		{http.MethodGet, "testerService2b@myorgPolicy", "myorgPolicy", "type1", "", http.StatusOK, 1, 18},
-		{http.MethodGet, "kuku@myorgPolicy", "myorgPolicy", "type1", "", http.StatusForbidden, 0, 19},
-		{http.MethodGet, "testerUser@myorgPolicy", "myorgPolicy", "type1", "", http.StatusOK, 4, 20},
-	}
-	for _, test := range tests {
-		urlString := test.objectType
-		if test.objectID != "" {
-			urlString = urlString + "/" + test.objectID
-		}
-
-		writer := newAPIServerTestResponseWriter()
-		request, _ := http.NewRequest(test.method, urlString, nil)
-		request.SetBasicAuth(test.appKey, "")
-
-		handleObjects(writer, request)
-		if writer.statusCode != test.expectedHTTPStatus {
-			t.Errorf("handleObjects of %s returned a status of %d instead of %d for test %d under %s\n",
-				urlString, writer.statusCode, test.expectedHTTPStatus, test.testID, test.appKey)
-		}
-		if writer.statusCode == http.StatusOK && test.objectID == "" {
-			decoder := json.NewDecoder(&writer.body)
-			var data []common.MetaData
-			if err := decoder.Decode(&data); err != nil {
-				t.Errorf("Failed to unmarshall objects. Error: %s\n", err)
-			} else {
-				if len(data) != test.expectedCount {
-					t.Errorf("Fetched %d objects instead of %d for test %d under %s",
-						len(data), test.expectedCount, test.testID, test.appKey)
-				}
-			}
-		}
-	}
+	return since, len(testData), nil
 }
 
 func testAPIServerSetup(nodeType string, storageType string) string {

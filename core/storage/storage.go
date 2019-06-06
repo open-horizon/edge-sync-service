@@ -76,6 +76,9 @@ type Storage interface {
 	// RetrieveObjectsWithDestinationPolicyByService returns the list of all the object Policies for a particular service
 	RetrieveObjectsWithDestinationPolicyByService(orgID, serviceOrgID, serviceName string) ([]common.ObjectDestinationPolicy, common.SyncServiceError)
 
+	// RetrieveObjectsWithDestinationPolicyUpdatedSince returns the list of all the objects that have a Destination Policy updated since the specified time
+	RetrieveObjectsWithDestinationPolicyUpdatedSince(orgID string, since int64) ([]common.ObjectDestinationPolicy, common.SyncServiceError)
+
 	// Return the list of all the objects that need to be sent to the destination
 	RetrieveObjects(orgID string, destType string, destID string, resend int) ([]common.MetaData, common.SyncServiceError)
 
@@ -445,11 +448,10 @@ func compareDestinations(oldList []common.StoreDestinationStatus, newList []comm
 }
 
 func createDestinationsFromMeta(store Storage, metaData common.MetaData) ([]common.StoreDestinationStatus, []common.StoreDestinationStatus, common.SyncServiceError) {
-	dests := make([]common.StoreDestinationStatus, 0)
 	if metaData.DestinationPolicy != nil {
-		return dests, nil, nil
+		return nil, nil, nil
 	}
-
+	dests := make([]common.StoreDestinationStatus, 0)
 	if metaData.DestID != "" {
 		// We check that destType is not empty in updateObject()
 		if dest, err := store.RetrieveDestination(metaData.DestOrgID, metaData.DestType, metaData.DestID); err == nil && dest != nil {

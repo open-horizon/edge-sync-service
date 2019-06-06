@@ -3,6 +3,7 @@ package common
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -158,7 +159,7 @@ type Policy struct {
 	// Services is the list of services this object has affinity for
 	Services []ServiceID `json:"services" bson:"services"`
 
-	// Timestamp indicates when the policy was last updated (result of time.Now().UnixNano())
+	// Timestamp indicates when the policy was last updated (result of time.Now().UTC().UnixNano())
 	Timestamp int64 `json:"timestamp" bson:"timestamp"`
 }
 
@@ -767,6 +768,9 @@ func BlockUntilNoRunningGoRoutines() {
 
 	waitingOnBlockChannel = false
 }
+
+// IsValidName checks if the string only contains letters, digits, and !@#%^*-_.~
+var IsValidName = regexp.MustCompile(`^[a-zA-Z0-9|!|@|#|$|^|*|\-|_|.|~]+$`).MatchString
 
 func init() {
 	Version.Major = 1

@@ -49,7 +49,7 @@ func (store *InMemoryStorage) Init() common.SyncServiceError {
 	persistedTimeBase := currentTimeInSeconds
 
 	dir := common.Configuration.PersistenceRootPath + "/sync/local/"
-	err := os.MkdirAll(dir, 0755)
+	err := os.MkdirAll(dir, 0750)
 	if err == nil {
 		path := dir + "persisted-data"
 		persisted := store.readPersistedTimebase(path)
@@ -330,6 +330,11 @@ func (store *InMemoryStorage) RetrieveObjectsWithDestinationPolicy(orgID string,
 
 // RetrieveObjectsWithDestinationPolicyByService returns the list of all the object Policies for a particular service
 func (store *InMemoryStorage) RetrieveObjectsWithDestinationPolicyByService(orgID, serviceOrgID, serviceName string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	return nil, nil
+}
+
+// RetrieveObjectsWithDestinationPolicyUpdatedSince returns the list of all the objects that have a Destination Policy updated since the specified time
+func (store *InMemoryStorage) RetrieveObjectsWithDestinationPolicyUpdatedSince(orgID string, since int64) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
 	return nil, nil
 }
 

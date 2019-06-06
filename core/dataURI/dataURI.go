@@ -33,12 +33,14 @@ func AppendData(uri string, dataReader io.Reader, dataLength uint32, offset int6
 	}
 
 	filePath := dataURI.Path + ".tmp"
-	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0644)
+	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
 		return common.CreateError(err, fmt.Sprintf("Failed to open file %s to append data. Error: ", dataURI.Path))
 	}
 	defer file.Close()
-	file.Seek(offset, io.SeekStart)
+	if _, err = file.Seek(offset, io.SeekStart); err != nil {
+		return &common.IOError{Message: fmt.Sprintf("Failed to seek to the offset %d of a file. Error: %s", offset, err.Error())}
+	}
 
 	written, err := io.Copy(file, dataReader)
 	if err != nil && err != io.EOF {
@@ -67,13 +69,15 @@ func StoreData(uri string, dataReader io.Reader, dataLength uint32) (int64, comm
 	}
 
 	filePath := dataURI.Path + ".tmp"
-	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0644)
+	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
 		return 0, common.CreateError(err, fmt.Sprintf("Failed to open file %s to write data. Error: ", dataURI.Path))
 	}
 	defer file.Close()
 
-	file.Seek(0, io.SeekStart)
+	if _, err = file.Seek(0, io.SeekStart); err != nil {
+		return 0, &common.IOError{Message: "Failed to seek to the start of a file. Error: " + err.Error()}
+	}
 
 	written, err := io.Copy(file, dataReader)
 	if err != nil && err != io.EOF {

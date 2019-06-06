@@ -34,6 +34,10 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 
 	common.HealthStatus.ClientRequestReceived()
 
+	if !common.IsValidName(orgID) {
+		return &common.InvalidRequest{Message: fmt.Sprintf("Organization ID (%s) contains invalid characters", orgID)}
+	}
+
 	// Verify that the object is valid
 	if metaData.ObjectID == "" {
 		return &common.InvalidRequest{Message: "Object's meta data does not contain object's ID"}
@@ -42,6 +46,9 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 		message := fmt.Sprintf("Object ID (%+v) in the URL doesn't match the object-id (%+v) in the payload", objectID, metaData.ObjectID)
 		return &common.InvalidRequest{Message: message}
 	}
+	if !common.IsValidName(objectID) {
+		return &common.InvalidRequest{Message: fmt.Sprintf("Object ID (%s) contains invalid characters", objectID)}
+	}
 
 	if metaData.ObjectType == "" {
 		return &common.InvalidRequest{Message: "Object's meta data does not contain object's type"}
@@ -49,6 +56,9 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 	if objectType != metaData.ObjectType {
 		message := fmt.Sprintf("Object type (%+v) in the URL doesn't match the object-type (%+v) in the payload", objectType, metaData.ObjectType)
 		return &common.InvalidRequest{Message: message}
+	}
+	if !common.IsValidName(objectType) {
+		return &common.InvalidRequest{Message: fmt.Sprintf("Object type (%s) contains invalid characters", objectType)}
 	}
 
 	if metaData.Expiration != "" {
@@ -106,6 +116,10 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 					Message: fmt.Sprintf("A service in the DestinationPolicy has an invalid version `%s`", service.Version)}
 			}
 		}
+	}
+
+	if metaData.DestType != "" && !common.IsValidName(metaData.DestType) {
+		return &common.InvalidRequest{Message: fmt.Sprintf("Destination type (%s) contains invalid characters", metaData.DestType)}
 	}
 
 	if metaData.AutoDelete && metaData.DestinationsList == nil && metaData.DestID == "" {
@@ -310,7 +324,24 @@ func ListObjectsWithDestinationPolicyByService(orgID, serviceOrgID, serviceName 
 
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In ListObjectsWithDestinationPolicyByService. Get %s/%s. Returned %d objects\n",
-			orgID, serviceName, len(objects))
+			serviceOrgID, serviceName, len(objects))
+	}
+
+	return objects, err
+}
+
+// ListObjectsWithDestinationPolicyUpdatedSince provides a list of objects that have a DestinationPolicy that has been updated since the specified time
+func ListObjectsWithDestinationPolicyUpdatedSince(orgID string, since int64) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	apiLock.RLock()
+	defer apiLock.RUnlock()
+
+	common.HealthStatus.ClientRequestReceived()
+
+	objects, err := store.RetrieveObjectsWithDestinationPolicyUpdatedSince(orgID, since)
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In ListObjectsWithDestinationPolicyByService. Get %s since %d. Returned %d objects\n",
+			orgID, since, len(objects))
 	}
 
 	return objects, err
@@ -790,6 +821,10 @@ func deleteOrganization(orgID string) common.SyncServiceError {
 
 func updateOrganization(orgID string, org common.Organization) common.SyncServiceError {
 	common.HealthStatus.ClientRequestReceived()
+
+	if !common.IsValidName(orgID) {
+		return &common.InvalidRequest{Message: fmt.Sprintf("Organization ID (%s) contains invalid characters", orgID)}
+	}
 
 	if common.Configuration.NodeType == common.ESS {
 		return &common.InvalidRequest{Message: "ESS can't add organization"}

@@ -322,7 +322,12 @@ func callWebhooks(metaData *common.MetaData) {
 				log.IsLogging(logger.ERROR) {
 				log.Error("Error in callWebhooks: received status: %d for %s\n", response.StatusCode, url)
 			}
-			response.Body.Close()
+			err = response.Body.Close()
+			if err != nil {
+				if log.IsLogging(logger.ERROR) {
+					log.Error("Error in callWebhooks, failed to close response body")
+				}
+			}
 		}
 	}
 }
