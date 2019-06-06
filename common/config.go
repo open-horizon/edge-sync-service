@@ -4,10 +4,10 @@ package common
 
 import (
 	"fmt"
-	"path/filepath"
 	"math"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -305,15 +305,15 @@ type Config struct {
 	// ShutdownQuiesceTime specifies the maximum time in seconds that the Sync Service will wait for internal tasks to end while shuting down
 	// The default values is 60 seconds
 	ShutdownQuiesceTime int `env:"SHUTDOWN_QUIESCE_TIME"`
-	
+
 	// ObjectsDataPath specifies a directory in which the object's data should be persisted.
 	// The application can then access the object's data directly on the file system instead of reading
-	// the data via the Sync Service. Applications should only read/copy the data but not modify/delete it. 
-	// When ObjectsDataPath is set the DestinationDataURI field in the object's metadata includes 
-	// the full path to the object's data. 
+	// the data via the Sync Service. Applications should only read/copy the data but not modify/delete it.
+	// When ObjectsDataPath is set the DestinationDataURI field in the object's metadata includes
+	// the full path to the object's data.
 	// ObjectsDataPath can be used only when the StorageProvider is set to bolt.
-	// The default is empty (not set) meaning that the object's data is persisted internally in a 
-	// path selected by the Sync Service. 
+	// The default is empty (not set) meaning that the object's data is persisted internally in a
+	// path selected by the Sync Service.
 	ObjectsDataPath string `env:"OBJECTS_DATA_PATH"`
 }
 
@@ -381,13 +381,24 @@ func ValidateConfig() error {
 	if Configuration.DestinationType == "" {
 		return &configError{"Please specify the destination type in the configuration file"}
 	}
+	if !IsValidName(Configuration.DestinationType) {
+		return &configError{"Destination type contains invalid characters"}
+	}
 
 	if Configuration.DestinationID == "" {
 		return &configError{"Please specify the destination id in the configuration file"}
 	}
+	if !IsValidName(Configuration.DestinationID) {
+		return &configError{"Destination ID contains invalid characters"}
+	}
 
-	if Configuration.NodeType == ESS && Configuration.OrgID == "" {
-		return &configError{"Please specify the organization id in the configuration file"}
+	if Configuration.NodeType == ESS {
+		if Configuration.OrgID == "" {
+			return &configError{"Please specify the organization id in the configuration file"}
+		}
+		if !IsValidName(Configuration.OrgID) {
+			return &configError{"Organization ID contains invalid characters"}
+		}
 	}
 
 	if Configuration.NodeType == CSS && !Configuration.CSSOnWIoTP && Configuration.OrgID != "" {
@@ -627,13 +638,13 @@ func ValidateConfig() error {
 	}
 	if len(Configuration.ObjectsDataPath) > 0 {
 		if Configuration.StorageProvider == Bolt {
-			if path, err := filepath.Abs(Configuration.ObjectsDataPath); err == nil { 
-				Configuration.ObjectsDataPath = path+"/"
+			if path, err := filepath.Abs(Configuration.ObjectsDataPath); err == nil {
+				Configuration.ObjectsDataPath = path + "/"
 			} else {
-				return &configError{fmt.Sprintf("Invalid ObjectsDataPath (%s): failed to convert to absolute path, err= %s", Configuration.ObjectsDataPath, err)}			
+				return &configError{fmt.Sprintf("Invalid ObjectsDataPath (%s): failed to convert to absolute path, err= %s", Configuration.ObjectsDataPath, err)}
 			}
 		} else {
-			return &configError{"Invalid ObjectsDataPath, it can only be set when StorageProvider is 'bolt'"}			
+			return &configError{"Invalid ObjectsDataPath, it can only be set when StorageProvider is 'bolt'"}
 		}
 	}
 

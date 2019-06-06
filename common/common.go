@@ -3,6 +3,7 @@ package common
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -767,6 +768,9 @@ func BlockUntilNoRunningGoRoutines() {
 
 	waitingOnBlockChannel = false
 }
+
+// IsValidName checks if the string only contains letters, digits, and !@#%^*-_.~
+var IsValidName = regexp.MustCompile(`^[a-zA-Z0-9|!|@|#|$|^|*|\-|_|.|~]+$`).MatchString
 
 func init() {
 	Version.Major = 1
