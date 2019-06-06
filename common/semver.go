@@ -54,9 +54,8 @@ func ParseSemVer(input string) (*SemVer, error) {
 func (semVer *SemVer) String() string {
 	if semVer.Infinity {
 		return "INFINITY"
-	} else {
-		return fmt.Sprintf("%d.%d.%d", semVer.Version, semVer.Minor, semVer.Fix)
 	}
+	return fmt.Sprintf("%d.%d.%d", semVer.Version, semVer.Minor, semVer.Fix)
 }
 
 // Compare compares a pair of SemVers
