@@ -1,6 +1,10 @@
 package security
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -15,8 +19,11 @@ import (
 
 var authenticator Authentication
 
+const saltLength = 24
+
 type authenticationCacheElement struct {
-	appSecret  string
+	appSecret  []byte
+	salt       []byte
 	code       int
 	orgID      string
 	userid     string
@@ -109,15 +116,32 @@ func Authenticate(request *http.Request) (int, string, string) {
 	authenticationCacheLock.RUnlock()
 
 	now := time.Now()
-	if ok && appSecret == entry.appSecret {
-		if now.Before(entry.expiration) {
-			return entry.code, entry.orgID, entry.userid
+	if ok && now.Before(entry.expiration) {
+		secretMAC, _, err := saltSecret(appSecret, entry.salt)
+		if err != nil {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("%s", err)
+			}
+			return AuthFailed, "", ""
 		}
 
+		if hmac.Equal(secretMAC, entry.appSecret) {
+			return entry.code, entry.orgID, entry.userid
+		}
+		return AuthFailed, "", ""
 	}
+
 	code, orgID, userID := authenticator.Authenticate(request)
 	if code != AuthFailed {
-		entry = authenticationCacheElement{appSecret, code, orgID, userID, now.Add(cacheDuration)}
+		secretMAC, salt, err := saltSecret(appSecret, nil)
+		if err != nil {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("%s", err)
+			}
+			return AuthFailed, "", ""
+		}
+
+		entry = authenticationCacheElement{secretMAC, salt, code, orgID, userID, now.Add(cacheDuration)}
 		authenticationCacheLock.Lock()
 		authenticationCache[appKey] = entry
 		authenticationCacheLock.Unlock()
@@ -134,6 +158,10 @@ func Authenticate(request *http.Request) (int, string, string) {
 // can create an object of the object type, and send it to the destinations in the meta data.
 func CanUserCreateObject(request *http.Request, orgID string, metaData *common.MetaData) bool {
 	code, userOrgID, userID := Authenticate(request)
+	if code == AuthSyncAdmin {
+		return true
+	}
+
 	if code == AuthFailed || code == AuthEdgeNode || userOrgID != orgID {
 		return false
 	}
@@ -172,6 +200,10 @@ func CanUserCreateObject(request *http.Request, orgID string, metaData *common.M
 // can read/modify the specified object type.
 func CanUserAccessObject(request *http.Request, orgID, objectType string) (int, string) {
 	code, userOrgID, userID := Authenticate(request)
+	if code == AuthSyncAdmin {
+		return code, userID
+	}
+
 	if code == AuthFailed || code == AuthEdgeNode || userOrgID != orgID {
 		return AuthFailed, ""
 	}
@@ -249,6 +281,23 @@ func ValidateSPIRequestIdentity(request *http.Request) (bool, string, string, st
 		return false, "", "", ""
 	}
 	return true, orgID, destType, destID
+}
+
+func saltSecret(appSecret string, salt []byte) ([]byte, []byte, error) {
+	if salt == nil {
+		salt = make([]byte, saltLength)
+		_, err := rand.Read(salt)
+		if err != nil {
+			return nil, nil, fmt.Errorf("Failed to generate salt. Error: %s", err)
+		}
+	}
+	secretHash := hmac.New(sha256.New, salt)
+	_, err := secretHash.Write([]byte(appSecret))
+	if err != nil {
+		return nil, nil, fmt.Errorf("Failed to generate HMAC. Error: %s", err)
+	}
+
+	return secretHash.Sum(nil), salt, nil
 }
 
 func checkObjectAccessByUser(userID, orgID, objectType string) bool {

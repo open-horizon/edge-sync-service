@@ -289,7 +289,7 @@ func handleResend(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	code, _, _ := security.Authenticate(request)
-	if code != security.AuthAdmin && code != security.AuthUser {
+	if code != security.AuthAdmin && code != security.AuthUser && code != security.AuthSyncAdmin {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
 		return
@@ -1355,7 +1355,7 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWriter,
 	request *http.Request) {
 	code, userOrgID, _ := security.Authenticate(request)
-	if code != security.AuthAdmin || userOrgID != orgID {
+	if code != security.AuthSyncAdmin && (code != security.AuthAdmin || userOrgID != orgID) {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
 		return
@@ -1781,7 +1781,7 @@ func handleSecurity(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	code, userOrg, _ := security.Authenticate(request)
-	if code == security.AuthFailed || code != security.AuthAdmin {
+	if code == security.AuthFailed || (code != security.AuthAdmin && code != security.AuthSyncAdmin) {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
 		return
@@ -1796,7 +1796,7 @@ func handleSecurity(writer http.ResponseWriter, request *http.Request) {
 	orgID := parts[1]
 	parts = parts[2:]
 
-	if userOrg != orgID {
+	if code != security.AuthSyncAdmin && userOrg != orgID {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
 		return
