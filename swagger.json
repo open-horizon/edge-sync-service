@@ -184,9 +184,16 @@
             "in": "query"
           },
           {
-            "type": "boolean",
+            "type": "string",
             "description": "The ID of the service (orgID/architecture/version/serviceName) to which objects have affinity, whose Destination Policy should be fetched.",
             "name": "service",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "Objects that have a Destination Policy which was updated since the specified UTC time in nanoseconds should be fetched.",
+            "name": "since",
             "in": "query"
           }
         ],
