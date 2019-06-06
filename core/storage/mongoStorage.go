@@ -288,7 +288,7 @@ func (store *MongoStorage) StoreObject(metaData common.MetaData, data []byte, st
 	}
 
 	if metaData.DestinationPolicy != nil {
-		metaData.DestinationPolicy.Timestamp = time.Now().UnixNano()
+		metaData.DestinationPolicy.Timestamp = time.Now().UTC().UnixNano()
 	}
 
 	var dests []common.StoreDestinationStatus

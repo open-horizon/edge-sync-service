@@ -1926,7 +1926,7 @@
           "x-go-name": "Services"
         },
         "timestamp": {
-          "description": "Timestamp indicates when the policy was last updated (result of time.Now().UnixNano())",
+          "description": "Timestamp indicates when the policy was last updated (result of time.Now().UTC().UnixNano())",
           "type": "integer",
           "format": "int64",
           "x-go-name": "Timestamp"

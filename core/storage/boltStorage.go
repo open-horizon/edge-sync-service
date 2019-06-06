@@ -226,7 +226,7 @@ func (store *BoltStorage) StoreObject(metaData common.MetaData, data []byte, sta
 	}
 
 	if metaData.DestinationPolicy != nil {
-		metaData.DestinationPolicy.Timestamp = time.Now().UnixNano()
+		metaData.DestinationPolicy.Timestamp = time.Now().UTC().UnixNano()
 	}
 
 	if metaData.MetaOnly {

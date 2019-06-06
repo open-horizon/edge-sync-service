@@ -159,7 +159,7 @@ type Policy struct {
 	// Services is the list of services this object has affinity for
 	Services []ServiceID `json:"services" bson:"services"`
 
-	// Timestamp indicates when the policy was last updated (result of time.Now().UnixNano())
+	// Timestamp indicates when the policy was last updated (result of time.Now().UTC().UnixNano())
 	Timestamp int64 `json:"timestamp" bson:"timestamp"`
 }
 
