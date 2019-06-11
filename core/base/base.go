@@ -141,7 +141,7 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 	if common.Configuration.NodeType == common.ESS {
 		common.Registered = false
 		if common.Configuration.CommunicationProtocol == common.HTTPProtocol {
-			communication.Register()
+			go communication.Register()
 		}
 	}
 
