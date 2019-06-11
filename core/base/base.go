@@ -44,11 +44,6 @@ var waitersForStartChannel chan chan int
 
 func init() {
 	blockChannel = make(chan int, 1)
-	resendStopChannel = make(chan int, 1)
-	activateStopChannel = make(chan int, 1)
-	maintenanceStopChannel = make(chan int, 1)
-	pingStopChannel = make(chan int, 1)
-	removeESSStopChannel = make(chan int, 1)
 	waitersForStartChannel = make(chan chan int, 40)
 }
 
@@ -56,6 +51,12 @@ func init() {
 func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 	startStopLock.Lock()
 	defer startStopLock.Unlock()
+
+	resendStopChannel = make(chan int, 1)
+	activateStopChannel = make(chan int, 1)
+	maintenanceStopChannel = make(chan int, 1)
+	pingStopChannel = make(chan int, 1)
+	removeESSStopChannel = make(chan int, 1)
 
 	common.ResetGoRoutineCounter()
 
@@ -140,7 +141,7 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 	if common.Configuration.NodeType == common.ESS {
 		common.Registered = false
 		if common.Configuration.CommunicationProtocol == common.HTTPProtocol {
-			communication.Register()
+			go communication.Register()
 		}
 	}
 
@@ -293,25 +294,29 @@ func Stop(quiesceTime int) {
 
 	security.Stop()
 
+	resendStopChannel <- 1
 	if resendTimer != nil {
 		resendTimer.Stop()
-		resendStopChannel <- 1
 	}
+
+	activateStopChannel <- 1
 	if activateTimer != nil {
 		activateTimer.Stop()
-		activateStopChannel <- 1
 	}
+
+	maintenanceStopChannel <- 1
 	if maintenanceTimer != nil {
 		maintenanceTimer.Stop()
-		maintenanceStopChannel <- 1
 	}
+
+	pingStopChannel <- 1
 	if pingTicker != nil {
 		pingTicker.Stop()
-		pingStopChannel <- 1
 	}
+
+	removeESSStopChannel <- 1
 	if removeESSTicker != nil {
 		removeESSTicker.Stop()
-		removeESSStopChannel <- 1
 	}
 
 	common.BlockUntilNoRunningGoRoutines()

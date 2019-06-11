@@ -890,6 +890,15 @@ func testObjectWithPolicyAPI(store storage.Storage, t *testing.T) {
 		}
 	}
 
+	objects, err := ListAllObjects("myorg000", "type1")
+	if err != nil {
+		t.Errorf("ListAllObjects failed to retrieve objects. Error: %s\n", err)
+	} else {
+		if len(objects) != len(tests)-1 {
+			t.Errorf("Received %d objects. Expected %d\n", len(objects), len(tests))
+		}
+	}
+
 	policyInfo, err := ListObjectsWithDestinationPolicy("myorg000", false)
 	if err != nil {
 		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)

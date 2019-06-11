@@ -35,6 +35,7 @@ type HTTP struct {
 	started             bool
 	httpPollTimer       *time.Timer
 	httpPollStopChannel chan int
+	requestWrapper      *httpRequestWrapper
 }
 
 type updateMessage struct {
@@ -79,6 +80,8 @@ func (communication *HTTP) StartCommunication() common.SyncServiceError {
 			tlsConfig := &tls.Config{RootCAs: caCertPool}
 			communication.httpClient.Transport = &http.Transport{TLSClientConfig: tlsConfig}
 		}
+		communication.httpPollStopChannel = make(chan int, 1)
+		communication.requestWrapper = newHTTPRequestWrapper(communication.httpClient)
 	}
 	communication.started = true
 
@@ -121,10 +124,12 @@ func (communication *HTTP) startPolling() {
 // StopCommunication stops communications
 func (communication *HTTP) StopCommunication() common.SyncServiceError {
 	communication.started = false
+	communication.httpPollStopChannel <- 1
 	if communication.httpPollTimer != nil {
 		communication.httpPollTimer.Stop()
-		communication.httpPollStopChannel <- 1
 	}
+
+	communication.requestWrapper.cancel()
 
 	return nil
 }
@@ -134,7 +139,6 @@ func (communication *HTTP) HandleRegAck() {
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Received regack")
 	}
-	communication.httpPollStopChannel = make(chan int, 1)
 	communication.startPolling()
 }
 
@@ -273,7 +277,7 @@ func (communication *HTTP) SendNotificationMessage(notificationTopic string, des
 	}
 	security.AddIdentityToSPIRequest(request, url)
 
-	response, err := communication.httpClient.Do(request)
+	response, err := communication.requestWrapper.do(request)
 	if err != nil {
 		return &Error{"Failed to send HTTP request. Error: " + err.Error()}
 	}
@@ -404,7 +408,7 @@ func (communication *HTTP) registerOrPing(url string) common.SyncServiceError {
 
 	security.AddIdentityToSPIRequest(request, requestURL)
 
-	response, err := communication.httpClient.Do(request)
+	response, err := communication.requestWrapper.do(request)
 	if err != nil {
 		return &Error{"Failed to send HTTP request to register/ping. Error: " + err.Error()}
 	}
@@ -474,7 +478,7 @@ func (communication *HTTP) GetData(metaData common.MetaData, offset int64) commo
 	}
 	security.AddIdentityToSPIRequest(request, url)
 
-	response, err := communication.httpClient.Do(request)
+	response, err := communication.requestWrapper.do(request)
 	if err != nil {
 		return &Error{"Error in GetData: failed to get data. Error: " + err.Error()}
 	}
@@ -545,7 +549,7 @@ func (communication *HTTP) Poll() bool {
 	}
 	security.AddIdentityToSPIRequest(request, urlString)
 
-	response, err := communication.httpClient.Do(request)
+	response, err := communication.requestWrapper.do(request)
 	if err != nil {
 		if log.IsLogging(logger.ERROR) {
 			log.Error("Failed to poll for updates. Error: %s\n", err)
@@ -874,7 +878,7 @@ func (communication *HTTP) pushData(metaData *common.MetaData) common.SyncServic
 	}
 	security.AddIdentityToSPIRequest(request, url)
 
-	response, err := communication.httpClient.Do(request)
+	response, err := communication.requestWrapper.do(request)
 	if err != nil {
 		return &Error{"Failed to send HTTP request. Error: " + err.Error()}
 	}
@@ -897,7 +901,7 @@ func (communication *HTTP) ResendObjects() common.SyncServiceError {
 	request, err := http.NewRequest("PUT", url, nil)
 	security.AddIdentityToSPIRequest(request, url)
 
-	response, err := communication.httpClient.Do(request)
+	response, err := communication.requestWrapper.do(request)
 	if err != nil {
 		return &Error{"Failed to send HTTP request to resend objects. Error: " + err.Error()}
 	}
@@ -970,7 +974,7 @@ func (communication *HTTP) SendFeedbackMessage(code int, retryInterval int32, re
 
 	security.AddIdentityToSPIRequest(request, url)
 
-	response, err := communication.httpClient.Do(request)
+	response, err := communication.requestWrapper.do(request)
 	if err != nil {
 		return &Error{"Failed to send HTTP request. Error: " + err.Error()}
 	}

@@ -480,6 +480,20 @@ func (store *BoltStorage) RetrieveObjectsWithDestinationPolicyUpdatedSince(orgID
 	return result, nil
 }
 
+// RetrieveAllObjects returns the list of all the objects of the specified type
+func (store *BoltStorage) RetrieveAllObjects(orgID string, objectType string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	result := make([]common.ObjectDestinationPolicy, 0)
+	function := func(object boltObject) {
+		if orgID == object.Meta.DestOrgID && object.Meta.ObjectType == objectType {
+			result = append(result, createObjectDestinationPolicy(object))
+		}
+	}
+	if err := store.retrieveObjectsHelper(function); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 // RetrieveObjects returns the list of all the objects that need to be sent to the destination
 // For CSS: adds the new destination to the destinations lists of the relevant objects.
 func (store *BoltStorage) RetrieveObjects(orgID string, destType string, destID string, resend int) ([]common.MetaData, common.SyncServiceError) {

@@ -133,6 +133,11 @@ func (store *Cache) RetrieveObjectsWithDestinationPolicyUpdatedSince(orgID strin
 	return store.Store.RetrieveObjectsWithDestinationPolicyUpdatedSince(orgID, since)
 }
 
+// RetrieveAllObjects returns the list of all the objects of the specified type
+func (store *Cache) RetrieveAllObjects(orgID string, objectType string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	return store.Store.RetrieveAllObjects(orgID, objectType)
+}
+
 // RetrieveObjects returns the list of all the objects that need to be sent to the destination
 func (store *Cache) RetrieveObjects(orgID string, destType string, destID string, resend int) ([]common.MetaData, common.SyncServiceError) {
 	return store.Store.RetrieveObjects(orgID, destType, destID, resend)

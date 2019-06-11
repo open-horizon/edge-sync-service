@@ -219,11 +219,6 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 		return err
 	}
 
-	if metaData.DestinationPolicy != nil {
-		common.ObjectLocks.Unlock(lockIndex)
-		return nil
-	}
-
 	store.DeleteNotificationRecords(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, "", "")
 
 	if status == common.NotReadyToSend || metaData.Inactive {
@@ -342,6 +337,22 @@ func ListObjectsWithDestinationPolicyUpdatedSince(orgID string, since int64) ([]
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In ListObjectsWithDestinationPolicyByService. Get %s since %d. Returned %d objects\n",
 			orgID, since, len(objects))
+	}
+
+	return objects, err
+}
+
+// ListAllObjects provides a list of all objects with the specified type
+func ListAllObjects(orgID string, objectType string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	apiLock.RLock()
+	defer apiLock.RUnlock()
+
+	common.HealthStatus.ClientRequestReceived()
+
+	objects, err := store.RetrieveAllObjects(orgID, objectType)
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In ListAllObjects. Get %s:%s. Returned %d objects\n", orgID, objectType, len(objects))
 	}
 
 	return objects, err

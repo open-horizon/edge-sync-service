@@ -69,7 +69,7 @@ type MQTT struct {
 	lock                    sync.RWMutex
 }
 
-type context struct {
+type mqttClientContext struct {
 	name          string
 	client        mqtt.Client
 	clientOptions *mqtt.ClientOptions
@@ -78,7 +78,7 @@ type context struct {
 }
 
 type mqttContext struct {
-	contexts     []context
+	contexts     []mqttClientContext
 	communicator *MQTT
 }
 
@@ -93,7 +93,7 @@ type parallelMQTTParams struct {
 }
 
 type messageHandlerInfo struct {
-	context        *context
+	context        *mqttClientContext
 	messagePayload messagePayload
 	payload        []byte
 }
@@ -114,7 +114,7 @@ func (communication *MQTT) serveMQTTQueue(c chan *messageHandlerInfo) {
 	common.GoRoutineEnded()
 }
 
-func (context *context) messageHandler(client mqtt.Client, msg mqtt.Message) {
+func (context *mqttClientContext) messageHandler(client mqtt.Client, msg mqtt.Message) {
 	var messageInfo messageHandlerInfo
 	ok := parseMessage(msg, &messageInfo)
 	if !ok {
@@ -124,7 +124,7 @@ func (context *context) messageHandler(client mqtt.Client, msg mqtt.Message) {
 	processMessage(&messageInfo)
 }
 
-func (context *context) parallelMessageHandler(client mqtt.Client, msg mqtt.Message) {
+func (context *mqttClientContext) parallelMessageHandler(client mqtt.Client, msg mqtt.Message) {
 	var messageInfo messageHandlerInfo
 	ok := parseMessage(msg, &messageInfo)
 	if !ok {
@@ -562,7 +562,7 @@ func (communication *MQTT) createClients() ([]clientInfo, common.SyncServiceErro
 	}
 
 	for i, groupURIs := range communication.serverURIs {
-		context := context{name: clients[i].name, communicator: communication}
+		context := mqttClientContext{name: clients[i].name, communicator: communication}
 		c, err := context.createAndConnectClient(clients[i], usernames[i], passwords[i], groupURIs)
 		if err != nil {
 			return nil, err
@@ -580,7 +580,7 @@ func (communication *MQTT) createClients() ([]clientInfo, common.SyncServiceErro
 	return clients, nil
 }
 
-func (context *context) createAndConnectClient(clientInfo clientInfo, username string, password string, servers []string) (mqtt.Client, common.SyncServiceError) {
+func (context *mqttClientContext) createAndConnectClient(clientInfo clientInfo, username string, password string, servers []string) (mqtt.Client, common.SyncServiceError) {
 	opts := mqtt.NewClientOptions()
 	opts.SetClientID(clientInfo.clientID)
 	opts.SetKeepAlive(120 * time.Second)
@@ -628,7 +628,7 @@ func (context *context) createAndConnectClient(clientInfo clientInfo, username s
 	return nil, tokenError
 }
 
-func (context *context) onConnectionLost(client mqtt.Client, err error) {
+func (context *mqttClientContext) onConnectionLost(client mqtt.Client, err error) {
 	if trace.IsLogging(logger.ERROR) {
 		trace.Error("Lost connection to the MQTT broker %s. Error: %s\n", context.name, err.Error())
 	}
@@ -662,7 +662,7 @@ func (communication *MQTT) checkIfOrgExists(client mqtt.Client) (exists bool, us
 	return false, "", ""
 }
 
-func (context *context) subscribe() {
+func (context *mqttClientContext) subscribe() {
 	client := context.client
 	if err := subscribe(client, context.communicator.topics); err != nil {
 
@@ -725,7 +725,7 @@ func (context *context) subscribe() {
 	context.subAttempts = 1
 }
 
-func (context *context) onReconnect(client mqtt.Client) {
+func (context *mqttClientContext) onReconnect(client mqtt.Client) {
 	if trace.IsLogging(logger.INFO) {
 		trace.Info("Connected to the MQTT broker %s\n", context.name)
 	}
@@ -766,7 +766,7 @@ func subscribe(client mqtt.Client, topics map[string]byte) common.SyncServiceErr
 
 // StartCommunication starts communications
 func (communication *MQTT) StartCommunication() common.SyncServiceError {
-	nodeContext = mqttContext{make([]context, 0), communication}
+	nodeContext = mqttContext{make([]mqttClientContext, 0), communication}
 	communication.orgToClient = make(map[string]*clientInfo)
 
 	switch common.Configuration.MQTTParallelMode {
@@ -1285,7 +1285,7 @@ func (communication *MQTT) UpdateOrganization(org common.Organization, timestamp
 	}
 
 	clientInfo := clientInfo{name: org.OrgID, clientID: "A:" + org.OrgID + ":CSS", timestamp: timestamp}
-	var currentContext context
+	var currentContext mqttClientContext
 	var index int
 
 	protocol := "ssl"
@@ -1331,7 +1331,7 @@ func (communication *MQTT) UpdateOrganization(org common.Organization, timestamp
 		index = len(communication.serverURIs)
 		communication.serverURIs = append(communication.serverURIs, make([]string, 0))
 		communication.serverURIs[index] = append(communication.serverURIs[index], brokerURI)
-		currentContext = context{name: org.OrgID, communicator: communication}
+		currentContext = mqttClientContext{name: org.OrgID, communicator: communication}
 	}
 	c, err := currentContext.createAndConnectClient(clientInfo, org.User, org.Password, communication.serverURIs[index])
 	if err != nil {

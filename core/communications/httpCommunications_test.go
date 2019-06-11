@@ -576,14 +576,14 @@ func testHTTPCommSetup(nodeType string) string {
 		return fmt.Sprintf("Failed to initialize storage driver. Error: %s\n", err.Error())
 	}
 
+	common.Configuration.NodeType = nodeType
+
 	http.DefaultServeMux = http.NewServeMux()
 	httpComm = &HTTP{}
 	if err := httpComm.StartCommunication(); err != nil {
 		return fmt.Sprintf("Failed to start HTTP communication. Error: %s", err.Error())
 	}
 	Comm = httpComm
-
-	common.Configuration.NodeType = nodeType
 	return ""
 }
 

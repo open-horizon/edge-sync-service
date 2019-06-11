@@ -471,7 +471,7 @@ func createObjectDestinationPolicy(object boltObject) common.ObjectDestinationPo
 	}
 	return common.ObjectDestinationPolicy{
 		OrgID: object.Meta.DestOrgID, ObjectType: object.Meta.ObjectType, ObjectID: object.Meta.ObjectID,
-		DestinationPolicy: *object.Meta.DestinationPolicy, Destinations: destinationList,
+		DestinationPolicy: object.Meta.DestinationPolicy, Destinations: destinationList,
 	}
 }
 

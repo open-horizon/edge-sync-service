@@ -79,6 +79,9 @@ type Storage interface {
 	// RetrieveObjectsWithDestinationPolicyUpdatedSince returns the list of all the objects that have a Destination Policy updated since the specified time
 	RetrieveObjectsWithDestinationPolicyUpdatedSince(orgID string, since int64) ([]common.ObjectDestinationPolicy, common.SyncServiceError)
 
+	// RetrieveAllObjects returns the list of all the objects of the specified type
+	RetrieveAllObjects(orgID string, objectType string) ([]common.ObjectDestinationPolicy, common.SyncServiceError)
+
 	// Return the list of all the objects that need to be sent to the destination
 	RetrieveObjects(orgID string, destType string, destID string, resend int) ([]common.MetaData, common.SyncServiceError)
 
@@ -417,13 +420,16 @@ func createDestinationFromList(orgID string, store Storage, destinationsList []s
 	return dests, nil
 }
 
-func compareDestinations(oldList []common.StoreDestinationStatus, newList []common.StoreDestinationStatus) ([]common.StoreDestinationStatus, []common.StoreDestinationStatus) {
+func compareDestinations(oldList []common.StoreDestinationStatus, newList []common.StoreDestinationStatus, useOldStatus bool) ([]common.StoreDestinationStatus, []common.StoreDestinationStatus, []common.StoreDestinationStatus) {
 	deletedDests := make([]common.StoreDestinationStatus, 0)
 	addedDests := make([]common.StoreDestinationStatus, 0)
 	for _, dest := range oldList {
 		found := false
-		for _, newDest := range newList {
+		for index, newDest := range newList {
 			if dest.Destination == newDest.Destination {
+				if useOldStatus {
+					newList[index] = dest
+				}
 				found = true
 				break
 			}
@@ -432,10 +438,13 @@ func compareDestinations(oldList []common.StoreDestinationStatus, newList []comm
 			deletedDests = append(deletedDests, dest)
 		}
 	}
-	for _, newDest := range newList {
+	for index, newDest := range newList {
 		found := false
 		for _, dest := range oldList {
 			if dest.Destination == newDest.Destination {
+				if useOldStatus {
+					newList[index] = dest
+				}
 				found = true
 				break
 			}
@@ -444,7 +453,7 @@ func compareDestinations(oldList []common.StoreDestinationStatus, newList []comm
 			addedDests = append(addedDests, newDest)
 		}
 	}
-	return deletedDests, addedDests
+	return newList, deletedDests, addedDests
 }
 
 func createDestinationsFromMeta(store Storage, metaData common.MetaData) ([]common.StoreDestinationStatus, []common.StoreDestinationStatus, common.SyncServiceError) {
@@ -476,7 +485,7 @@ func createDestinationsFromMeta(store Storage, metaData common.MetaData) ([]comm
 
 	existingDestList, _ := store.GetObjectDestinationsList(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 	if existingDestList != nil {
-		deletedDests, _ := compareDestinations(existingDestList, dests)
+		dests, deletedDests, _ := compareDestinations(existingDestList, dests, false)
 		return dests, deletedDests, nil
 	}
 
@@ -491,7 +500,7 @@ func createDestinations(orgID string, store Storage, existingDestinations []comm
 		return nil, nil, nil, err
 	}
 
-	deletedDests, addedDests := compareDestinations(existingDestinations, dests)
+	dests, deletedDests, addedDests := compareDestinations(existingDestinations, dests, true)
 	return dests, deletedDests, addedDests, nil
 }
 
