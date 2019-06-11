@@ -128,7 +128,6 @@ func Authenticate(request *http.Request) (int, string, string) {
 		if hmac.Equal(secretMAC, entry.appSecret) {
 			return entry.code, entry.orgID, entry.userid
 		}
-		return AuthFailed, "", ""
 	}
 
 	code, orgID, userID := authenticator.Authenticate(request)
