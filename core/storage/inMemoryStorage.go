@@ -338,6 +338,23 @@ func (store *InMemoryStorage) RetrieveObjectsWithDestinationPolicyUpdatedSince(o
 	return nil, nil
 }
 
+// RetrieveAllObjects returns the list of all the objects of the specified type
+func (store *InMemoryStorage) RetrieveAllObjects(orgID string, objectType string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	store.lock()
+	defer store.unLock()
+
+	result := make([]common.ObjectDestinationPolicy, 0)
+	for _, obj := range store.objects {
+		if objectType == obj.meta.ObjectType {
+			object := common.ObjectDestinationPolicy{
+				OrgID: orgID, ObjectType: objectType, ObjectID: obj.meta.ObjectID,
+				DestinationPolicy: obj.meta.DestinationPolicy}
+			result = append(result, object)
+		}
+	}
+	return result, nil
+}
+
 // RetrieveObjects returns the list of all the objects that need to be sent to the destination
 func (store *InMemoryStorage) RetrieveObjects(orgID string, destType string, destID string, resend int) ([]common.MetaData, common.SyncServiceError) {
 	store.lock()

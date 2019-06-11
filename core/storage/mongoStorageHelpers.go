@@ -165,7 +165,7 @@ func (store *MongoStorage) retrievePolicies(query interface{}) ([]common.ObjectD
 		}
 		objects[index] = common.ObjectDestinationPolicy{
 			OrgID: oneResult.MetaData.DestOrgID, ObjectType: oneResult.MetaData.ObjectType, ObjectID: oneResult.MetaData.ObjectID,
-			DestinationPolicy: *oneResult.MetaData.DestinationPolicy, Destinations: destinationList,
+			DestinationPolicy: oneResult.MetaData.DestinationPolicy, Destinations: destinationList,
 		}
 	}
 	return objects, nil

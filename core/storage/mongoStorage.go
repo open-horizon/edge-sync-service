@@ -682,6 +682,16 @@ func (store *MongoStorage) RetrieveObjectsWithDestinationPolicyUpdatedSince(orgI
 	return store.retrievePolicies(query)
 }
 
+// RetrieveAllObjects returns the list of all the objects of the specified type
+func (store *MongoStorage) RetrieveAllObjects(orgID string, objectType string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	query := bson.M{
+		"metadata.destination-org-id": orgID,
+		"metadata.object-type":        objectType,
+	}
+
+	return store.retrievePolicies(query)
+}
+
 // RetrieveObjects returns the list of all the objects that need to be sent to the destination.
 // Adds the new destination to the destinations lists of the relevant objects.
 func (store *MongoStorage) RetrieveObjects(orgID string, destType string, destID string, resend int) ([]common.MetaData, common.SyncServiceError) {

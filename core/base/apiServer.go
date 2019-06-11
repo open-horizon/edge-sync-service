@@ -396,17 +396,86 @@ func handleObjects(writer http.ResponseWriter, request *http.Request) {
 			// PUT - register/delete a webhook
 			switch request.Method {
 			case http.MethodGet:
-				receivedString := request.URL.Query().Get("received")
-				received := false
-				if receivedString != "" {
+				// swagger:operation GET /api/v1/objects/{orgID}/{objectType} handleListObjects
+				//
+				// Get objects of the specified type.
+				//
+				// Get objects of the specified object type. Either get all of the objects or just those objects that have pending (unconsumed) updates.
+				// An application would typically invoke the latter API periodically to check for updates (an alternative is to use a webhook).
+				//
+				// ---
+				//
+				// produces:
+				// - application/json
+				// - text/plain
+				//
+				// parameters:
+				// - name: orgID
+				//   in: path
+				//   description: The orgID of the objects to return. Present only when working with a CSS, removed from the path when working with an ESS
+				//   required: true
+				//   type: string
+				// - name: objectType
+				//   in: path
+				//   description: The object type of the objects to return
+				//   required: true
+				//   type: string
+				// - name: all_objects
+				//   in: query
+				//   description: Whether or not to include all objects. If false only updated objects will be returned.
+				//   required: false
+				//   type: boolean
+				// - name: received
+				//   in: query
+				//   description: When returning updated objects only, whether or not to include the objects that have been marked as received by the application
+				//   required: false
+				//   type: boolean
+				//
+				// responses:
+				//   '200':
+				//     description: Updated objects response
+				//     schema:
+				//       oneOf:
+				//         - type: array
+				//           items:
+				//             "$ref": "#/definitions/ObjectDestinationPolicy"
+				//         - type: array
+				//           items:
+				//             "$ref": "#/definitions/MetaData"
+				//   '404':
+				//     description: No updated objects found
+				//     schema:
+				//       type: string
+				//   '500':
+				//     description: Failed to retrieve the updated objects
+				//     schema:
+				//       type: string
+				allObjectsString := request.URL.Query().Get("all_objects")
+				fmt.Println(allObjectsString)
+				allObjects := false
+				if allObjectsString != "" {
 					var err error
-					received, err = strconv.ParseBool(receivedString)
+					allObjects, err = strconv.ParseBool(allObjectsString)
 					if err != nil {
 						writer.WriteHeader(http.StatusBadRequest)
 						return
 					}
 				}
-				handleListUpdatedObjects(orgID, parts[0], received, writer, request)
+				if allObjects {
+					handleListAllObjects(orgID, parts[0], writer, request)
+				} else {
+					receivedString := request.URL.Query().Get("received")
+					received := false
+					if receivedString != "" {
+						var err error
+						received, err = strconv.ParseBool(receivedString)
+						if err != nil {
+							writer.WriteHeader(http.StatusBadRequest)
+							return
+						}
+					}
+					handleListUpdatedObjects(orgID, parts[0], received, writer, request)
+				}
 			case http.MethodPut:
 				handleWebhook(orgID, parts[0], writer, request)
 			default:
@@ -1207,51 +1276,6 @@ func handleObjectPutData(orgID string, objectType string, objectID string, write
 	}
 }
 
-// swagger:operation GET /api/v1/objects/{orgID}/{objectType} handleListUpdatedObjects
-//
-// Get updated objects.
-//
-// Get the list of objects of the specified object type that have pending (unconsumed) updates.
-// An application would typically invoke this API periodically to check for updates (an alternative is to use a webhook).
-//
-// ---
-//
-// produces:
-// - application/json
-// - text/plain
-//
-// parameters:
-// - name: orgID
-//   in: path
-//   description: The orgID of the updated objects to return. Present only when working with a CSS, removed from the path when working with an ESS
-//   required: true
-//   type: string
-// - name: objectType
-//   in: path
-//   description: The object type of the updated objects to return
-//   required: true
-//   type: string
-// - name: received
-//   in: query
-//   description: Whether or not to include the objects that have been marked as received by the application
-//   required: false
-//   type: boolean
-//
-// responses:
-//   '200':
-//     description: Updated objects response
-//     schema:
-//       type: array
-//       items:
-//         "$ref": "#/definitions/MetaData"
-//   '404':
-//     description: No updated objects found
-//     schema:
-//       type: string
-//   '500':
-//     description: Failed to retrieve the updated objects
-//     schema:
-//       type: string
 func handleListUpdatedObjects(orgID string, objectType string, received bool, writer http.ResponseWriter,
 	request *http.Request) {
 	if trace.IsLogging(logger.DEBUG) {
@@ -1273,7 +1297,7 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 		} else {
 			result = make([]common.MetaData, 0)
 			for _, object := range metaData {
-				if canServiceAccessObject(userID, &object) {
+				if canServiceAccessObject(userID, object.DestinationPolicy) {
 					result = append(result, object)
 				}
 			}
@@ -1284,6 +1308,48 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 		} else {
 			if data, err := json.MarshalIndent(result, "", "  "); err != nil {
 				communications.SendErrorResponse(writer, err, "Failed to marshal the list of updates. Error: ", 0)
+			} else {
+				writer.Header().Add(contentType, applicationJSON)
+				writer.WriteHeader(http.StatusOK)
+				if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+					log.Error("Failed to write response body, error: " + err.Error())
+				}
+			}
+		}
+	}
+}
+
+func handleListAllObjects(orgID string, objectType string, writer http.ResponseWriter, request *http.Request) {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In handleObjects. List %s, Method %s, orgID %s, objectType %s\n",
+			objectType, request.Method, orgID, objectType)
+	}
+	code, userID := canUserAccessObject(request, orgID, objectType, "")
+	if code == security.AuthFailed {
+		writer.WriteHeader(http.StatusForbidden)
+		writer.Write(unauthorizedBytes)
+		return
+	}
+	if objects, err := ListAllObjects(orgID, objectType); err != nil {
+		communications.SendErrorResponse(writer, err, "Failed to fetch the list of objects. Error: ", 0)
+	} else {
+		var result []common.ObjectDestinationPolicy
+		if common.Configuration.NodeType == common.CSS || code != security.AuthService {
+			result = objects
+		} else {
+			result = make([]common.ObjectDestinationPolicy, 0)
+			for _, object := range objects {
+				if canServiceAccessObject(userID, object.DestinationPolicy) {
+					result = append(result, object)
+				}
+			}
+		}
+
+		if len(result) == 0 {
+			writer.WriteHeader(http.StatusNotFound)
+		} else {
+			if data, err := json.MarshalIndent(result, "", "  "); err != nil {
+				communications.SendErrorResponse(writer, err, "Failed to marshal the list of objects. Error: ", 0)
 			} else {
 				writer.Header().Add(contentType, applicationJSON)
 				writer.WriteHeader(http.StatusOK)
@@ -2146,14 +2212,14 @@ func canUserAccessObject(request *http.Request, orgID, objectType, objectID stri
 	defer apiObjectLocks.RUnlock(lockIndex)
 
 	metadata, err := store.RetrieveObject(orgID, objectType, objectID)
-	if err == nil && metadata != nil && canServiceAccessObject(userID, metadata) {
+	if err == nil && metadata != nil && canServiceAccessObject(userID, metadata.DestinationPolicy) {
 		return code, userID
 	}
 	return security.AuthFailed, ""
 }
 
-func canServiceAccessObject(serviceID string, metadata *common.MetaData) bool {
-	if metadata.DestinationPolicy == nil || len(metadata.DestinationPolicy.Services) == 0 {
+func canServiceAccessObject(serviceID string, policy *common.Policy) bool {
+	if policy == nil || len(policy.Services) == 0 {
 		return true
 	}
 	// serviceOrgID/arch/version/serviceName
@@ -2161,7 +2227,7 @@ func canServiceAccessObject(serviceID string, metadata *common.MetaData) bool {
 	if len(parts) < 3 {
 		return false
 	}
-	for _, service := range metadata.DestinationPolicy.Services {
+	for _, service := range policy.Services {
 		if parts[0] == service.OrgID && parts[2] == service.ServiceName {
 			if policySemVerRange, err := common.ParseSemVerRange(service.Version); err != nil {
 				return false

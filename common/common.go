@@ -393,9 +393,9 @@ type ObjectDestinationPolicy struct {
 
 	// DestinationPolicy is the policy specification that should be used to distribute this object
 	// to the appropriate set of destinations.
-	DestinationPolicy Policy `json:"destinationPolicy"`
+	DestinationPolicy *Policy `json:"destinationPolicy,omitempty"`
 
-	//Destinations is the list of the object's current destinations
+	// Destinations is the list of the object's current destinations
 	Destinations []DestinationsStatus `json:"destinations"`
 }
 
