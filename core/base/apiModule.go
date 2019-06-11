@@ -219,11 +219,6 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 		return err
 	}
 
-	if metaData.DestinationPolicy != nil {
-		common.ObjectLocks.Unlock(lockIndex)
-		return nil
-	}
-
 	store.DeleteNotificationRecords(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, "", "")
 
 	if status == common.NotReadyToSend || metaData.Inactive {
