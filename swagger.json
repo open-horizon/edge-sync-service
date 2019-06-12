@@ -224,31 +224,37 @@
     },
     "/api/v1/objects/{orgID}/{objectType}": {
       "get": {
-        "description": "Get the list of objects of the specified object type that have pending (unconsumed) updates.\nAn application would typically invoke this API periodically to check for updates (an alternative is to use a webhook).",
+        "description": "Get objects of the specified object type. Either get all of the objects or just those objects that have pending (unconsumed) updates.\nAn application would typically invoke the latter API periodically to check for updates (an alternative is to use a webhook).",
         "produces": [
           "application/json",
           "text/plain"
         ],
-        "summary": "Get updated objects.",
-        "operationId": "handleListUpdatedObjects",
+        "summary": "Get objects of the specified type.",
+        "operationId": "handleListObjects",
         "parameters": [
           {
             "type": "string",
-            "description": "The orgID of the updated objects to return. Present only when working with a CSS, removed from the path when working with an ESS",
+            "description": "The orgID of the objects to return. Present only when working with a CSS, removed from the path when working with an ESS",
             "name": "orgID",
             "in": "path",
             "required": true
           },
           {
             "type": "string",
-            "description": "The object type of the updated objects to return",
+            "description": "The object type of the objects to return",
             "name": "objectType",
             "in": "path",
             "required": true
           },
           {
             "type": "boolean",
-            "description": "Whether or not to include the objects that have been marked as received by the application",
+            "description": "Whether or not to include all objects. If false only updated objects will be returned.",
+            "name": "all_objects",
+            "in": "query"
+          },
+          {
+            "type": "boolean",
+            "description": "When returning updated objects only, whether or not to include the objects that have been marked as received by the application",
             "name": "received",
             "in": "query"
           }
@@ -257,10 +263,20 @@
           "200": {
             "description": "Updated objects response",
             "schema": {
-              "type": "array",
-              "items": {
-                "$ref": "#/definitions/MetaData"
-              }
+              "oneOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/ObjectDestinationPolicy"
+                  }
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/MetaData"
+                  }
+                }
+              ]
             }
           },
           "404": {

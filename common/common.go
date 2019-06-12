@@ -23,6 +23,12 @@ func (e *InvalidRequest) Error() string {
 	return e.Message
 }
 
+// IsInvalidRequest returns true if the error passed in is the common.InvalidRequest error
+func IsInvalidRequest(err error) bool {
+	_, ok := err.(*InvalidRequest)
+	return ok
+}
+
 // SetupError is the error for setup issues
 // swagger:ignore
 type SetupError struct {

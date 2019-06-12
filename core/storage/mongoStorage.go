@@ -337,7 +337,7 @@ func (store *MongoStorage) StoreObject(metaData common.MetaData, data []byte, st
 	if existingObject != nil {
 		if (metaData.DestinationPolicy != nil && existingObject.MetaData.DestinationPolicy == nil) ||
 			(metaData.DestinationPolicy == nil && existingObject.MetaData.DestinationPolicy != nil) {
-			return nil, &Error{"Can't update the existence of Destination Policy"}
+			return nil, &common.InvalidRequest{Message: "Can't update the existence of Destination Policy"}
 		}
 		if metaData.MetaOnly {
 			metaData.DataID = existingObject.MetaData.DataID
@@ -1336,7 +1336,10 @@ func (store *MongoStorage) RetrieveDestination(orgID string, destType string, de
 	result := destinationObject{}
 	id := createDestinationCollectionID(orgID, destType, destID)
 	if err := store.fetchOne(destinations, bson.M{"_id": id}, nil, &result); err != nil {
-		return nil, &Error{fmt.Sprintf("Failed to fetch the destination. Error: %s.", err)}
+		if err != mgo.ErrNotFound {
+			return nil, &Error{fmt.Sprintf("Failed to fetch the destination. Error: %s.", err)}
+		}
+		return nil, &NotFound{fmt.Sprintf(" The destination %s:%s does not exist", destType, destID)}
 	}
 	return &result.Destination, nil
 }

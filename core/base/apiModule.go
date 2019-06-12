@@ -953,7 +953,7 @@ func UpdateObjectDestinations(orgID string, objectType string, objectID string, 
 	metaData, status, deletedDestinations, addedDestinations, err := store.UpdateObjectDestinations(orgID, objectType, objectID, destinationsList)
 	if err != nil {
 		apiObjectLocks.Unlock(lockIndex)
-		return &common.InvalidRequest{Message: "Failed to update destinations: " + err.Error()}
+		return err
 	}
 
 	var deleteNotificationsInfo, updateNotificationsInfo []common.NotificationInfo
