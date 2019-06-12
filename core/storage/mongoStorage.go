@@ -337,7 +337,7 @@ func (store *MongoStorage) StoreObject(metaData common.MetaData, data []byte, st
 	if existingObject != nil {
 		if (metaData.DestinationPolicy != nil && existingObject.MetaData.DestinationPolicy == nil) ||
 			(metaData.DestinationPolicy == nil && existingObject.MetaData.DestinationPolicy != nil) {
-			return nil, &Error{"Can't update the existence of Destination Policy"}
+			return nil, &common.InvalidRequest{Message: "Can't update the existence of Destination Policy"}
 		}
 		if metaData.MetaOnly {
 			metaData.DataID = existingObject.MetaData.DataID

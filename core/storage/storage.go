@@ -411,10 +411,13 @@ func createDestinationFromList(orgID string, store Storage, destinationsList []s
 			if dest, err := store.RetrieveDestination(orgID, parts[0], parts[1]); err == nil && dest != nil {
 				dests = append(dests, common.StoreDestinationStatus{Destination: *dest, Status: common.Pending})
 			} else {
+				if IsNotFound(err) {
+					return nil, &common.InvalidRequest{Message: fmt.Sprintf("Invalid destination %s:%s", parts[0], parts[1])}
+				}
 				return nil, &Error{fmt.Sprintf("Failed to find destination %s:%s", parts[0], parts[1])}
 			}
 		} else {
-			return nil, &Error{fmt.Sprintf("Invalid destination %s", d)}
+			return nil, &common.InvalidRequest{Message: fmt.Sprintf("Invalid destination %s", d)}
 		}
 	}
 	return dests, nil

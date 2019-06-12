@@ -237,11 +237,11 @@ func (store *BoltStorage) StoreObject(metaData common.MetaData, data []byte, sta
 		function := func(object boltObject) (boltObject, common.SyncServiceError) {
 			if object.Status == common.ConsumedByDest {
 				// On ESS we remove the data of consumed objects, therefore we can't accept "meta only" updates
-				return object, &Error{"Can't update only the meta data of consumed object"}
+				return object, &common.InvalidRequest{"Can't update only the meta data of consumed object"}
 			}
 			if (object.Meta.DestinationPolicy == nil && metaData.DestinationPolicy != nil) ||
 				(object.Meta.DestinationPolicy != nil && metaData.DestinationPolicy == nil) {
-				return object, &Error{"Can't update the existence of Destination Policy"}
+				return object, &common.InvalidRequest{"Can't update the existence of Destination Policy"}
 			}
 			metaData.DataID = object.Meta.DataID // Keep the previous data id
 			object.Meta = metaData
@@ -279,7 +279,7 @@ func (store *BoltStorage) StoreObject(metaData common.MetaData, data []byte, sta
 	function := func(object boltObject) (boltObject, common.SyncServiceError) {
 		if (object.Meta.DestinationPolicy == nil && metaData.DestinationPolicy != nil) ||
 			(object.Meta.DestinationPolicy != nil && metaData.DestinationPolicy == nil) {
-			return object, &Error{"Can't update the existence of Destination Policy"}
+			return object, &common.InvalidRequest{Message: "Can't update the existence of Destination Policy"}
 		}
 		if metaData.DestinationPolicy != nil {
 			newObject.Destinations = object.Destinations
