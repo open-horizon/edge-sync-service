@@ -113,6 +113,7 @@ type Destination struct {
 
 	// Communication is the communication protocol used by the destination to connect (can be MQTT or HTTP)
 	//   required: true
+	//   enum:  HTTP,MQTT
 	Communication string `json:"communication" bson:"communication"`
 
 	// CodeVersion is the sync service code version used by the destination
@@ -348,6 +349,7 @@ type DestinationsStatus struct {
 
 	// Status is the destination status
 	//   required: true
+	//   enum: pending,delivering,delivered,consumed,deleted,error
 	Status string `json:"status"`
 
 	// Message is the message for the destination
@@ -378,6 +380,7 @@ type ObjectStatus struct {
 
 	// Status is the object status for this destination
 	//   required: true
+	//   enum: delivering,delivered,consumed,deleted,error
 	Status string `json:"status"`
 }
 
