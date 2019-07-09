@@ -988,6 +988,7 @@ func handleActivateObject(orgID string, objectType string, objectID string, writ
 //     description: Object status
 //     schema:
 //       type: string
+//       enum: [notReady, ready, received, completelyReceived, consumed, deleted]
 //   '500':
 //     description: Failed to retrieve the object's status
 //     schema:
