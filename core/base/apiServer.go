@@ -396,62 +396,8 @@ func handleObjects(writer http.ResponseWriter, request *http.Request) {
 			// PUT - register/delete a webhook
 			switch request.Method {
 			case http.MethodGet:
-				// swagger:operation GET /api/v1/objects/{orgID}/{objectType} handleListObjects
-				//
-				// Get objects of the specified type.
-				//
-				// Get objects of the specified object type. Either get all of the objects or just those objects that have pending (unconsumed) updates.
-				// An application would typically invoke the latter API periodically to check for updates (an alternative is to use a webhook).
-				//
-				// ---
-				//
-				// produces:
-				// - application/json
-				// - text/plain
-				//
-				// parameters:
-				// - name: orgID
-				//   in: path
-				//   description: The orgID of the objects to return. Present only when working with a CSS, removed from the path when working with an ESS
-				//   required: true
-				//   type: string
-				// - name: objectType
-				//   in: path
-				//   description: The object type of the objects to return
-				//   required: true
-				//   type: string
-				// - name: all_objects
-				//   in: query
-				//   description: Whether or not to include all objects. If false only updated objects will be returned.
-				//   required: false
-				//   type: boolean
-				// - name: received
-				//   in: query
-				//   description: When returning updated objects only, whether or not to include the objects that have been marked as received by the application
-				//   required: false
-				//   type: boolean
-				//
-				// responses:
-				//   '200':
-				//     description: Updated objects response
-				//     schema:
-				//       oneOf:
-				//         - type: array
-				//           items:
-				//             "$ref": "#/definitions/ObjectDestinationPolicy"
-				//         - type: array
-				//           items:
-				//             "$ref": "#/definitions/MetaData"
-				//   '404':
-				//     description: No updated objects found
-				//     schema:
-				//       type: string
-				//   '500':
-				//     description: Failed to retrieve the updated objects
-				//     schema:
-				//       type: string
+
 				allObjectsString := request.URL.Query().Get("all_objects")
-				fmt.Println(allObjectsString)
 				allObjects := false
 				if allObjectsString != "" {
 					var err error
@@ -1277,6 +1223,51 @@ func handleObjectPutData(orgID string, objectType string, objectID string, write
 	}
 }
 
+// swagger:operation GET /api/v1/objects/{orgID}/{objectType} handleListObjects
+//
+// Get objects of the specified type.
+//
+// Get objects of the specified object type. Either get all of the objects or just those objects that have pending (unconsumed) updates.
+// An application would typically invoke the latter API periodically to check for updates (an alternative is to use a webhook).
+//
+// ---
+//
+// produces:
+// - application/json
+// - text/plain
+//
+// parameters:
+// - name: orgID
+//   in: path
+//   description: The orgID of the objects to return. Present only when working with a CSS, removed from the path when working with an ESS
+//   required: true
+//   type: string
+// - name: objectType
+//   in: path
+//   description: The object type of the objects to return
+//   required: true
+//   type: string
+// - name: received
+//   in: query
+//   description: When returning updated objects only, whether or not to include the objects that have been marked as received by the application
+//   required: false
+//   type: boolean
+//
+// responses:
+//   '200':
+//     description: Updated objects response
+//     schema:
+//       type: array
+//       items:
+//         "$ref": "#/definitions/MetaData"
+//   '404':
+//     description: No updated objects found
+//     schema:
+//       type: string
+//   '500':
+//     description: Failed to retrieve the updated objects
+//     schema:
+//       type: string
 func handleListUpdatedObjects(orgID string, objectType string, received bool, writer http.ResponseWriter,
 	request *http.Request) {
 	if trace.IsLogging(logger.DEBUG) {
@@ -1320,6 +1311,50 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 	}
 }
 
+// swagger:operation GET /api/v1/objects/{orgID}/{objectType}?all_objects=true handleListAllObjects
+//
+// Get objects with a destination policy of the specified type.
+//
+// Get all objects of the specified object type that have a destination policy.
+//
+// ---
+//
+// produces:
+// - application/json
+// - text/plain
+//
+// parameters:
+// - name: orgID
+//   in: path
+//   description: The orgID of the objects to return. Present only when working with a CSS, removed from the path when working with an ESS
+//   required: true
+//   type: string
+// - name: objectType
+//   in: path
+//   description: The object type of the objects to return
+//   required: true
+//   type: string
+// - name: all_objects
+//   in: query
+//   description: Whether or not to include all objects. If false only updated objects will be returned.
+//   required: true
+//   type: boolean
+//
+// responses:
+//   '200':
+//     description: Objects with a destination policy response
+//     schema:
+//       type: array
+//       items:
+//         "$ref": "#/definitions/ObjectDestinationPolicy"
+//   '404':
+//     description: No objects with a destination policy found
+//     schema:
+//       type: string
+//   '500':
+//     description: Failed to retrieve the updated objects
+//     schema:
+//       type: string
 func handleListAllObjects(orgID string, objectType string, writer http.ResponseWriter, request *http.Request) {
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In handleObjects. List %s, Method %s, orgID %s, objectType %s\n",
