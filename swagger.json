@@ -248,12 +248,6 @@
           },
           {
             "type": "boolean",
-            "description": "Whether or not to include all objects. If false only updated objects will be returned.",
-            "name": "all_objects",
-            "in": "query"
-          },
-          {
-            "type": "boolean",
             "description": "When returning updated objects only, whether or not to include the objects that have been marked as received by the application",
             "name": "received",
             "in": "query"
@@ -263,20 +257,10 @@
           "200": {
             "description": "Updated objects response",
             "schema": {
-              "oneOf": [
-                {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/definitions/ObjectDestinationPolicy"
-                  }
-                },
-                {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/definitions/MetaData"
-                  }
-                }
-              ]
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/MetaData"
+              }
             }
           },
           "404": {
@@ -989,11 +973,76 @@
           "200": {
             "description": "Object status",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "notReady",
+                "ready",
+                "received",
+                "completelyReceived",
+                "consumed",
+                "deleted"
+              ]
             }
           },
           "500": {
             "description": "Failed to retrieve the object's status",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{orgID}/{objectType}?all_objects=true": {
+      "get": {
+        "description": "Get all objects of the specified object type that have a destination policy.",
+        "produces": [
+          "application/json",
+          "text/plain"
+        ],
+        "summary": "Get objects with a destination policy of the specified type.",
+        "operationId": "handleListAllObjects",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the objects to return. Present only when working with a CSS, removed from the path when working with an ESS",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object type of the objects to return",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "boolean",
+            "description": "Whether or not to include all objects. If false only updated objects will be returned.",
+            "name": "all_objects",
+            "in": "query",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Objects with a destination policy response",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ObjectDestinationPolicy"
+              }
+            }
+          },
+          "404": {
+            "description": "No objects with a destination policy found",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve the updated objects",
             "schema": {
               "type": "string"
             }
@@ -1483,6 +1532,10 @@
         "communication": {
           "description": "Communication is the communication protocol used by the destination to connect (can be MQTT or HTTP)",
           "type": "string",
+          "enum": [
+            "HTTP",
+            "MQTT"
+          ],
           "x-go-name": "Communication"
         },
         "destinationID": {
@@ -1530,6 +1583,14 @@
         "status": {
           "description": "Status is the destination status",
           "type": "string",
+          "enum": [
+            "pending",
+            "delivering",
+            "delivered",
+            "consumed",
+            "deleted",
+            "error"
+          ],
           "x-go-name": "Status"
         }
       },
@@ -1878,6 +1939,13 @@
         "status": {
           "description": "Status is the object status for this destination",
           "type": "string",
+          "enum": [
+            "delivering",
+            "delivered",
+            "consumed",
+            "deleted",
+            "error"
+          ],
           "x-go-name": "Status"
         }
       },
