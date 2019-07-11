@@ -9,17 +9,12 @@ A pair of configuration files is provided to configure the behavior of the CSS a
 
 ## General Setup
 
-1. After you have setup the edge-sync-service code, from the root of the workspace run:
+### Build the samples executables:
+
+From the root of the workspace run:
     1. `export GOPATH=$(pwd)` (if not already done)
-    2. `cd src/github.com/open-horizon`
-    3. `go get github.com/open-horizon/edge-sync-service-client`
-
-2. Build the samples executables:
-
-    1. From the root of the workspace run:
-        1. `export GOPATH=$(pwd)` (if not already done)
-        2. `go install github.com/open-horizon/edge-sync-service/cmd/embedded-upload-files`
-        3. `go install github.com/open-horizon/edge-sync-service/cmd/embedded-receive-file`
+    2. `go install github.com/open-horizon/edge-sync-service/cmd/embedded-upload-files`
+    3. `go install github.com/open-horizon/edge-sync-service/cmd/embedded-receive-file`
 
 ## Running
 
