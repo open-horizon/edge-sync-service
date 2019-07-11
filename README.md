@@ -65,7 +65,7 @@ The following is a list of the main features provided by the sync service:
 2. cd into the workspace directory
 3. Run:
      1. `export GOPATH=$(pwd)`
-     2. `go get github.com/open-horizon/edge-sync-service`
+     2. `go get -d github.com/open-horizon/edge-sync-service`
      3. `cd src/github.com/open-horizon/edge-sync-service`
      4. `./get_dependencies.sh`
 
