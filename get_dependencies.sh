@@ -7,12 +7,12 @@ if [[ -z ${1} ]]; then
   
   if [[ ! -d ../edge-sync-service-client ]]; then
     rm -f ../edge-sync-service-client
-    go get github.com/open-horizon/edge-sync-service-client
+    go get -d github.com/open-horizon/edge-sync-service-client
   fi
  
   if [[ ! -d ../edge-utilities ]]; then
     rm -f ../edge-utilities
-    go get github.com/open-horizon/edge-utilities
+    go get -d github.com/open-horizon/edge-utilities
   fi
 
   find ${GOPATH} -name vendor.json -exec ${0} \{\} \;
