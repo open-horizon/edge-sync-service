@@ -11,17 +11,39 @@ import (
 	"github.com/open-horizon/edge-utilities/logger/log"
 )
 
+// DummyAuthenticate is the dummy implementation of the Authenticate interface.
+// It should NOT be used in production deployments.
+//
+// This implementation ignores App secrets.
+//
+// App keys for:
+//
+//     APIs        are of the form userID@orgID or email@emailDomain@orgID.
+//                 The file {PersistentRootPath}/sync/dummy-auth.json is used to
+//                 determine if a userID is a regular user or a sync admin.
+//
+//                 The file {PersistentRootPath}/sync/dummy-auth.json is of the form:
+//                    {
+//                      "regularUsers": [ "user1", "user2" ],
+//                      "syncAdmins": [ "admin" ]
+//                    }
+//                 The userIDs in the field regularUsers are regular users and the
+//                 userIDs in the field syncAdmins are sync-service administrators.
+//
+//                 If a userID does not appear in the file, it is assumed to be an
+//                 admin for the specified org.
+//
+//     Edge nodes  are of the form orgID/destType/destID
+type DummyAuthenticate struct {
+	regularUsers []string
+	syncAdmins   []string
+}
+
 const dummyAuthFilename = "/sync/dummy-auth.json"
 
 type authInfo struct {
 	RegularUsers []string `json:"regularUsers"`
 	SyncAdmins   []string `json:"syncAdmins"`
-}
-
-// DummyAuthenticate is the dummy implementation of the Authenticate interface.
-type DummyAuthenticate struct {
-	regularUsers []string
-	syncAdmins   []string
 }
 
 // Start initializes the DummyAuthenticate struct

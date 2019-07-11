@@ -8,17 +8,12 @@ In particular the CSS and the ESS can be connected via HTTP or MQTT.
 
 ## General Setup
 
-1. After you have setup and built the edge-sync-service executable, from the root of the workspace run:
+### Build the samples executables:
+
+From the root of the workspace run:
     1. `export GOPATH=$(pwd)` (if not already done)
-    2. `cd src/github.com/open-horizon`
-    3. `go get github.com/open-horizon/edge-sync-service-client`
-
-2. Build the samples executables:
-
-    1. From the root of the workspace run:
-        1. `export GOPATH=$(pwd)` (if not already done)
-        2. `go install github.com/open-horizon/edge-sync-service/cmd/send-file`
-        3. `go install github.com/open-horizon/edge-sync-service/cmd/receive-file`
+    2. `go install github.com/open-horizon/edge-sync-service/cmd/send-file`
+    3. `go install github.com/open-horizon/edge-sync-service/cmd/receive-file`
 
 ## Running
 
@@ -122,7 +117,7 @@ In this setup receive-file works with the ESS and send-file works with the CSS.
     1. `mkdir files`
     2. `cd files`
         - **Note:** The file receiver writes files to where it is executed from.
-    3. `$GOPATH/bin/receive-file -s :8443 -cert ../persist/sync/certs/cert.pem`
+    3. `$GOPATH/bin/receive-file -s :8443 -key user@myorg -cert ../persist/sync/certs/cert.pem`
         - **Note:**
             - If you had to change the port of the ESS, replace **8443** with the port you chose.
             - The *-cert* parameter is used to specify a CA certificate to use when communicating with the
@@ -131,7 +126,7 @@ In this setup receive-file works with the ESS and send-file works with the CSS.
               was provided for it, in the file *../persist/sync/certs/cert.pem*
 
 2. In another terminal window, from the root of the workspace, run the file sender by:
-    - `$GOPATH/bin/send-file -p http -s :8080 -org myorg -dt edge -id node1 -f filename`
+    - `$GOPATH/bin/send-file -p http -s :8080 -key user@myorg -org myorg -dt edge -id node1 -f filename`
         - **Where:**
             - *filename* is the full name of the file to be sent (the path can be absolute or relative).
         - **Note:** If you had to change the port of the CSS, replace **8080** with the port you chose.
@@ -146,11 +141,11 @@ In this setup receive-file works with the CSS and send-file works with the ESS.
     1. `mkdir files`
     2. `cd files`
         - **Note:** The file receiver writes files to where it is executed from.
-    3. `$GOPATH/bin/receive-file -p http -s :8080 -org myorg`
+    3. `$GOPATH/bin/receive-file -p http -s :8080 -key user@myorg -org myorg`
         - **Note:** If you had to change the port of the CSS, replace **8080** with the port you chose.
 
 2. In another terminal window, from the root of the workspace, run the file sender by:
-    - `$GOPATH/bin/send-file -s :8443 -cert ../persist/sync/certs/cert.pem -f filename`
+    - `$GOPATH/bin/send-file -s :8443 -key user@myorg -cert ../persist/sync/certs/cert.pem -f filename`
         - **Where:**
             - *filename* is the name of the file to be sent.
         - **Note:** If you had to change the port of the ESS, replace **8443** with the port you chose.    
