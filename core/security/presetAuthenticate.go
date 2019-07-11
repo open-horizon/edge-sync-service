@@ -11,6 +11,37 @@ import (
 	"github.com/open-horizon/edge-utilities/logger/log"
 )
 
+// PresetAuthenticate is an implementation of the Authenticate interface that uses a set of
+// ids defined in the file {PersistenceRootPath}/sync/preset-auth.json.
+//
+// The file {PersistenceRootPath}/sync/preset-auth.json is of the form:
+//
+//    {
+//      "credentials": {
+//        "edgeNodeKey1": {
+//          "secret": "edgeNodeSecret1", "orgID": "orgid", "username": "destType/destID", "type": "EdgeNode"
+//        },
+//        "appKey1": {
+//          "secret": "appSecret1", "orgID": "orgid", "username": "user1", "type": "admin"
+//        }
+//      },
+//      "cssCredentials": { "key": "edgeNodeKey1", "secret": "edgeNodeSecret1" }
+//    }
+//
+// The credentials field is a set of JSON objects, whose key or name is an appKey. The JSON objects have
+// fields in them for the user's appSecret, the org they are part of, their user name and their type. The
+// values for the type field are admin, edgenode, user, syncadmin, and service. The username field for
+// an edge node is of the form destType/destID and for a service it is of the form serviceOrg/version/serviceName.
+//
+// The cssCredentials field is used to provide an ESS with the credentials it needs to communicate with the CSS
+// via HTTP. These credentials must be in one of the elements of the above described credentials field on the CSS.
+type PresetAuthenticate struct {
+	Credentials map[string]CredentialInfo `json:"credentials"`
+
+	// CSSCredentials is the credentials to use when communicating with the CSS
+	CSSCredentials CSSCredentials `json:"cssCredentials"`
+}
+
 const presetAuthFilename = "/sync/preset-auth.json"
 
 // CredentialInfo is the information related to an app key
@@ -26,14 +57,6 @@ type CredentialInfo struct {
 type CSSCredentials struct {
 	AppKey    string `json:"key"`
 	AppSecret string `json:"secret"`
-}
-
-// PresetAuthenticate is an implementation of the Authenticate interface that uses a preset set of ids.
-type PresetAuthenticate struct {
-	Credentials map[string]CredentialInfo `json:"credentials"`
-
-	// CSSCredentials is the credentials to use when communicating with the CSS
-	CSSCredentials CSSCredentials `json:"cssCredentials"`
 }
 
 // Start initializes the PresetAuthenticate struct
