@@ -115,6 +115,10 @@ func handleRegisterNew(dest common.Destination, persistentStorage bool) common.S
 		return &notificationHandlerError{fmt.Sprintf("Error in handleRegisterNew: failed to store destination. Error: %s\n", err)}
 	}
 
+	if log.IsLogging(logger.INFO) {
+		log.Info("New destination: %s %s %s", dest.DestOrgID, dest.DestType, dest.DestID)
+	}
+
 	// Ack
 	if err := Comm.RegisterAck(dest); err != nil {
 		return &notificationHandlerError{fmt.Sprintf("Error in handleRegisterNew: failed to send ack. Error: %s\n", err)}
