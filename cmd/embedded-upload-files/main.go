@@ -61,6 +61,7 @@ var destType string
 
 var mapLock sync.RWMutex
 var objInfoMap map[string]*ObjectInfo
+var sourceDir string
 var goOn bool
 var syncClient *client.SyncServiceClient
 var fileChan chan os.FileInfo
@@ -95,6 +96,12 @@ func main() {
 	}
 	if !fileInfo.Mode().IsDir() {
 		fmt.Printf("The given srcDir (%s) is not a directory.\n", *srcDir)
+		os.Exit(1)
+	}
+
+	sourceDir, err = filepath.Abs(*srcDir)
+	if err != nil {
+		fmt.Printf("Failed to get the absolute path of the source directory (%s). Error: %s\n", *srcDir, err)
 		os.Exit(1)
 	}
 
@@ -191,7 +198,7 @@ func watchDir(sd *os.File) {
 				objInfo.start = curTime()
 				objInfo.status = fileSent
 			} else {
-				objInfo = &ObjectInfo{fileInfo, nil, filepath.Join(*srcDir, fileName), curTime(), fileSent}
+				objInfo = &ObjectInfo{fileInfo, nil, filepath.Join(sourceDir, fileName), curTime(), fileSent}
 				mapLock.Lock()
 				objInfoMap[fileName] = objInfo
 				mapLock.Unlock()
@@ -245,7 +252,7 @@ func sendFiles(myId int) {
 			metaData := &client.ObjectMetaData{
 				ObjectType: "send-file", ObjectID: fileName + "@" + destType + "-" + destID,
 				Expiration: "", Version: "0.0.1"}
-			metaData.SourceDataURI = "file:" + objInfo.filePath
+			metaData.SourceDataURI = "file://" + objInfo.filePath
 
 			if V > medium {
 				fmt.Printf("The file %s is about to be sent by goRoutine %d.\n", fileName, myId)
