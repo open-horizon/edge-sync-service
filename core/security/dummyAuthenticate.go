@@ -51,9 +51,14 @@ func (auth *DummyAuthenticate) Start() {
 	authFile, err := os.Open(common.Configuration.PersistenceRootPath + dummyAuthFilename)
 	if err != nil {
 		if log.IsLogging(logger.WARNING) {
-			log.Warning("Failed to open user file. Error: %s\n", err)
+			if os.IsNotExist(err) {
+				log.Warning("dummy-auth.json file not found. All users will be treated as org admins.")
+			} else {
+				log.Warning("Failed to open dummy-auth.json file. All users will be treated as org admins.\n Error: %s\n", err)
+			}
 		}
 		auth.regularUsers = make([]string, 0)
+		auth.syncAdmins = make([]string, 0)
 		return
 	}
 	decoder := json.NewDecoder(authFile)
