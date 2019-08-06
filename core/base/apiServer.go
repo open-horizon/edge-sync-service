@@ -1428,7 +1428,7 @@ func handleListAllObjects(orgID string, objectType string, writer http.ResponseW
 //   type: boolean
 // - name: service
 //   in: query
-//   description: The ID of the service (orgID/architecture/version/serviceName) to which objects have affinity,
+//   description: The ID of the service (orgID/serviceName) to which objects have affinity,
 //        whose Destination Policy should be fetched.
 //   required: false
 //   type: string
