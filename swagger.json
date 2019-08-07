@@ -185,7 +185,7 @@
           },
           {
             "type": "string",
-            "description": "The ID of the service (orgID/architecture/version/serviceName) to which objects have affinity, whose Destination Policy should be fetched.",
+            "description": "The ID of the service (orgID/serviceName) to which objects have affinity, whose Destination Policy should be fetched.",
             "name": "service",
             "in": "query"
           },
