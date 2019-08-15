@@ -425,6 +425,204 @@ func testStorageObjectsWithPolicy(storageType string, t *testing.T) {
 	}
 }
 
+func testGetObjectWithFilters(storageType string, t *testing.T) {
+	store, err := setUpStorage(storageType)
+	if err != nil {
+		t.Errorf(err.Error())
+		return
+	}
+	defer store.Stop()
+
+	tests := []struct {
+		metaData common.MetaData
+	}{
+		{common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg111", NoData: true,
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "a", Value: float64(1)},
+					{Name: "b", Value: "zxcv"},
+					{Name: "c", Value: true, Type: "bool"},
+				},
+				Constraints: []string{"Plover=34", "asdf=true"},
+			},
+			Expiration: "",
+		}},
+		{common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "myorg111", NoData: true,
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "d", Value: float64(98)},
+					{Name: "e", Value: "asdf", Type: "string"},
+					{Name: "f", Value: false},
+				},
+				Constraints: []string{"xyzzy=78", "vbnm=false"},
+				Services: []common.ServiceID{
+					{OrgID: "plover", Arch: "amd64", ServiceName: "xyzzy", Version: "1.0.0"},
+				},
+			},
+			Expiration: "2012-08-14T14:00:00Z",
+		}},
+		{common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "myorg111", NoData: true,
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "g", Value: float64(-34)},
+					{Name: "h", Value: "qwer"},
+					{Name: "i", Value: float64(42), Type: "float"},
+				},
+				Constraints: []string{"x=15", "y=0.0"},
+				Services: []common.ServiceID{
+					{OrgID: "plover", Arch: "amd64", ServiceName: "xyzzy", Version: "1.0.0"},
+				},
+			},
+			Expiration: "2013-08-14T14:00:00Z",
+		}},
+		{common.MetaData{ObjectID: "4", ObjectType: "type1", DestOrgID: "myorg111", NoData: true,
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "j", Value: float64(42.0)},
+					{Name: "k", Value: "ghjk"},
+					{Name: "l", Value: float64(613)},
+				},
+				Constraints: []string{"il=71", "rtyu=\"edcrfv\""},
+				Services: []common.ServiceID{
+					{OrgID: "plover", Arch: "amd64", ServiceName: "wompus", Version: "1.0.0"},
+				},
+			},
+			Expiration: "2014-08-14T14:00:00Z",
+		}},
+		{common.MetaData{ObjectID: "5a", ObjectType: "type1", DestOrgID: "myorg111", DestType: "myDestType5", DestID: "myDestID5a", NoData: true, Expiration: ""}},
+		{common.MetaData{ObjectID: "5b", ObjectType: "type1", DestOrgID: "myorg111", DestType: "myDestType5", DestID: "myDestID5b", NoData: false, Expiration: ""}},
+	}
+
+	for _, test := range tests {
+		// delete
+		if err := store.DeleteStoredObject(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID); err != nil {
+			t.Errorf("Failed to delete object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+		}
+
+		// insert
+		if _, err := store.StoreObject(test.metaData, nil, common.NotReadyToSend); err != nil {
+			t.Errorf("Failed to store object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+		}
+
+		// retrieve
+		if _, err := store.RetrieveObject(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID); err != nil {
+			t.Errorf("Failed to retrieve object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+		}
+	}
+
+	objects, err := store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "", 0, "", "", nil, "")
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with filters. Error: %s\n", err)
+	}
+	if len(objects) != len(tests) {
+		t.Errorf("Retrieved %d objects with filters. Expected %d\n", len(objects), len(tests))
+	}
+
+	destinationPolicy := true
+	expectedResultCount := 4
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", &destinationPolicy, "", "", "", 0, "", "", nil, "")
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(objects) != expectedResultCount {
+		t.Errorf("Retrieved %d objects with filters. Expected %d\n", len(objects), expectedResultCount)
+	}
+
+	expectedResultCount = 2
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", &destinationPolicy, "plover", "xyzzy", "", 0, "", "", nil, "")
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(objects) != expectedResultCount {
+		t.Errorf("Retrieved %d objects with given serviceOrgId and servicename in destination policy. Expected %d\n", len(objects), expectedResultCount)
+	}
+
+	expectedResultCount = 1
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", &destinationPolicy, "plover", "xyzzy", "d", 0, "", "", nil, "")
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(objects) != expectedResultCount {
+		t.Errorf("Retrieved %d objects with given serviceOrgId, serviceName and propertyName in destination policy. Expected %d\n", len(objects), expectedResultCount)
+	}
+
+	expectedResultCount = 1
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", &destinationPolicy, "", "", "d", 0, "", "", nil, "")
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(objects) != expectedResultCount {
+		t.Errorf("Retrieved %d objects with given propertyName in destination policy. Expected %d\n", len(objects), expectedResultCount)
+	}
+
+	destinationPolicy = false
+	expectedResultCount = 2
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", &destinationPolicy, "", "", "", 0, "", "", nil, "")
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(objects) != expectedResultCount {
+		t.Errorf("Retrieved %d objects without destination policy. Expected %d\n", len(objects), expectedResultCount)
+	}
+
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "d", 0, "", "", nil, "")
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(objects) != len(tests) {
+		t.Errorf("Retrieved %d objects should not check destination policy subfield if desitinationPolicy is nil. Expected %d\n", len(objects), len(tests))
+	}
+
+	expectedResultCount = 2
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "", 0, "myDestType5", "", nil, "")
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(objects) != expectedResultCount {
+		t.Errorf("Retrieved %d objects with given destination type. Expected %d\n", len(objects), expectedResultCount)
+	}
+
+	expectedResultCount = 1
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "", 0, "myDestType5", "myDestID5a", nil, "")
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(objects) != expectedResultCount {
+		t.Errorf("Retrieved %d objects with given destinationType and destinationID. Expected %d\n", len(objects), expectedResultCount)
+	}
+
+	expectedResultCount = 5
+	noData := true
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "", 0, "", "", &noData, "")
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(objects) != expectedResultCount {
+		t.Errorf("Retrieved %d objects with noData set to true. Expected %d\n", len(objects), expectedResultCount)
+	}
+
+	expectedResultCount = 1
+	destinationPolicy = false
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", &destinationPolicy, "", "", "", 0, "", "", &noData, "")
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(objects) != expectedResultCount {
+		t.Errorf("Retrieved %d objects without destination policy and noData set to false. Expected %d\n", len(objects), expectedResultCount)
+	}
+
+	expectedResultCount = 2
+	//noData = true
+	expirationTimeBefore := "2013-08-15T14:00:00Z"
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "", 0, "", "", nil, expirationTimeBefore)
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(objects) != expectedResultCount {
+		t.Errorf("Retrieved %d objects with given destination type. Expected %d\n", len(objects), expectedResultCount)
+	}
+}
+
 func testStorageObjectActivation(storageType string, t *testing.T) {
 	store, err := setUpStorage(storageType)
 	if err != nil {

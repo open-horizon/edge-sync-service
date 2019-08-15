@@ -15,6 +15,10 @@ func TestBoltStorageObjectsWithPolicy(t *testing.T) {
 	testStorageObjectsWithPolicy(common.Bolt, t)
 }
 
+func TestBoltStorageGetObjectWithFilters(t *testing.T) {
+	testGetObjectWithFilters(common.Bolt, t)
+}
+
 func TestBoltStorageStorageObjectActivation(t *testing.T) {
 	testStorageObjectActivation(common.Bolt, t)
 }

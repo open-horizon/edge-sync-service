@@ -153,75 +153,6 @@
         }
       }
     },
-    "/api/v1/objects/{orgID}": {
-      "get": {
-        "description": "Get the list of objects that have destination policies.\nAn application would typically invoke this API periodically to check for updates.",
-        "produces": [
-          "application/json",
-          "text/plain"
-        ],
-        "summary": "Get objects that have destination policies.",
-        "operationId": "handleListObjectsWithDestinationPolicy",
-        "parameters": [
-          {
-            "type": "string",
-            "description": "The orgID of the updated objects to return. Present only when working with a CSS, removed from the path when working with an ESS",
-            "name": "orgID",
-            "in": "path",
-            "required": true
-          },
-          {
-            "type": "boolean",
-            "description": "Must be true to indicate that objects with destinationPolicy are to be retrieved",
-            "name": "destination_policy",
-            "in": "query",
-            "required": true
-          },
-          {
-            "type": "boolean",
-            "description": "Whether or not to include the objects that have been marked as received by the application",
-            "name": "received",
-            "in": "query"
-          },
-          {
-            "type": "string",
-            "description": "The ID of the service (orgID/serviceName) to which objects have affinity, whose Destination Policy should be fetched.",
-            "name": "service",
-            "in": "query"
-          },
-          {
-            "type": "integer",
-            "format": "int64",
-            "description": "Objects that have a Destination Policy which was updated since the specified UTC time in nanoseconds should be fetched.",
-            "name": "since",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Object destination policy response",
-            "schema": {
-              "type": "array",
-              "items": {
-                "$ref": "#/definitions/ObjectDestinationPolicy"
-              }
-            }
-          },
-          "404": {
-            "description": "No updated objects found",
-            "schema": {
-              "type": "string"
-            }
-          },
-          "500": {
-            "description": "Failed to retrieve the updated objects",
-            "schema": {
-              "type": "string"
-            }
-          }
-        }
-      }
-    },
     "/api/v1/objects/{orgID}/{objectType}": {
       "get": {
         "description": "Get objects of the specified object type. Either get all of the objects or just those objects that have pending (unconsumed) updates.\nAn application would typically invoke the latter API periodically to check for updates (an alternative is to use a webhook).",
@@ -1043,6 +974,173 @@
           },
           "500": {
             "description": "Failed to retrieve the updated objects",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{orgID}?destination_policy=true": {
+      "get": {
+        "description": "Get the list of objects that have destination policies.\nAn application would typically invoke this API periodically to check for updates.",
+        "produces": [
+          "application/json",
+          "text/plain"
+        ],
+        "summary": "Get objects that have destination policies.",
+        "operationId": "handleListObjectsWithDestinationPolicy",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the updated objects to return. Present only when working with a CSS, removed from the path when working with an ESS",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "boolean",
+            "description": "Must be true to indicate that objects with destinationPolicy are to be retrieved",
+            "name": "destination_policy",
+            "in": "query",
+            "required": true
+          },
+          {
+            "type": "boolean",
+            "description": "Whether or not to include the objects that have been marked as received by the application",
+            "name": "received",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "The ID of the service (orgID/serviceName) to which objects have affinity, whose Destination Policy should be fetched.",
+            "name": "service",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "Objects that have a Destination Policy which was updated since the specified UTC time in nanoseconds should be fetched.",
+            "name": "since",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Object destination policy response",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ObjectDestinationPolicy"
+              }
+            }
+          },
+          "404": {
+            "description": "No updated objects found",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve the updated objects",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{orgID}?filters=true": {
+      "get": {
+        "description": "Get the list of objects that satisfy the given filters\nThis is a CSS only API.",
+        "produces": [
+          "application/json",
+          "text/plain"
+        ],
+        "summary": "Get objects satisfy the given filters",
+        "operationId": "handleListObjectsWithFilters",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the updated objects to return. Present only when working with a CSS, removed from the path when working with an ESS",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "boolean",
+            "description": "Must be true to indicate that objects with filters are to be retrieved",
+            "name": "filters",
+            "in": "query",
+            "required": true
+          },
+          {
+            "type": "boolean",
+            "description": "Must be true to indicate that objects with destinationPolicy are to be retrieved",
+            "name": "destinationPolicy",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "The ID of the service (orgID/serviceName) to which objects have affinity, whose Destination Policy should be fetched.",
+            "name": "dpService",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "The property name defined inside destination policy to which objects have affinity, whose Destination Policy should be fetched.",
+            "name": "dpPropertyName",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "Objects that have a Destination Policy which was updated since the specified timestamp in RFC3339 should be fetched.",
+            "name": "since",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "Fetch the objects with given destination type",
+            "name": "destinationType",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "Fetch the objects with given destination id",
+            "name": "destinationID",
+            "in": "query"
+          },
+          {
+            "type": "boolean",
+            "description": "Fetch the objects with noData marked to true",
+            "name": "noData",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "Fetch the objects with expiration time before specified timestamp in RFC3339 format",
+            "name": "expirationTimeBefore",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Objects response",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/MetaData"
+              }
+            }
+          },
+          "404": {
+            "description": "No objects found",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve the objects",
             "schema": {
               "type": "string"
             }
