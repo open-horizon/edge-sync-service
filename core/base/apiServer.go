@@ -1291,12 +1291,15 @@ func handleObjectDestinations(orgID string, objectType string, objectID string, 
 		}
 		var destinationsList []string
 		err := json.NewDecoder(request.Body).Decode(&destinationsList)
-		if err == nil {
+		inputValidated, validateErr := common.ValidateDestinationListInput(destinationsList)
+		if inputValidated && err == nil {
 			if err := UpdateObjectDestinations(orgID, objectType, objectID, destinationsList); err == nil {
 				writer.WriteHeader(http.StatusNoContent)
 			} else {
 				communications.SendErrorResponse(writer, err, "", 0)
 			}
+		} else if !inputValidated {
+			communications.SendErrorResponse(writer, validateErr, "Invalid char in destinationsList. Error: ", http.StatusBadRequest)
 		} else {
 			communications.SendErrorResponse(writer, err, "Invalid JSON for update. Error: ", http.StatusBadRequest)
 		}
