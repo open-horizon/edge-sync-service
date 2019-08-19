@@ -663,10 +663,15 @@ func (store *MongoStorage) RetrieveObjectsWithDestinationPolicy(orgID string, re
 
 // RetrieveObjectsWithDestinationPolicyByService returns the list of all the object Policies for a particular service
 func (store *MongoStorage) RetrieveObjectsWithDestinationPolicyByService(orgID, serviceOrgID, serviceName string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
+	subquery := bson.M{
+		"$elemMatch": bson.M{
+			"org-id":       serviceOrgID,
+			"service-name": serviceName,
+		},
+	}
 	query := bson.M{
-		"metadata.destination-org-id":                       orgID,
-		"metadata.destination-policy.services.org-id":       serviceOrgID,
-		"metadata.destination-policy.services.service-name": serviceName,
+		"metadata.destination-org-id":          orgID,
+		"metadata.destination-policy.services": subquery,
 	}
 
 	return store.retrievePolicies(query)
@@ -680,6 +685,73 @@ func (store *MongoStorage) RetrieveObjectsWithDestinationPolicyUpdatedSince(orgI
 	}
 
 	return store.retrievePolicies(query)
+}
+
+// RetrieveObjectsWithFilters returns the list of all the objects that meet the given conditions
+func (store *MongoStorage) RetrieveObjectsWithFilters(orgID string, destinationPolicy *bool, dpServiceOrgID string, dpServiceName string, dpPropertyName string, since int64, destinationType string, destinationID string, noData *bool, expirationTimeBefore string) ([]common.MetaData, common.SyncServiceError) {
+	result := []object{}
+
+	query := bson.M{
+		"metadata.destination-org-id": orgID,
+	}
+	if destinationPolicy != nil {
+		if *destinationPolicy {
+			query["metadata.destination-policy"] = bson.M{"$ne": nil}
+			query["metadata.destination-policy.timestamp"] = bson.M{"$gte": since}
+
+			if dpServiceOrgID != "" && dpServiceName != "" {
+				subquery := bson.M{
+					"$elemMatch": bson.M{
+						"org-id":       dpServiceOrgID,
+						"service-name": dpServiceName,
+					},
+				}
+				query["metadata.destination-policy.services"] = subquery
+			}
+
+			if dpPropertyName != "" {
+				query["metadata.destination-policy.properties.name"] = dpPropertyName
+			}
+		} else {
+			query["metadata.destination-policy"] = nil
+		}
+
+	}
+
+	if destinationType != "" {
+		query["metadata.destination-type"] = destinationType
+		if destinationID != "" {
+			query["metadata.destination-id"] = destinationID
+		}
+	}
+
+	if noData != nil {
+		query["metadata.no-data"] = *noData
+	}
+
+	if expirationTimeBefore != "" {
+		subquery := bson.M{
+			"$ne":  "",
+			"$lte": expirationTimeBefore,
+		}
+		query["metadata.expiration"] = subquery
+	}
+
+	if err := store.fetchAll(objects, query, nil, &result); err != nil {
+		switch err {
+		case mgo.ErrNotFound:
+			return nil, nil
+		default:
+			return nil, &Error{fmt.Sprintf("Failed to fetch the objects. Error: %s.", err)}
+		}
+	}
+
+	metaDatas := make([]common.MetaData, len(result))
+	for i, r := range result {
+		metaDatas[i] = r.MetaData
+	}
+	return metaDatas, nil
+
 }
 
 // RetrieveAllObjects returns the list of all the objects of the specified type
@@ -1395,7 +1467,7 @@ func (store *MongoStorage) UpdateNotificationRecord(notification common.Notifica
 	n := notificationObject{ID: id, Notification: notification}
 	err := store.upsert(notifications,
 		bson.M{
-			"_id": id,
+			"_id":                             id,
 			"notification.destination-org-id": notification.DestOrgID,
 			"notification.destination-id":     notification.DestID,
 			"notification.destination-type":   notification.DestType,

@@ -725,6 +725,203 @@ func loadTestPolicyData(nodeType string, orgID string) (int64, int, error) {
 	return since, len(testData), nil
 }
 
+func TestGetObjectsWithFilters(t *testing.T) {
+	testGetObjectsWithFiltersHelper(common.Mongo, t)
+	testGetObjectsWithFiltersHelper(common.Bolt, t)
+}
+
+func testGetObjectsWithFiltersHelper(storageProvider string, t *testing.T) {
+	if status := testAPIServerSetup(common.CSS, storageProvider); status != "" {
+		t.Errorf(status)
+	}
+	defer communications.Store.Stop()
+
+	_, _, err := loadTestMetaData(common.CSS, "")
+	if err != nil {
+		t.Errorf("StoreObject failed: %s", err.Error())
+	}
+
+	tests := []struct {
+		method             string
+		orgID              string
+		destinationPolicy  string
+		destService        string
+		destPropname       string
+		since              string
+		destType           string
+		destID             string
+		noData             string
+		expirationBefore   string
+		expectedHTTPStatus int
+		expectedCount      int
+		testID             int
+	}{
+		// Must be first test
+		{http.MethodGet, "myorgObjFilter", "", "", "", "", "", "", "", "", http.StatusOK, 7, 0},
+		{http.MethodGet, "myorgObjFilter", "true", "", "", "", "", "", "", "", http.StatusOK, 5, 1},
+		{http.MethodGet, "myorgObjFilter", "false", "", "", "", "", "", "", "", http.StatusOK, 2, 2},
+		// Must be second test
+		{http.MethodGet, "myorgObjFilter", "true", "plover/testerService1", "", "", "", "", "", "", http.StatusOK, 2, 3},
+		{http.MethodGet, "myorgObjFilter", "true", "plover/testerService1", "b", "", "", "", "", "", http.StatusOK, 1, 4},
+		{http.MethodGet, "myorgObjFilter", "", "plover/testerService1", "b", "", "", "", "", "", http.StatusOK, 7, 5},
+		{http.MethodGet, "myorgObjFilter", "true", "", "b", "", "", "", "", "", http.StatusOK, 4, 6},
+		{http.MethodGet, "myorgObjFilter", "true", "", "", "2000-08-14T14:00:00Z", "", "", "", "", http.StatusOK, 5, 7},
+		{http.MethodGet, "myorgObjFilter", "true", "", "", "2030-08-14T14:00:00Z", "", "", "", "", http.StatusNotFound, 0, 8},
+		{http.MethodGet, "myorgObjFilter", "true", "", "", "", "", "", "false", "", http.StatusOK, 1, 9},
+		{http.MethodGet, "myorgObjFilter", "true", "", "", "", "", "", "true", "", http.StatusOK, 4, 10},
+		{http.MethodGet, "myorgObjFilter", "false", "", "", "", "", "", "false", "", http.StatusOK, 1, 11},
+		{http.MethodGet, "myorgObjFilter", "false", "", "", "", "", "", "true", "", http.StatusOK, 1, 12},
+		{http.MethodGet, "myorgObjFilter", "", "", "", "", "", "", "false", "", http.StatusOK, 2, 13},
+		{http.MethodGet, "myorgObjFilter", "", "", "", "", "", "", "true", "", http.StatusOK, 5, 14},
+		{http.MethodGet, "myorgObjFilter", "", "", "", "", "myDestType5", "", "", "", http.StatusOK, 2, 15},
+		{http.MethodGet, "myorgObjFilter", "", "", "", "", "myDestType5", "myDestID5a", "", "", http.StatusOK, 1, 16},
+		{http.MethodGet, "myorgObjFilter", "", "", "", "", "", "", "", "2012-08-15T14:00:00Z", http.StatusOK, 2, 17},
+		{http.MethodGet, "myorgObjFilter", "false", "", "", "", "", "", "", "2012-08-15T14:00:00Z", http.StatusNotFound, 0, 18},
+		{http.MethodGet, "myorgObjFilter1", "true", "", "", "", "", "", "", "", http.StatusOK, 1, 19},
+		{http.MethodGet, "myorgObjFilter", "aaa", "", "", "", "", "", "", "", http.StatusBadRequest, 0, 20},
+		{http.MethodPut, "myorgObjFilter", "true", "", "", "", "", "", "", "", http.StatusMethodNotAllowed, 0, 21},
+		{http.MethodGet, "myorgObjFilter2", "true", "", "", "", "", "", "", "", http.StatusNotFound, 0, 22},
+	}
+
+	//sinceFormat := time.Unix(since, 0).Format(time.RFC3339)
+	//tests[5].since = sinceFormat
+	//tests[1].expectedCount = totalCount - 1
+
+	for _, test := range tests {
+		//urlString := fmt.Sprintf("%s?destination_policy=true&since=%d", test.orgID, test.since)
+		urlString := fmt.Sprintf("%s?filters=true&destinationPolicy=%s&dpPropertyName=%s&dpService=%s&since=%s&destinationType=%s&destinationID=%s&noData=%s&expirationTimeBefore=%s",
+			test.orgID, test.destinationPolicy, test.destPropname, test.destService, test.since, test.destType, test.destID, test.noData, test.expirationBefore)
+		writer := newAPIServerTestResponseWriter()
+		request, _ := http.NewRequest(test.method, urlString, nil)
+		request.SetBasicAuth("testerAdmin@"+test.orgID, "")
+
+		handleObjects(writer, request)
+		if writer.statusCode != test.expectedHTTPStatus {
+			t.Errorf("handleObjects of %s returned a status of %d instead of %d for test %d\n",
+				urlString, writer.statusCode, test.expectedHTTPStatus, test.testID)
+		}
+		if writer.statusCode == http.StatusOK {
+			decoder := json.NewDecoder(&writer.body)
+			var data []common.ObjectDestinationPolicy
+			if err := decoder.Decode(&data); err != nil {
+				t.Errorf("Failed to unmarshall objects. Error: %s\n", err)
+			} else {
+				if len(data) != test.expectedCount {
+					t.Errorf("Fetched %d objects instead of %d for test %d",
+						len(data), test.expectedCount, test.testID)
+				}
+			}
+		}
+	}
+}
+
+func loadTestMetaData(nodeType string, orgID string) (int64, int, error) {
+	testData := []common.MetaData{
+		common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorgObjFilter1", NoData: true,
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "a", Value: float64(1)},
+					{Name: "b", Value: "zxcv"},
+					{Name: "c", Value: true, Type: "bool"},
+				},
+				Constraints: []string{"Plover=34", "asdf=true"},
+				Services: []common.ServiceID{
+					{OrgID: "plover", Arch: "amd64", ServiceName: "testerService1", Version: "0.0.1"},
+				},
+			},
+			Expiration: "",
+		},
+		common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorgObjFilter", NoData: true,
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "a", Value: float64(1)},
+					{Name: "b", Value: "zxcv"},
+					{Name: "c", Value: true, Type: "bool"},
+				},
+				Constraints: []string{"Plover=34", "asdf=true"},
+				Services: []common.ServiceID{
+					{OrgID: "plover", Arch: "amd64", ServiceName: "testerService1", Version: "0.0.1"},
+				},
+			},
+			Expiration: "2011-08-14T14:00:00Z",
+		},
+		common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "myorgObjFilter", NoData: true,
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "a", Value: float64(1)},
+					{Name: "c", Value: true, Type: "bool"},
+				},
+				Constraints: []string{"Plover=34", "asdf=true"},
+				Services: []common.ServiceID{
+					{OrgID: "plover", Arch: "amd64", ServiceName: "testerService1", Version: "0.0.1"},
+					{OrgID: "plover", Arch: "amd64", ServiceName: "testerService2", Version: "[0.0.1, 0.1.0)"},
+				},
+			},
+			Expiration: "",
+		},
+		common.MetaData{ObjectID: "2a", ObjectType: "type1", DestOrgID: "myorgObjFilter", NoData: true,
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "a", Value: float64(1)},
+					{Name: "b", Value: "zxcv"},
+					{Name: "c", Value: true, Type: "bool"},
+				},
+				Constraints: []string{"Plover=34", "asdf=true"},
+				Services: []common.ServiceID{
+					{OrgID: "plover", Arch: "amd64", ServiceName: "testerService2", Version: "[0.1.0, INFINITY)"},
+				},
+			},
+			Expiration: "2012-08-14T14:00:00Z",
+		},
+		common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "myorgObjFilter", NoData: true,
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "a", Value: float64(1)},
+					{Name: "b", Value: "zxcv"},
+					{Name: "c", Value: true, Type: "bool"},
+				},
+				Constraints: []string{"Plover=34", "asdf=true"},
+				Services: []common.ServiceID{
+					{OrgID: "plover", Arch: "amd64", ServiceName: "testerService3", Version: "0.0.1"},
+				},
+			},
+			Expiration: "2013-08-14T14:00:00Z",
+		},
+		common.MetaData{ObjectID: "4", ObjectType: "type1", DestOrgID: "myorgObjFilter", NoData: false,
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "a", Value: float64(1)},
+					{Name: "b", Value: "zxcv"},
+					{Name: "c", Value: true, Type: "bool"},
+				},
+				Constraints: []string{"Plover=34", "asdf=true"},
+				Services: []common.ServiceID{
+					{OrgID: "plover", Arch: "amd64", ServiceName: "testerService4", Version: "0.0.1"},
+				},
+			},
+			Expiration: "2014-08-14T14:00:00Z",
+		},
+		common.MetaData{ObjectID: "5a", ObjectType: "type1", DestOrgID: "myorgObjFilter", DestType: "myDestType5", DestID: "myDestID5a", NoData: true, Expiration: "2015-08-14T14:00:00Z"},
+		common.MetaData{ObjectID: "5b", ObjectType: "type1", DestOrgID: "myorgObjFilter", DestType: "myDestType5", DestID: "myDestID5b", NoData: false, Expiration: "2015-08-14T14:00:00Z"},
+	}
+
+	var since int64
+
+	for _, metaData := range testData {
+		if nodeType == common.ESS && metaData.DestOrgID != orgID {
+			continue
+		}
+		since = time.Now().UTC().UnixNano()
+		time.Sleep(10 * time.Millisecond)
+
+		if _, err := store.StoreObject(metaData, nil, common.CompletelyReceived); err != nil {
+			return 0, 0, err
+		}
+	}
+
+	return since, len(testData), nil
+}
+
 func testAPIServerSetup(nodeType string, storageType string) string {
 	common.Running = true
 	time.Sleep(100 * time.Millisecond) // Wait a bit

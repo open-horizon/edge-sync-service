@@ -480,6 +480,97 @@ func (store *BoltStorage) RetrieveObjectsWithDestinationPolicyUpdatedSince(orgID
 	return result, nil
 }
 
+// RetrieveObjectsWithFilters returns the list of all othe objects that meet the given conditions
+func (store *BoltStorage) RetrieveObjectsWithFilters(orgID string, destinationPolicy *bool, dpServiceOrgID string, dpServiceName string, dpPropertyName string, since int64, destinationType string, destinationID string, noData *bool, expirationTimeBefore string) ([]common.MetaData, common.SyncServiceError) {
+	result := make([]common.MetaData, 0)
+	function := func(object boltObject) {
+		if orgID == object.Meta.DestOrgID {
+			// check destinationPolicy
+			if destinationPolicy != nil {
+				if *destinationPolicy {
+					if object.Meta.DestinationPolicy != nil && object.Meta.DestinationPolicy.Timestamp >= since {
+						check := false
+						if dpServiceOrgID != "" && dpServiceName != "" {
+							for _, service := range object.Meta.DestinationPolicy.Services {
+								if dpServiceOrgID == service.OrgID && dpServiceName == service.ServiceName {
+									check = true
+									break
+								}
+							}
+							if !check {
+								return
+							}
+						}
+
+						if dpPropertyName != "" {
+							check = false
+							for _, policyProperty := range object.Meta.DestinationPolicy.Properties {
+								if dpPropertyName == policyProperty.Name {
+									check = true
+									break
+								}
+							}
+							if !check {
+								return
+							}
+						}
+
+						// if check {
+						// 	result = append(result, obj.Meta)
+						// }
+					} else {
+						return
+					}
+				} else { //*destinationPolicy = false
+					if object.Meta.DestinationPolicy != nil {
+						return
+					}
+
+				}
+			}
+
+			// check destinationType and destinationID
+			if destinationType != "" {
+				if destinationType != object.Meta.DestType {
+					return
+				} else {
+					if destinationID != "" {
+						if destinationID != object.Meta.DestID {
+							return
+						}
+					}
+				}
+			}
+
+			if noData != nil {
+				if *noData != object.Meta.NoData {
+					return
+				}
+			}
+
+			if expirationTimeBefore != "" {
+				boltObjectExpirationTime, err := time.Parse(time.RFC3339, object.Meta.Expiration)
+				queryExpirationTimeBefore, _ := time.Parse(time.RFC3339, expirationTimeBefore)
+
+				if err != nil || boltObjectExpirationTime.After(queryExpirationTimeBefore) {
+					return
+				}
+			}
+
+			// if expirationTimeBefore is not satisfy, return
+			result = append(result, object.Meta)
+
+		}
+
+	}
+
+	if err := store.retrieveObjectsHelper(function); err != nil {
+		return nil, err
+	}
+	return result, nil
+
+}
+
 // RetrieveAllObjects returns the list of all the objects of the specified type
 func (store *BoltStorage) RetrieveAllObjects(orgID string, objectType string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
 	result := make([]common.ObjectDestinationPolicy, 0)

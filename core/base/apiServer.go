@@ -374,17 +374,31 @@ func handleObjects(writer http.ResponseWriter, request *http.Request) {
 
 		if len(parts) == 0 {
 			// GET     /api/v1/objects/orgID?destination_policy=true
+			// GET     /api/v1/objects/orgID?filters=true
 			if request.Method != http.MethodGet {
 				writer.WriteHeader(http.StatusMethodNotAllowed)
 				return
 			}
+
+			// GET     /api/v1/objects/orgID?destination_policy=true, return []common.ObjectDestinationPolicy
 			destPolicyString := request.URL.Query().Get("destination_policy")
 			destPolicy := false
+
+			objectFilterString := request.URL.Query().Get("filters")
+			objectFilter := false
+			var err error
 			if destPolicyString != "" {
-				var err error
 				destPolicy, err = strconv.ParseBool(destPolicyString)
 				if err == nil && destPolicy {
 					handleListObjectsWithDestinationPolicy(orgID, writer, request)
+					return
+				}
+			} else if objectFilterString != "" {
+				// GET     /api/v1/objects/orgID?filters=true&param1=value1&param2=value2.....
+				// this API is to filter objects which have destination policy, and return []common.Metatdata
+				objectFilter, err = strconv.ParseBool(objectFilterString)
+				if err == nil && objectFilter {
+					handleListObjectsWithFilters(orgID, writer, request)
 					return
 				}
 			}
@@ -583,6 +597,203 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 	default:
 		writer.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+// swagger:operation GET /api/v1/objects/{orgID}?filters=true handleListObjectsWithFilters
+//
+// Get objects satisfy the given filters
+//
+// Get the list of objects that satisfy the given filters
+// This is a CSS only API.
+//
+// ---
+//
+// produces:
+// - application/json
+// - text/plain
+//
+// parameters:
+// - name: orgID
+//   in: path
+//   description: The orgID of the updated objects to return. Present only when working with a CSS, removed from the path when working with an ESS
+//   required: true
+//   type: string
+// - name: filters
+//   in: query
+//   description: Must be true to indicate that objects with filters are to be retrieved
+//   required: true
+//   type: boolean
+// - name: destinationPolicy
+//   in: query
+//   description: Must be true to indicate that objects with destinationPolicy are to be retrieved
+//   required: false
+//   type: boolean
+// - name: dpService
+//   in: query
+//   description: The ID of the service (orgID/serviceName) to which objects have affinity,
+//        whose Destination Policy should be fetched.
+//   required: false
+//   type: string
+// - name: dpPropertyName
+//   in: query
+//   description: The property name defined inside destination policy to which objects have affinity,
+//        whose Destination Policy should be fetched.
+//   required: false
+//   type: string
+// - name: since
+//   in: query
+//   description: Objects that have a Destination Policy which was updated since the specified timestamp in RFC3339 should be fetched.
+//   required: false
+//   type: string
+// - name: destinationType
+//   in: query
+//   description: Fetch the objects with given destination type
+//   required: false
+//   type: string
+// - name: destinationID
+//   in: query
+//   description: Fetch the objects with given destination id
+//   required: false
+//   type: string
+// - name: noData
+//   in: query
+//   description: Fetch the objects with noData marked to true
+//   required: false
+//   type: boolean
+// - name: expirationTimeBefore
+//   in: query
+//   description: Fetch the objects with expiration time before specified timestamp in RFC3339 format
+//   required: false
+//   type: string
+//
+// responses:
+//   '200':
+//     description: Objects response
+//     schema:
+//       type: array
+//       items:
+//         "$ref": "#/definitions/MetaData"
+//   '404':
+//     description: No objects found
+//     schema:
+//       type: string
+//   '500':
+//     description: Failed to retrieve the objects
+//     schema:
+//       type: string
+func handleListObjectsWithFilters(orgID string, writer http.ResponseWriter, request *http.Request) {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In handleListObjectsWithFilters")
+	}
+	code, userOrgID, _ := security.Authenticate(request)
+	if code != security.AuthSyncAdmin && (code != security.AuthAdmin || userOrgID != orgID) {
+		writer.WriteHeader(http.StatusForbidden)
+		writer.Write(unauthorizedBytes)
+		return
+	}
+
+	destinationPolicyString := request.URL.Query().Get("destinationPolicy")
+	var destinationPolicy *bool
+	if destinationPolicyString != "" {
+		var err error
+		destinationPolicyValue, err := strconv.ParseBool(destinationPolicyString)
+		destinationPolicy = &destinationPolicyValue
+		if err != nil {
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+	}
+
+	dpServiceOrgID := ""
+	dpServiceName := ""
+	dpPropertyName := ""
+	since := int64(0)
+
+	if destinationPolicy != nil && *destinationPolicy == true {
+		dpServiceID := request.URL.Query().Get("dpService")
+		if dpServiceID != "" {
+			parts := strings.SplitN(dpServiceID, "/", 2)
+			if len(parts) < 2 || len(parts[0]) == 0 || len(parts[1]) == 0 {
+				writer.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			dpServiceOrgID = parts[0]
+			dpServiceName = parts[1]
+		}
+
+		dpPropertyName = request.URL.Query().Get("dpPropertyName")
+
+		sinceString := request.URL.Query().Get("since")
+		if sinceString != "" {
+			var err error
+			sinceTime, err := time.Parse(time.RFC3339, sinceString)
+			if err != nil {
+				writer.WriteHeader(http.StatusBadRequest)
+				return
+			}
+
+			since = sinceTime.UTC().UnixNano()
+			if since < 1 {
+				writer.WriteHeader(http.StatusBadRequest)
+				return
+			}
+
+		}
+	}
+
+	destinationType := request.URL.Query().Get("destinationType")
+	destinationID := ""
+	if destinationType != "" {
+		destinationID = request.URL.Query().Get("destinationID")
+	}
+
+	var noData *bool
+	noDataString := request.URL.Query().Get("noData")
+	if noDataString != "" {
+		var err error
+		noDataVelue, err := strconv.ParseBool(noDataString)
+		noData = &noDataVelue
+		if err != nil {
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+	}
+
+	expirationTimeBeforeString := request.URL.Query().Get("expirationTimeBefore")
+	if expirationTimeBeforeString != "" {
+		_, err := time.Parse(time.RFC3339, expirationTimeBeforeString)
+		if err != nil {
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+	}
+
+	var objects []common.MetaData
+	var err error
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In handleListObjectsWithFilters, get objects with %s %s %s %s %s %d %s %s %s %s\n", orgID, destinationPolicyString, dpServiceOrgID, dpServiceName, dpPropertyName, since, destinationType, destinationID, noDataString, expirationTimeBeforeString)
+	}
+
+	if objects, err = ListObjectsWithFilters(orgID, destinationPolicy, dpServiceOrgID, dpServiceName, dpPropertyName, since, destinationType, destinationID, noData, expirationTimeBeforeString); err != nil {
+		communications.SendErrorResponse(writer, err, "Failed to fetch the list of objects with given conditions. Error: ", 0)
+	} else {
+		if len(objects) == 0 {
+			writer.WriteHeader(http.StatusNotFound)
+		} else {
+			if data, err := json.MarshalIndent(objects, "", "  "); err != nil {
+				communications.SendErrorResponse(writer, err, "Failed to marshal the list of objects with a Metadata. Error: ", 0)
+			} else {
+				writer.Header().Add(contentType, applicationJSON)
+				writer.WriteHeader(http.StatusOK)
+				if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+					log.Error("Failed to write response body, error: " + err.Error())
+				}
+			}
+		}
+
+	}
+
 }
 
 func handleObjectOperation(operation string, orgID string, objectType string, objectID string, writer http.ResponseWriter, request *http.Request) {
@@ -1397,7 +1608,7 @@ func handleListAllObjects(orgID string, objectType string, writer http.ResponseW
 	}
 }
 
-// swagger:operation GET /api/v1/objects/{orgID} handleListObjectsWithDestinationPolicy
+// swagger:operation GET /api/v1/objects/{orgID}?destination_policy=true handleListObjectsWithDestinationPolicy
 //
 // Get objects that have destination policies.
 //
