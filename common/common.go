@@ -789,7 +789,7 @@ func ValidateDestinationListInput(destinationsList []string) (bool, SyncServiceE
 
 	for _, destination := range destinationsList {
 		if strings.ContainsAny(destination, "<") || strings.ContainsAny(destination, ">") {
-			message := fmt.Sprintf("destinationsList contains invalide char: < or > (%+v)", destination)
+			message := fmt.Sprintf("destinationsList contains unsupported char: < or > (%+v)", destination)
 			return false, &InvalidRequest{Message: message}
 		}
 	}

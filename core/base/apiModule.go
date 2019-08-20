@@ -88,7 +88,7 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 		return &common.InvalidRequest{Message: "Both destinations list and destination type are specified"}
 	}
 	if validatedDestList, _ := common.ValidateDestinationListInput(metaData.DestinationsList); validatedDestList == false {
-		return &common.InvalidRequest{Message: "Invalid char <, > in destinationsList."}
+		return &common.InvalidRequest{Message: "Unsupported char <, > in destinationsList."}
 	}
 
 	if metaData.DestinationPolicy != nil {

@@ -1299,7 +1299,7 @@ func handleObjectDestinations(orgID string, objectType string, objectID string, 
 				communications.SendErrorResponse(writer, err, "", 0)
 			}
 		} else if !inputValidated {
-			communications.SendErrorResponse(writer, validateErr, "Invalid char in destinationsList. Error: ", http.StatusBadRequest)
+			communications.SendErrorResponse(writer, validateErr, "Unsupported char in destinationsList. Error: ", http.StatusBadRequest)
 		} else {
 			communications.SendErrorResponse(writer, err, "Invalid JSON for update. Error: ", http.StatusBadRequest)
 		}
