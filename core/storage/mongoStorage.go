@@ -688,7 +688,7 @@ func (store *MongoStorage) RetrieveObjectsWithDestinationPolicyUpdatedSince(orgI
 }
 
 // RetrieveObjectsWithFilters returns the list of all the objects that meet the given conditions
-func (store *MongoStorage) RetrieveObjectsWithFilters(orgID string, destinationPolicy *bool, dpServiceOrgID string, dpServiceName string, dpPropertyName string, since int64, destinationType string, destinationID string, noData *bool, expirationTimeBefore string) ([]common.MetaData, common.SyncServiceError) {
+func (store *MongoStorage) RetrieveObjectsWithFilters(orgID string, destinationPolicy *bool, dpServiceOrgID string, dpServiceName string, dpPropertyName string, since int64, objectType string, objectID string, destinationType string, destinationID string, noData *bool, expirationTimeBefore string) ([]common.MetaData, common.SyncServiceError) {
 	result := []object{}
 
 	query := bson.M{
@@ -718,11 +718,28 @@ func (store *MongoStorage) RetrieveObjectsWithFilters(orgID string, destinationP
 
 	}
 
-	if destinationType != "" {
-		query["metadata.destination-type"] = destinationType
-		if destinationID != "" {
-			query["metadata.destination-id"] = destinationID
+	if objectType != "" {
+		query["metadata.object-type"] = objectType
+		if objectID != "" {
+			query["metadata.object-id"] = objectID
 		}
+	}
+
+	if destinationType != "" {
+		var subquery []bson.M
+		if destinationID == "" {
+			subquery = []bson.M{
+				bson.M{"metadata.destination-type": destinationType},
+				bson.M{"metadata.destinations-list": bson.M{"$regex": destinationType + ":*"}},
+			}
+		} else {
+			subquery = []bson.M{
+				bson.M{"metadata.destination-type": destinationType, "metadata.destination-id": destinationID},
+				bson.M{"metadata.destinations-list": destinationType + ":" + destinationID},
+			}
+		}
+		query["$or"] = subquery
+
 	}
 
 	if noData != nil {

@@ -433,6 +433,13 @@ func testGetObjectWithFilters(storageType string, t *testing.T) {
 	}
 	defer store.Stop()
 
+	dest1 := common.Destination{DestOrgID: "myorg111", DestType: "myDestType5", DestID: "myDestID5c", Communication: common.HTTPProtocol}
+	destArray := []string{"myDestType5:myDestID5c"}
+
+	if err := store.StoreDestination(dest1); err != nil {
+		t.Errorf("StoreDestination failed. Error: %s\n", err.Error())
+	}
+
 	tests := []struct {
 		metaData common.MetaData
 	}{
@@ -491,6 +498,24 @@ func testGetObjectWithFilters(storageType string, t *testing.T) {
 		}},
 		{common.MetaData{ObjectID: "5a", ObjectType: "type1", DestOrgID: "myorg111", DestType: "myDestType5", DestID: "myDestID5a", NoData: true, Expiration: ""}},
 		{common.MetaData{ObjectID: "5b", ObjectType: "type1", DestOrgID: "myorg111", DestType: "myDestType5", DestID: "myDestID5b", NoData: false, Expiration: ""}},
+		{common.MetaData{ObjectID: "5c", ObjectType: "type1", DestOrgID: "myorg111", DestinationsList: destArray, NoData: false, Expiration: ""}},
+		{common.MetaData{ObjectID: "1", ObjectType: "type2", DestOrgID: "myorg111", NoData: true,
+			DestinationPolicy: &common.Policy{
+				Properties: []common.PolicyProperty{
+					{Name: "j", Value: float64(42.0)},
+					{Name: "k", Value: "ghjk"},
+					{Name: "l", Value: float64(613)},
+				},
+				Constraints: []string{"il=71", "rtyu=\"edcrfv\""},
+				Services: []common.ServiceID{
+					{OrgID: "plover", Arch: "amd64", ServiceName: "wompus", Version: "1.0.0"},
+				},
+			},
+			Expiration: "2014-08-14T14:00:00Z",
+		}},
+		{common.MetaData{ObjectID: "5a", ObjectType: "type2", DestOrgID: "myorg111", DestType: "myDestType5", DestID: "myDestID5a", NoData: true, Expiration: ""}},
+		{common.MetaData{ObjectID: "5b", ObjectType: "type2", DestOrgID: "myorg111", DestType: "myDestType5", DestID: "myDestID5b", NoData: false, Expiration: ""}},
+		{common.MetaData{ObjectID: "5c", ObjectType: "type2", DestOrgID: "myorg111", DestinationsList: destArray, NoData: false, Expiration: ""}},
 	}
 
 	for _, test := range tests {
@@ -500,7 +525,7 @@ func testGetObjectWithFilters(storageType string, t *testing.T) {
 		}
 
 		// insert
-		if _, err := store.StoreObject(test.metaData, nil, common.NotReadyToSend); err != nil {
+		if _, err := store.StoreObject(test.metaData, nil, common.ReadyToSend); err != nil {
 			t.Errorf("Failed to store object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
 		}
 
@@ -510,7 +535,7 @@ func testGetObjectWithFilters(storageType string, t *testing.T) {
 		}
 	}
 
-	objects, err := store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "", 0, "", "", nil, "")
+	objects, err := store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "", 0, "", "", "", "", nil, "")
 	if err != nil {
 		t.Errorf("Failed to retrieve the objects with filters. Error: %s\n", err)
 	}
@@ -519,8 +544,8 @@ func testGetObjectWithFilters(storageType string, t *testing.T) {
 	}
 
 	destinationPolicy := true
-	expectedResultCount := 4
-	objects, err = store.RetrieveObjectsWithFilters("myorg111", &destinationPolicy, "", "", "", 0, "", "", nil, "")
+	expectedResultCount := 5
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", &destinationPolicy, "", "", "", 0, "", "", "", "", nil, "")
 	if err != nil {
 		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
 	}
@@ -529,7 +554,7 @@ func testGetObjectWithFilters(storageType string, t *testing.T) {
 	}
 
 	expectedResultCount = 2
-	objects, err = store.RetrieveObjectsWithFilters("myorg111", &destinationPolicy, "plover", "xyzzy", "", 0, "", "", nil, "")
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", &destinationPolicy, "plover", "xyzzy", "", 0, "", "", "", "", nil, "")
 	if err != nil {
 		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
 	}
@@ -538,7 +563,7 @@ func testGetObjectWithFilters(storageType string, t *testing.T) {
 	}
 
 	expectedResultCount = 1
-	objects, err = store.RetrieveObjectsWithFilters("myorg111", &destinationPolicy, "plover", "xyzzy", "d", 0, "", "", nil, "")
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", &destinationPolicy, "plover", "xyzzy", "d", 0, "", "", "", "", nil, "")
 	if err != nil {
 		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
 	}
@@ -547,7 +572,16 @@ func testGetObjectWithFilters(storageType string, t *testing.T) {
 	}
 
 	expectedResultCount = 1
-	objects, err = store.RetrieveObjectsWithFilters("myorg111", &destinationPolicy, "", "", "d", 0, "", "", nil, "")
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", &destinationPolicy, "", "", "d", 0, "", "", "", "", nil, "")
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(objects) != expectedResultCount {
+		t.Errorf("Retrieved %d objects with given propertyName in destination policy. Expected %d\n", len(objects), expectedResultCount)
+	}
+
+	expectedResultCount = 1
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", &destinationPolicy, "", "", "", 0, "type2", "", "", "", nil, "")
 	if err != nil {
 		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
 	}
@@ -556,8 +590,8 @@ func testGetObjectWithFilters(storageType string, t *testing.T) {
 	}
 
 	destinationPolicy = false
-	expectedResultCount = 2
-	objects, err = store.RetrieveObjectsWithFilters("myorg111", &destinationPolicy, "", "", "", 0, "", "", nil, "")
+	expectedResultCount = 6
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", &destinationPolicy, "", "", "", 0, "", "", "", "", nil, "")
 	if err != nil {
 		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
 	}
@@ -565,7 +599,7 @@ func testGetObjectWithFilters(storageType string, t *testing.T) {
 		t.Errorf("Retrieved %d objects without destination policy. Expected %d\n", len(objects), expectedResultCount)
 	}
 
-	objects, err = store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "d", 0, "", "", nil, "")
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "d", 0, "", "", "", "", nil, "")
 	if err != nil {
 		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
 	}
@@ -573,8 +607,35 @@ func testGetObjectWithFilters(storageType string, t *testing.T) {
 		t.Errorf("Retrieved %d objects should not check destination policy subfield if desitinationPolicy is nil. Expected %d\n", len(objects), len(tests))
 	}
 
+	expectedResultCount = 6
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "", 0, "", "", "myDestType5", "", nil, "")
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(objects) != expectedResultCount {
+		t.Errorf("Retrieved %d objects with given destination type. Expected %d\n", len(objects), expectedResultCount)
+	}
+
 	expectedResultCount = 2
-	objects, err = store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "", 0, "myDestType5", "", nil, "")
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "", 0, "", "", "myDestType5", "myDestID5a", nil, "")
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(objects) != expectedResultCount {
+		t.Errorf("Retrieved %d objects with given destinationType and destinationID. Expected %d\n", len(objects), expectedResultCount)
+	}
+
+	expectedResultCount = 2
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "", 0, "", "", "myDestType5", "myDestID5c", nil, "")
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(objects) != expectedResultCount {
+		t.Errorf("Retrieved %d objects with given destinationType and destinationID. Expected %d\n", len(objects), expectedResultCount)
+	}
+
+	expectedResultCount = 4
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "", 0, "type2", "", "", "", nil, "")
 	if err != nil {
 		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
 	}
@@ -583,17 +644,34 @@ func testGetObjectWithFilters(storageType string, t *testing.T) {
 	}
 
 	expectedResultCount = 1
-	objects, err = store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "", 0, "myDestType5", "myDestID5a", nil, "")
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "", 0, "type2", "5a", "", "", nil, "")
 	if err != nil {
 		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
 	}
 	if len(objects) != expectedResultCount {
-		t.Errorf("Retrieved %d objects with given destinationType and destinationID. Expected %d\n", len(objects), expectedResultCount)
+		t.Errorf("Retrieved %d objects with given destination type. Expected %d\n", len(objects), expectedResultCount)
 	}
 
-	expectedResultCount = 5
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "", 0, "", "5a", "", "", nil, "")
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(objects) != len(tests) {
+		t.Errorf("Retrieved %d objects with given destination type. Expected %d\n", len(objects), expectedResultCount)
+	}
+
+	expectedResultCount = 3
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "", 0, "type2", "", "myDestType5", "", nil, "")
+	if err != nil {
+		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
+	}
+	if len(objects) != expectedResultCount {
+		t.Errorf("Retrieved %d objects with given destination type. Expected %d\n", len(objects), expectedResultCount)
+	}
+
+	expectedResultCount = 7
 	noData := true
-	objects, err = store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "", 0, "", "", &noData, "")
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "", 0, "", "", "", "", &noData, "")
 	if err != nil {
 		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
 	}
@@ -601,9 +679,9 @@ func testGetObjectWithFilters(storageType string, t *testing.T) {
 		t.Errorf("Retrieved %d objects with noData set to true. Expected %d\n", len(objects), expectedResultCount)
 	}
 
-	expectedResultCount = 1
+	expectedResultCount = 2
 	destinationPolicy = false
-	objects, err = store.RetrieveObjectsWithFilters("myorg111", &destinationPolicy, "", "", "", 0, "", "", &noData, "")
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", &destinationPolicy, "", "", "", 0, "", "", "", "", &noData, "")
 	if err != nil {
 		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
 	}
@@ -612,15 +690,15 @@ func testGetObjectWithFilters(storageType string, t *testing.T) {
 	}
 
 	expectedResultCount = 2
-	//noData = true
 	expirationTimeBefore := "2013-08-15T14:00:00Z"
-	objects, err = store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "", 0, "", "", nil, expirationTimeBefore)
+	objects, err = store.RetrieveObjectsWithFilters("myorg111", nil, "", "", "", 0, "", "", "", "", nil, expirationTimeBefore)
 	if err != nil {
 		t.Errorf("Failed to retrieve the objects with a destination policy. Error: %s\n", err)
 	}
 	if len(objects) != expectedResultCount {
 		t.Errorf("Retrieved %d objects with given destination type. Expected %d\n", len(objects), expectedResultCount)
 	}
+
 }
 
 func testStorageObjectActivation(storageType string, t *testing.T) {

@@ -339,7 +339,7 @@ func (store *InMemoryStorage) RetrieveObjectsWithDestinationPolicyUpdatedSince(o
 }
 
 // RetrieveObjectsWithFilters returns the list of all othe objects that meet the given conditions
-func (store *InMemoryStorage) RetrieveObjectsWithFilters(orgID string, destinationPolicy *bool, dpServiceOrgID string, dpServiceName string, dpPropertyName string, since int64, destinationType string, destinationID string, noData *bool, expirationTimeBefore string) ([]common.MetaData, common.SyncServiceError) {
+func (store *InMemoryStorage) RetrieveObjectsWithFilters(orgID string, destinationPolicy *bool, dpServiceOrgID string, dpServiceName string, dpPropertyName string, since int64, objectType string, objectID string, destinationType string, destinationID string, noData *bool, expirationTimeBefore string) ([]common.MetaData, common.SyncServiceError) {
 	return nil, nil
 }
 

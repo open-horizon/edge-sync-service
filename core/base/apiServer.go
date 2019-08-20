@@ -645,6 +645,16 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 //   description: Objects that have a Destination Policy which was updated since the specified timestamp in RFC3339 should be fetched.
 //   required: false
 //   type: string
+// - name: objectType
+//   in: query
+//   description: Fetch the objects with given object type
+//   required: false
+//   type: string
+// - name: objectID
+//   in: query
+//   description: Fetch the objects with given object id
+//   required: false
+//   type: string
 // - name: destinationType
 //   in: query
 //   description: Fetch the objects with given destination type
@@ -741,6 +751,13 @@ func handleListObjectsWithFilters(orgID string, writer http.ResponseWriter, requ
 		}
 	}
 
+	objectType := request.URL.Query().Get("objectType")
+	objectID := ""
+
+	if objectType != "" {
+		objectID = request.URL.Query().Get("objectID")
+	}
+
 	destinationType := request.URL.Query().Get("destinationType")
 	destinationID := ""
 	if destinationType != "" {
@@ -772,10 +789,10 @@ func handleListObjectsWithFilters(orgID string, writer http.ResponseWriter, requ
 	var err error
 
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("In handleListObjectsWithFilters, get objects with %s %s %s %s %s %d %s %s %s %s\n", orgID, destinationPolicyString, dpServiceOrgID, dpServiceName, dpPropertyName, since, destinationType, destinationID, noDataString, expirationTimeBeforeString)
+		trace.Debug("In handleListObjectsWithFilters, get objects with %s %s %s %s %s %d %s %s %s %s %s %s\n", orgID, destinationPolicyString, dpServiceOrgID, dpServiceName, dpPropertyName, since, objectType, objectID, destinationType, destinationID, noDataString, expirationTimeBeforeString)
 	}
 
-	if objects, err = ListObjectsWithFilters(orgID, destinationPolicy, dpServiceOrgID, dpServiceName, dpPropertyName, since, destinationType, destinationID, noData, expirationTimeBeforeString); err != nil {
+	if objects, err = ListObjectsWithFilters(orgID, destinationPolicy, dpServiceOrgID, dpServiceName, dpPropertyName, since, objectType, objectID, destinationType, destinationID, noData, expirationTimeBeforeString); err != nil {
 		communications.SendErrorResponse(writer, err, "Failed to fetch the list of objects with given conditions. Error: ", 0)
 	} else {
 		if len(objects) == 0 {

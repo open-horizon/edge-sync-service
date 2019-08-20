@@ -481,7 +481,7 @@ func (store *BoltStorage) RetrieveObjectsWithDestinationPolicyUpdatedSince(orgID
 }
 
 // RetrieveObjectsWithFilters returns the list of all othe objects that meet the given conditions
-func (store *BoltStorage) RetrieveObjectsWithFilters(orgID string, destinationPolicy *bool, dpServiceOrgID string, dpServiceName string, dpPropertyName string, since int64, destinationType string, destinationID string, noData *bool, expirationTimeBefore string) ([]common.MetaData, common.SyncServiceError) {
+func (store *BoltStorage) RetrieveObjectsWithFilters(orgID string, destinationPolicy *bool, dpServiceOrgID string, dpServiceName string, dpPropertyName string, since int64, objectType string, objectID string, destinationType string, destinationID string, noData *bool, expirationTimeBefore string) ([]common.MetaData, common.SyncServiceError) {
 	result := make([]common.MetaData, 0)
 	function := func(object boltObject) {
 		if orgID == object.Meta.DestOrgID {
@@ -529,17 +529,52 @@ func (store *BoltStorage) RetrieveObjectsWithFilters(orgID string, destinationPo
 				}
 			}
 
+			// check objectType and objectID
+			if objectType != "" {
+				if objectType != object.Meta.ObjectType {
+					return
+				}
+				if objectID != "" {
+					if objectID != object.Meta.ObjectID {
+						return
+					}
+				}
+			}
+
 			// check destinationType and destinationID
 			if destinationType != "" {
-				if destinationType != object.Meta.DestType {
-					return
-				} else {
+				if object.Meta.DestType != "" {
+					if destinationType != object.Meta.DestType {
+						return
+					}
 					if destinationID != "" {
 						if destinationID != object.Meta.DestID {
 							return
 						}
 					}
+
+				} else { // check object.Meta.DestinationsList (destinationType: destinationID)
+					checkedDestList := false
+					for _, dest := range object.Meta.DestinationsList {
+						if destinationID != "" {
+							if dest == destinationType+":"+destinationID {
+								checkedDestList = true
+								break
+							}
+						} else {
+							parts := strings.SplitN(dest, ":", 2)
+							if len(parts) == 2 && parts[0] == destinationType {
+								checkedDestList = true
+								break
+							}
+
+						}
+					}
+					if !checkedDestList {
+						return
+					}
 				}
+
 			}
 
 			if noData != nil {
