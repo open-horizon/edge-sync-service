@@ -781,6 +781,21 @@ func BlockUntilNoRunningGoRoutines() {
 // IsValidName checks if the string only contains letters, digits, and !@#%^*-_.~
 var IsValidName = regexp.MustCompile(`^[a-zA-Z0-9|!|@|#|$|^|*|\-|_|.|~]+$`).MatchString
 
+// ValidateDestinationListInput checks if destinationsList contains < or >, to avoid injecting html like tags from user
+func ValidateDestinationListInput(destinationsList []string) (bool, SyncServiceError) {
+	if len(destinationsList) == 0 {
+		return true, nil
+	}
+
+	for _, destination := range destinationsList {
+		if strings.ContainsAny(destination, "<") || strings.ContainsAny(destination, ">") {
+			message := fmt.Sprintf("destinationsList contains unsupported char: < or > (%+v)", destination)
+			return false, &InvalidRequest{Message: message}
+		}
+	}
+	return true, nil
+}
+
 func init() {
 	Version.Major = 1
 	Version.Minor = 0
