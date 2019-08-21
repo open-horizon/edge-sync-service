@@ -1100,6 +1100,18 @@
           },
           {
             "type": "string",
+            "description": "Fetch the objects with given object type",
+            "name": "objectType",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "Fetch the objects with given object id",
+            "name": "objectID",
+            "in": "query"
+          },
+          {
+            "type": "string",
             "description": "Fetch the objects with given destination type",
             "name": "destinationType",
             "in": "query"

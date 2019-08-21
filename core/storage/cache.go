@@ -134,8 +134,8 @@ func (store *Cache) RetrieveObjectsWithDestinationPolicyUpdatedSince(orgID strin
 }
 
 // RetrieveObjectsWithFilters returns the list of all othe objects that meet the given conditions
-func (store *Cache) RetrieveObjectsWithFilters(orgID string, destinationPolicy *bool, dpServiceOrgID string, dpServiceName string, dpPropertyName string, since int64, destinationType string, destinationID string, noData *bool, expirationTimeBefore string) ([]common.MetaData, common.SyncServiceError) {
-	return store.Store.RetrieveObjectsWithFilters(orgID, destinationPolicy, dpServiceOrgID, dpServiceName, dpPropertyName, since, destinationType, destinationID, noData, expirationTimeBefore)
+func (store *Cache) RetrieveObjectsWithFilters(orgID string, destinationPolicy *bool, dpServiceOrgID string, dpServiceName string, dpPropertyName string, since int64, objectType string, objectID string, destinationType string, destinationID string, noData *bool, expirationTimeBefore string) ([]common.MetaData, common.SyncServiceError) {
+	return store.Store.RetrieveObjectsWithFilters(orgID, destinationPolicy, dpServiceOrgID, dpServiceName, dpPropertyName, since, objectType, objectID, destinationType, destinationID, noData, expirationTimeBefore)
 }
 
 // RetrieveAllObjects returns the list of all the objects of the specified type

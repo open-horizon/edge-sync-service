@@ -345,14 +345,14 @@ func ListObjectsWithDestinationPolicyUpdatedSince(orgID string, since int64) ([]
 	return objects, err
 }
 
-// GetObjectsByFilter provides a list of objects that satisfy the given conditions
-func ListObjectsWithFilters(orgID string, destinationPolicy *bool, dpServiceOrgID string, dpServiceName string, dpPropertyName string, since int64, destinationType string, destinationID string, noData *bool, expirationTimeBefore string) ([]common.MetaData, common.SyncServiceError) {
+// ListObjectsWithFilters provides a list of objects that satisfy the given conditions
+func ListObjectsWithFilters(orgID string, destinationPolicy *bool, dpServiceOrgID string, dpServiceName string, dpPropertyName string, since int64, objectType string, objectID string, destinationType string, destinationID string, noData *bool, expirationTimeBefore string) ([]common.MetaData, common.SyncServiceError) {
 	apiLock.RLock()
 	defer apiLock.RUnlock()
 
 	common.HealthStatus.ClientRequestReceived()
 
-	objects, err := store.RetrieveObjectsWithFilters(orgID, destinationPolicy, dpServiceOrgID, dpServiceName, dpPropertyName, since, destinationType, destinationID, noData, expirationTimeBefore)
+	objects, err := store.RetrieveObjectsWithFilters(orgID, destinationPolicy, dpServiceOrgID, dpServiceName, dpPropertyName, since, objectType, objectID, destinationType, destinationID, noData, expirationTimeBefore)
 
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In ListObjectsWithFilters. Get %s. Returned %d objects\n", orgID, len(objects))
