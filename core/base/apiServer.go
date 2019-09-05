@@ -95,6 +95,8 @@ func setupAPIServer() {
 }
 
 func handleDestinations(writer http.ResponseWriter, request *http.Request) {
+	setCacheControlHeaders(writer)
+
 	if !common.Running {
 		writer.WriteHeader(http.StatusServiceUnavailable)
 		return
@@ -283,6 +285,8 @@ func handleDestinations(writer http.ResponseWriter, request *http.Request) {
 //     schema:
 //       type: string
 func handleResend(writer http.ResponseWriter, request *http.Request) {
+	setCacheControlHeaders(writer)
+
 	if !common.Running {
 		writer.WriteHeader(http.StatusServiceUnavailable)
 		return
@@ -310,6 +314,8 @@ func handleResend(writer http.ResponseWriter, request *http.Request) {
 }
 
 func handleShutdown(writer http.ResponseWriter, request *http.Request) {
+	setCacheControlHeaders(writer)
+
 	code, _, _ := security.Authenticate(request)
 	if code != security.AuthSyncAdmin {
 		writer.WriteHeader(http.StatusForbidden)
@@ -357,6 +363,8 @@ func handleShutdown(writer http.ResponseWriter, request *http.Request) {
 }
 
 func handleObjects(writer http.ResponseWriter, request *http.Request) {
+	setCacheControlHeaders(writer)
+
 	if !common.Running {
 		writer.WriteHeader(http.StatusServiceUnavailable)
 		return
@@ -466,6 +474,8 @@ func handleObjects(writer http.ResponseWriter, request *http.Request) {
 }
 
 func handleObjectRequest(orgID string, objectType string, objectID string, writer http.ResponseWriter, request *http.Request) {
+	setCacheControlHeaders(writer)
+
 	switch request.Method {
 
 	// swagger:operation GET /api/v1/objects/{orgID}/{objectType}/{objectID} handleGetObject
@@ -1946,6 +1956,8 @@ func handleUpdateObject(orgID string, objectType string, objectID string, writer
 //     schema:
 //       type: string
 func handleGetOrganizations(writer http.ResponseWriter, request *http.Request) {
+	setCacheControlHeaders(writer)
+
 	if !common.Running {
 		writer.WriteHeader(http.StatusServiceUnavailable)
 		return
@@ -1990,6 +2002,8 @@ func handleGetOrganizations(writer http.ResponseWriter, request *http.Request) {
 }
 
 func handleOrganizations(writer http.ResponseWriter, request *http.Request) {
+	setCacheControlHeaders(writer)
+
 	if !common.Running {
 		writer.WriteHeader(http.StatusServiceUnavailable)
 		return
@@ -2108,6 +2122,8 @@ func handleOrganizations(writer http.ResponseWriter, request *http.Request) {
 }
 
 func handleSecurity(writer http.ResponseWriter, request *http.Request) {
+	setCacheControlHeaders(writer)
+
 	if !common.Running {
 		writer.WriteHeader(http.StatusServiceUnavailable)
 		return
@@ -2549,6 +2565,8 @@ type healthReport struct {
 //     schema:
 //       type: string
 func handleHealth(writer http.ResponseWriter, request *http.Request) {
+	setCacheControlHeaders(writer)
+
 	detailsString := request.URL.Query().Get("details")
 	details := false
 	var err error
@@ -2602,4 +2620,10 @@ func handleHealth(writer http.ResponseWriter, request *http.Request) {
 			log.Error("Failed to write response body, error: " + err.Error())
 		}
 	}
+}
+
+// Set HTTP cache control headers for http 1.0 and 1.1 clients.
+func setCacheControlHeaders(writer http.ResponseWriter) {
+	writer.Header().Set("Cache-Control", "no-store")
+	writer.Header().Set("Pragma", "no-cache")
 }
