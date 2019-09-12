@@ -339,6 +339,14 @@ func (store *MongoStorage) StoreObject(metaData common.MetaData, data []byte, st
 			(metaData.DestinationPolicy == nil && existingObject.MetaData.DestinationPolicy != nil) {
 			return nil, &common.InvalidRequest{Message: "Can't update the existence of Destination Policy"}
 		}
+
+		// Don't allow updates to the service reference of an existing object.
+		if existingObject.MetaData.DestinationPolicy != nil && metaData.DestinationPolicy != nil {
+			if same := common.ComparePolicyServices(existingObject.MetaData.DestinationPolicy, metaData.DestinationPolicy); !same {
+				return nil, &common.InvalidRequest{Message: "Can't update the service name, org or version in Destination Policy"}
+			}
+		}
+
 		if metaData.MetaOnly {
 			metaData.DataID = existingObject.MetaData.DataID
 			metaData.ObjectSize = existingObject.MetaData.ObjectSize

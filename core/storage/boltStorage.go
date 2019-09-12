@@ -243,6 +243,12 @@ func (store *BoltStorage) StoreObject(metaData common.MetaData, data []byte, sta
 				(object.Meta.DestinationPolicy != nil && metaData.DestinationPolicy == nil) {
 				return object, &common.InvalidRequest{"Can't update the existence of Destination Policy"}
 			}
+			// Don't allow updates to the service reference of an existing object.
+			if object.Meta.DestinationPolicy != nil && metaData.DestinationPolicy != nil {
+				if same := common.ComparePolicyServices(object.Meta.DestinationPolicy, metaData.DestinationPolicy); !same {
+					return object, &common.InvalidRequest{Message: "Can't update the service name, org or version in Destination Policy"}
+				}
+			}
 			metaData.DataID = object.Meta.DataID // Keep the previous data id
 			object.Meta = metaData
 			object.Status = status
@@ -280,6 +286,12 @@ func (store *BoltStorage) StoreObject(metaData common.MetaData, data []byte, sta
 		if (object.Meta.DestinationPolicy == nil && metaData.DestinationPolicy != nil) ||
 			(object.Meta.DestinationPolicy != nil && metaData.DestinationPolicy == nil) {
 			return object, &common.InvalidRequest{Message: "Can't update the existence of Destination Policy"}
+		}
+		// Don't allow updates to the service reference of an existing object.
+		if object.Meta.DestinationPolicy != nil && metaData.DestinationPolicy != nil {
+			if same := common.ComparePolicyServices(object.Meta.DestinationPolicy, metaData.DestinationPolicy); !same {
+				return object, &common.InvalidRequest{Message: "Can't update the service name, org or version in Destination Policy"}
+			}
 		}
 		if metaData.DestinationPolicy != nil {
 			newObject.Destinations = object.Destinations
