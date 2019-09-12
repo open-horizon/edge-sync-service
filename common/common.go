@@ -170,6 +170,25 @@ type Policy struct {
 	Timestamp int64 `json:"timestamp" bson:"timestamp"`
 }
 
+// Return true if the services of 2 policy objects are identical
+func ComparePolicyServices(existingPolicy *Policy, newPolicy *Policy) bool {
+	for _, existingService := range existingPolicy.Services {
+		found := false
+		for _, newService := range newPolicy.Services {
+			if newService.OrgID == existingService.OrgID &&
+			   newService.ServiceName == existingService.ServiceName &&
+			   newService.Version == existingService.Version {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
 // MetaData is the metadata that identifies and defines the sync service object.
 // Every object includes metadata (mandatory) and data (optional). The metadata and data can be updated independently.
 // Each sync service node (ESS) has an address that is composed of the node's ID, Type, and Organization.
