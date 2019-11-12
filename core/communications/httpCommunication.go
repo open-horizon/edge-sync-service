@@ -548,6 +548,7 @@ func (communication *HTTP) Poll() bool {
 		return false
 	}
 	security.AddIdentityToSPIRequest(request, urlString)
+	request.Close = true
 
 	response, err := communication.requestWrapper.do(request)
 	if err != nil {
