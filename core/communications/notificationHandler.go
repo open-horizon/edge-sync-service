@@ -702,6 +702,9 @@ func handleAckDelete(orgID string, objectType string, objectID string, destType 
 	}
 
 	// Mark the notification as ackdelete
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("Mark the notification as ackdelete %s %s\n", objectType, objectID)
+	}
 	if err := Store.UpdateNotificationRecord(
 		common.Notification{ObjectID: objectID, ObjectType: objectType,
 			DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.AckDelete, InstanceID: instanceID, DataID: dataID},
@@ -722,6 +725,52 @@ func handleAckDelete(orgID string, objectType string, objectID string, destType 
 		}
 		return &notificationHandlerError{fmt.Sprintf("Error in handleAckDelete: failed to find object. Error: %s\n", err)}
 	}
+
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("Node Type %s\n", common.Configuration.NodeType)
+	}
+
+	// remove policy services from lastDestinationPolicyService list, need to do this compare because metadata.LastDestinationPolicyServices may be updated during sending
+	if common.Configuration.NodeType == common.CSS {
+		// check deletedDestinationNum from DB
+		// deletedDestinationNum --
+		deletedDestNum := -1
+		_, deletedDestNum, err = Store.RetrieveObjectAndDeletedDestinationNum(orgID, objectType, objectID)
+		if err != nil || deletedDestNum == -1 {
+			return &notificationHandlerError{fmt.Sprintf("Error in handleAckDelete: failed to retrieve deletedDestinationNum. Error: %s\n", err)}
+		}
+
+		if trace.IsLogging(logger.TRACE) {
+			trace.Trace("Todo: deletedDestNum --, deletedDestNum: %d\n", deletedDestNum)
+		}
+
+		if deletedDestNum > 0 {
+			deletedDestNum--
+			if err = Store.UpdateDeletedDestinationNum(orgID, objectType, objectID, deletedDestNum); err != nil {
+				return &notificationHandlerError{fmt.Sprintf("Error in handleAckDelete: failed to update deletedDestinationNum. Error: %s\n", err)}
+			}
+		}
+
+		if trace.IsLogging(logger.TRACE) {
+			trace.Trace("after deletedDestNum --, deletedDestNum: %d\n", deletedDestNum)
+		}
+
+		if deletedDestNum == 0 {
+			if trace.IsLogging(logger.TRACE) {
+				trace.Trace("It is CSS \n")
+			}
+			//if err == nil && metaData != nil {
+			if trace.IsLogging(logger.TRACE) {
+				trace.Trace("Updating LastDestinationPolicyServices for %s:%s:%s\n", orgID, objectType, objectID)
+			}
+
+			emptyLastDestinationPolicySerivces := make([]common.ServiceID, 0)
+			if err = Store.UpdateLastDestinationPolicyServices(orgID, objectType, objectID, emptyLastDestinationPolicySerivces); err != nil {
+				return &notificationHandlerError{fmt.Sprintf("Error in handleAckDelete: failed to find object and remove LastDestinationPolicyServices. Error: %s\n", err)}
+			}
+		}
+	}
+
 	return nil
 }
 

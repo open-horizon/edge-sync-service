@@ -40,14 +40,15 @@ type MongoStorage struct {
 }
 
 type object struct {
-	ID                 string                          `bson:"_id"`
-	MetaData           common.MetaData                 `bson:"metadata"`
-	Status             string                          `bson:"status"`
-	PolicyReceived     bool                            `bson:"policy-received"`
-	RemainingConsumers int                             `bson:"remaining-consumers"`
-	RemainingReceivers int                             `bson:"remaining-receivers"`
-	Destinations       []common.StoreDestinationStatus `bson:"destinations"`
-	LastUpdate         bson.MongoTimestamp             `bson:"last-update"`
+	ID                    string                          `bson:"_id"`
+	MetaData              common.MetaData                 `bson:"metadata"`
+	Status                string                          `bson:"status"`
+	PolicyReceived        bool                            `bson:"policy-received"`
+	RemainingConsumers    int                             `bson:"remaining-consumers"`
+	RemainingReceivers    int                             `bson:"remaining-receivers"`
+	DeletedDestinationNum int                             `bson:"deleted-destination-num"`
+	Destinations          []common.StoreDestinationStatus `bson:"destinations"`
+	LastUpdate            bson.MongoTimestamp             `bson:"last-update"`
 }
 
 type destinationObject struct {
@@ -340,11 +341,20 @@ func (store *MongoStorage) StoreObject(metaData common.MetaData, data []byte, st
 			return nil, &common.InvalidRequest{Message: "Can't update the existence of Destination Policy"}
 		}
 
-		// Don't allow updates to the service reference of an existing object.
 		if existingObject.MetaData.DestinationPolicy != nil && metaData.DestinationPolicy != nil {
-			if same := common.ComparePolicyServices(existingObject.MetaData.DestinationPolicy, metaData.DestinationPolicy); !same {
-				return nil, &common.InvalidRequest{Message: "Can't update the service name, org or version in Destination Policy"}
+			if existingObject.DeletedDestinationNum > 0 {
+				return nil, &common.InvalidRequest{Message: "Can't update the Destination Policy if DeletedDestinationNum is not 0, waiting for ackDelete from all destinations for last policy update"}
 			}
+
+			removedPolicyServices := common.GetRemovedPolicyServices(existingObject.MetaData.DestinationPolicy, metaData.DestinationPolicy)
+			// add removedPolicyServices to meatadata LastDestinationPolicyServices
+			existingLastDestinationPolicyServices := metaData.LastDestinationPolicyServices
+			for _, removedPolicyService := range removedPolicyServices {
+				if sliceContains := common.ServiceListContains(existingLastDestinationPolicyServices, removedPolicyService); !sliceContains {
+					existingLastDestinationPolicyServices = append(existingLastDestinationPolicyServices, removedPolicyService)
+				}
+			}
+			metaData.LastDestinationPolicyServices = existingLastDestinationPolicyServices
 		}
 
 		if metaData.MetaOnly {
@@ -904,6 +914,22 @@ func (store *MongoStorage) RetrieveObjectAndStatus(orgID string, objectType stri
 	return &result.MetaData, result.Status, nil
 }
 
+// RetrieveObjectAndDeletedDestinationNum returns the object meta data and deletedDestinationNum with the specified para
+func (store *MongoStorage) RetrieveObjectAndDeletedDestinationNum(orgID string, objectType string, objectID string) (*common.MetaData, int, common.SyncServiceError) {
+	result := object{}
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	if err := store.fetchOne(objects, bson.M{"_id": id}, nil, &result); err != nil {
+		switch err {
+		case mgo.ErrNotFound:
+			return nil, -1, nil
+		default:
+			return nil, -1, &Error{fmt.Sprintf("Failed to fetch the object. Error: %s.", err)}
+		}
+	}
+	return &result.MetaData, result.DeletedDestinationNum, nil
+
+}
+
 // RetrieveObjectData returns the object data with the specified parameters
 func (store *MongoStorage) RetrieveObjectData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
 	id := createObjectCollectionID(orgID, objectType, objectID)
@@ -1137,6 +1163,32 @@ func (store *MongoStorage) MarkObjectDeleted(orgID string, objectType string, ob
 			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
 		}); err != nil {
 		return &Error{fmt.Sprintf("Failed to mark object as deleted. Error: %s.", err)}
+	}
+	return nil
+}
+
+// UpdateLastDestinationPolicyServices updates the LastDestinationPolicyServices
+func (store *MongoStorage) UpdateLastDestinationPolicyServices(orgID string, objectType string, objectID string, destinationPolicyServices []common.ServiceID) common.SyncServiceError {
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	if err := store.update(objects, bson.M{"_id": id},
+		bson.M{
+			"$set":         bson.M{"metadata.last-destination-policy-services": destinationPolicyServices},
+			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+		}); err != nil {
+		return &Error{fmt.Sprintf("Failed to update object's lastDestinationPolicyServices. Error: %s.", err)}
+	}
+	return nil
+}
+
+// UpdateDeletedDestinationNum updates the UpdateDeletedDestinationNum
+func (store *MongoStorage) UpdateDeletedDestinationNum(orgID string, objectType string, objectID string, deletedDestinationsNum int) common.SyncServiceError {
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	if err := store.update(objects, bson.M{"_id": id},
+		bson.M{
+			"$set":         bson.M{"deleted-destination-num": deletedDestinationsNum},
+			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+		}); err != nil {
+		return &Error{fmt.Sprintf("Failed to update object's deletedDestinationNum. Error: %s.", err)}
 	}
 	return nil
 }

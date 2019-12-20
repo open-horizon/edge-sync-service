@@ -1530,7 +1530,7 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 		} else {
 			result = make([]common.MetaData, 0)
 			for _, object := range metaData {
-				if canServiceAccessObject(userID, object.DestinationPolicy) {
+				if canServiceAccessObject(userID, object.DestinationPolicy, object.LastDestinationPolicyServices, object.Deleted) {
 					result = append(result, object)
 				}
 			}
@@ -1615,8 +1615,11 @@ func handleListAllObjects(orgID string, objectType string, writer http.ResponseW
 			result = objects
 		} else {
 			result = make([]common.ObjectDestinationPolicy, 0)
+			//Do not need to show result to old services, so set oldService to empty list and deleted to false
+			oldServices := make([]common.ServiceID, 0)
+			deleted := false
 			for _, object := range objects {
-				if canServiceAccessObject(userID, object.DestinationPolicy) {
+				if canServiceAccessObject(userID, object.DestinationPolicy, oldServices, deleted) {
 					result = append(result, object)
 				}
 			}
@@ -2495,35 +2498,56 @@ func canUserAccessObject(request *http.Request, orgID, objectType, objectID stri
 	defer apiObjectLocks.RUnlock(lockIndex)
 
 	metadata, err := store.RetrieveObject(orgID, objectType, objectID)
-	if err == nil && metadata != nil && canServiceAccessObject(userID, metadata.DestinationPolicy) {
+	if err == nil && metadata != nil && canServiceAccessObject(userID, metadata.DestinationPolicy, metadata.LastDestinationPolicyServices, metadata.Deleted) {
 		return code, userID
 	}
 	return security.AuthFailed, ""
 }
 
-func canServiceAccessObject(serviceID string, policy *common.Policy) bool {
+func canServiceAccessObject(serviceID string, policy *common.Policy, oldPolicyServices []common.ServiceID, objectDeleted bool) bool {
 	if policy == nil || len(policy.Services) == 0 {
 		return true
 	}
-	// serviceOrgID/arch/version/serviceName
+	// serviceOrgID/version/serviceName
 	parts := strings.SplitN(serviceID, "/", 3)
 	if len(parts) < 3 {
 		return false
 	}
+	serviceFoundInDestinationPolicy := false
 	for _, service := range policy.Services {
 		if parts[0] == service.OrgID && parts[2] == service.ServiceName {
-			if policySemVerRange, err := common.ParseSemVerRange(service.Version); err != nil {
-				return false
-			} else if serviceSemVer, err := common.ParseSemVer(parts[1]); err != nil {
-				return false
-			} else {
-				if policySemVerRange.IsInRange(serviceSemVer) {
-					return true
+			if policySemVerRange, err := common.ParseSemVerRange(service.Version); err == nil {
+				if serviceSemVer, err := common.ParseSemVer(parts[1]); err == nil {
+					if policySemVerRange.IsInRange(serviceSemVer) {
+						serviceFoundInDestinationPolicy = true
+					}
 				}
 			}
 		}
 	}
-	return false
+
+	if serviceFoundInDestinationPolicy {
+		return true
+	}
+
+	// If authentication serviceID is found in oldDestinationPolicyService && deleted flag is true, this metadata object is accessible
+	serviceFoundInOldDestinationPolicy := false
+	if objectDeleted {
+		for _, oldService := range oldPolicyServices {
+			if parts[0] == oldService.OrgID && parts[2] == oldService.ServiceName {
+				if policySemVerRange, err := common.ParseSemVerRange(oldService.Version); err == nil {
+					if serviceSemVer, err := common.ParseSemVer(parts[1]); err == nil {
+						if policySemVerRange.IsInRange(serviceSemVer) {
+							serviceFoundInOldDestinationPolicy = true
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return serviceFoundInOldDestinationPolicy
 }
 
 // swagger:model

@@ -163,6 +163,11 @@ func (store *Cache) RetrieveObjectAndStatus(orgID string, objectType string, obj
 	return store.Store.RetrieveObjectAndStatus(orgID, objectType, objectID)
 }
 
+// RetrieveObjectAndDeletedDestinationNum returns the object meta data and deletedDestinationNum with the specified para
+func (store *Cache) RetrieveObjectAndDeletedDestinationNum(orgID string, objectType string, objectID string) (*common.MetaData, int, common.SyncServiceError) {
+	return store.Store.RetrieveObjectAndDeletedDestinationNum(orgID, objectType, objectID)
+}
+
 // RetrieveObjectData returns the object data with the specified parameters
 func (store *Cache) RetrieveObjectData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
 	return store.Store.RetrieveObjectData(orgID, objectType, objectID)
@@ -181,6 +186,16 @@ func (store *Cache) CloseDataReader(dataReader io.Reader) common.SyncServiceErro
 // MarkObjectDeleted marks the object as deleted
 func (store *Cache) MarkObjectDeleted(orgID string, objectType string, objectID string) common.SyncServiceError {
 	return store.Store.MarkObjectDeleted(orgID, objectType, objectID)
+}
+
+// UpdateLastDestinationPolicyServices updates the LastDestinationPolicyService list
+func (store *Cache) UpdateLastDestinationPolicyServices(orgID string, objectType string, objectID string, destinationPolicyServices []common.ServiceID) common.SyncServiceError {
+	return store.Store.UpdateLastDestinationPolicyServices(orgID, objectType, objectID, destinationPolicyServices)
+}
+
+// UpdateDeletedDestinationNum updates the UpdateDeletedDestinationNum
+func (store *Cache) UpdateDeletedDestinationNum(orgID string, objectType string, objectID string, deletedDestinationsNum int) common.SyncServiceError {
+	return store.Store.UpdateDeletedDestinationNum(orgID, objectType, objectID, deletedDestinationsNum)
 }
 
 // MarkDestinationPolicyReceived marks an object's destination policy as having been received

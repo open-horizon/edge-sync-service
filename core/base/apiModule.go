@@ -975,6 +975,23 @@ func UpdateObjectDestinations(orgID string, objectType string, objectID string, 
 		return err
 	}
 
+	if len(metaData.LastDestinationPolicyServices) != 0 {
+		if len(deletedDestinations) != 0 {
+			// set deletedDestinationNum
+			if err = store.UpdateDeletedDestinationNum(orgID, objectType, objectID, len(deletedDestinations)); err != nil {
+				apiObjectLocks.Unlock(lockIndex)
+				return err
+			}
+		} else {
+			// empty metadata.LastDestinationPolicyServices list
+			emptyPolicyServiceList := make([]common.ServiceID, 0)
+			if err = store.UpdateLastDestinationPolicyServices(orgID, objectType, objectID, emptyPolicyServiceList); err != nil {
+				apiObjectLocks.Unlock(lockIndex)
+				return err
+			}
+		}
+	}
+
 	var deleteNotificationsInfo, updateNotificationsInfo []common.NotificationInfo
 	if len(deletedDestinations) != 0 {
 		deleteNotificationsInfo, err = communications.PrepareNotificationsForDestinations(*metaData, deletedDestinations, common.Delete)

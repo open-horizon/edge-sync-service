@@ -28,14 +28,15 @@ type BoltStorage struct {
 }
 
 type boltObject struct {
-	Meta               common.MetaData                 `json:"meta"`
-	Status             string                          `json:"status"`
-	PolicyReceived     bool                            `json:"policy-received"`
-	RemainingConsumers int                             `json:"remaining-consumers"`
-	RemainingReceivers int                             `json:"remaining-receivers"`
-	DataPath           string                          `json:"data-path"`
-	ConsumedTimestamp  time.Time                       `json:"consumed-timestamp"`
-	Destinations       []common.StoreDestinationStatus `json:"destinations"`
+	Meta                  common.MetaData                 `json:"meta"`
+	Status                string                          `json:"status"`
+	PolicyReceived        bool                            `json:"policy-received"`
+	RemainingConsumers    int                             `json:"remaining-consumers"`
+	RemainingReceivers    int                             `json:"remaining-receivers"`
+	DeletedDestinationNum int                             `bson:"deleted-destination-num"`
+	DataPath              string                          `json:"data-path"`
+	ConsumedTimestamp     time.Time                       `json:"consumed-timestamp"`
+	Destinations          []common.StoreDestinationStatus `json:"destinations"`
 }
 
 type boltDestination struct {
@@ -243,11 +244,22 @@ func (store *BoltStorage) StoreObject(metaData common.MetaData, data []byte, sta
 				(object.Meta.DestinationPolicy != nil && metaData.DestinationPolicy == nil) {
 				return object, &common.InvalidRequest{"Can't update the existence of Destination Policy"}
 			}
-			// Don't allow updates to the service reference of an existing object.
+
 			if object.Meta.DestinationPolicy != nil && metaData.DestinationPolicy != nil {
-				if same := common.ComparePolicyServices(object.Meta.DestinationPolicy, metaData.DestinationPolicy); !same {
-					return object, &common.InvalidRequest{Message: "Can't update the service name, org or version in Destination Policy"}
+				if object.DeletedDestinationNum > 0 {
+					return object, &common.InvalidRequest{Message: "Can't update the Destination Policy if DeletedDestinationNum is not 0, waiting for ackDelete from all destinations for last policy update"}
 				}
+
+				removedPolicyServices := common.GetRemovedPolicyServices(object.Meta.DestinationPolicy, metaData.DestinationPolicy)
+				// add removedPolicyServices to meatadata LastDestinationPolicyServices
+				existingLastDestinationPolicyServices := object.Meta.LastDestinationPolicyServices
+				for _, removedPolicyService := range removedPolicyServices {
+					if sliceContains := common.ServiceListContains(existingLastDestinationPolicyServices, removedPolicyService); !sliceContains {
+						existingLastDestinationPolicyServices = append(existingLastDestinationPolicyServices, removedPolicyService)
+					}
+				}
+				metaData.LastDestinationPolicyServices = existingLastDestinationPolicyServices
+
 			}
 			metaData.DataID = object.Meta.DataID // Keep the previous data id
 			object.Meta = metaData
@@ -287,11 +299,22 @@ func (store *BoltStorage) StoreObject(metaData common.MetaData, data []byte, sta
 			(object.Meta.DestinationPolicy != nil && metaData.DestinationPolicy == nil) {
 			return object, &common.InvalidRequest{Message: "Can't update the existence of Destination Policy"}
 		}
-		// Don't allow updates to the service reference of an existing object.
+
 		if object.Meta.DestinationPolicy != nil && metaData.DestinationPolicy != nil {
-			if same := common.ComparePolicyServices(object.Meta.DestinationPolicy, metaData.DestinationPolicy); !same {
-				return object, &common.InvalidRequest{Message: "Can't update the service name, org or version in Destination Policy"}
+			if object.DeletedDestinationNum > 0 {
+				return object, &common.InvalidRequest{Message: "Can't update the Destination Policy if DeletedDestinationNum is not 0, waiting for ackDelete from all destinations for last policy update"}
 			}
+
+			removedPolicyServices := common.GetRemovedPolicyServices(object.Meta.DestinationPolicy, metaData.DestinationPolicy)
+			// add removedPolicyServices to meatadata LastDestinationPolicyServices
+			existingLastDestinationPolicyServices := object.Meta.LastDestinationPolicyServices
+			for _, removedPolicyService := range removedPolicyServices {
+				if sliceContains := common.ServiceListContains(existingLastDestinationPolicyServices, removedPolicyService); !sliceContains {
+					existingLastDestinationPolicyServices = append(existingLastDestinationPolicyServices, removedPolicyService)
+				}
+			}
+			metaData.LastDestinationPolicyServices = existingLastDestinationPolicyServices
+			newObject.Meta = metaData
 		}
 		if metaData.DestinationPolicy != nil {
 			newObject.Destinations = object.Destinations
@@ -419,6 +442,24 @@ func (store *BoltStorage) RetrieveObjectStatus(orgID string, objectType string, 
 		return "", err
 	}
 	return status, nil
+}
+
+// RetrieveObjectAndDeletedDestinationNum returns the object meta data and deletedDestinationNum with the specified para
+func (store *BoltStorage) RetrieveObjectAndDeletedDestinationNum(orgID string, objectType string, objectID string) (*common.MetaData, int, common.SyncServiceError) {
+	var meta *common.MetaData
+	var deletedDestinationNum int
+	function := func(object boltObject) common.SyncServiceError {
+		meta = &object.Meta
+		deletedDestinationNum = object.DeletedDestinationNum
+		return nil
+	}
+	if err := store.viewObjectHelper(orgID, objectType, objectID, function); err != nil {
+		if common.IsNotFound(err) {
+			err = nil
+		}
+		return nil, -1, err
+	}
+	return meta, deletedDestinationNum, nil
 }
 
 // RetrieveUpdatedObjects returns the list of all the edge updated objects that are not marked as consumed
@@ -861,6 +902,24 @@ func (store *BoltStorage) MarkObjectDeleted(orgID string, objectType string, obj
 	function := func(object boltObject) (boltObject, common.SyncServiceError) {
 		object.Status = common.ObjDeleted
 		object.Meta.Deleted = true
+		return object, nil
+	}
+	return store.updateObjectHelper(orgID, objectType, objectID, function)
+}
+
+// UpdateLastDestinationPolicyServices update the lastDestinationPolicyServices
+func (store *BoltStorage) UpdateLastDestinationPolicyServices(orgID string, objectType string, objectID string, destinationPolicyServices []common.ServiceID) common.SyncServiceError {
+	function := func(object boltObject) (boltObject, common.SyncServiceError) {
+		object.Meta.LastDestinationPolicyServices = destinationPolicyServices
+		return object, nil
+	}
+	return store.updateObjectHelper(orgID, objectType, objectID, function)
+}
+
+// UpdateDeletedDestinationNum updates the UpdateDeletedDestinationNum
+func (store *BoltStorage) UpdateDeletedDestinationNum(orgID string, objectType string, objectID string, deletedDestinationsNum int) common.SyncServiceError {
+	function := func(object boltObject) (boltObject, common.SyncServiceError) {
+		object.DeletedDestinationNum = deletedDestinationsNum
 		return object, nil
 	}
 	return store.updateObjectHelper(orgID, objectType, objectID, function)

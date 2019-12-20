@@ -130,6 +130,7 @@ func Authenticate(request *http.Request) (int, string, string) {
 		}
 	}
 
+	// eg: userID = e2edev@somecomp.com/1.0.0/my.company.com.services.usehello2
 	code, orgID, userID := authenticator.Authenticate(request)
 	if code != AuthFailed {
 		secretMAC, salt, err := saltSecret(appSecret, nil)
@@ -198,6 +199,7 @@ func CanUserCreateObject(request *http.Request, orgID string, metaData *common.M
 // CanUserAccessObject checks if the user identified by the credentials in the supplied request,
 // can read/modify the specified object type.
 func CanUserAccessObject(request *http.Request, orgID, objectType string) (int, string) {
+	// eg: userID = e2edev@somecomp.com/1.0.0/my.company.com.services.usehello2
 	code, userOrgID, userID := Authenticate(request)
 	if code == AuthSyncAdmin {
 		return code, userID

@@ -1898,6 +1898,14 @@
           "format": "int64",
           "x-go-name": "InstanceID"
         },
+        "lastDestinationPolicyServices": {
+          "description": "LastDestinationPolicyServices is to store the last destination policy services when user update object\nwith new destination policy services\nThis field can only be set internally",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ServiceID"
+          },
+          "x-go-name": "LastDestinationPolicyServices"
+        },
         "link": {
           "description": "Link is a link to where the data for this object can be fetched from.\nThe link is set and used by the application. The sync service does not access the link.\nOptional field, if omitted the data must be provided by the application.",
           "type": "string",

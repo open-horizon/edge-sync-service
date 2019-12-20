@@ -53,6 +53,9 @@ type Storage interface {
 	// Find the object and return its status
 	RetrieveObjectStatus(orgID string, objectType string, objectID string) (string, common.SyncServiceError)
 
+	// Find the object and deletedDestinationNum
+	RetrieveObjectAndDeletedDestinationNum(orgID string, objectType string, objectID string) (*common.MetaData, int, common.SyncServiceError)
+
 	// Find the object and return the number of remaining consumers that haven't consumed the object yet
 	RetrieveObjectRemainingConsumers(orgID string, objectType string, objectID string) (int, common.SyncServiceError)
 
@@ -108,6 +111,12 @@ type Storage interface {
 
 	// Marks the object as deleted
 	MarkObjectDeleted(orgID string, objectType string, objectID string) common.SyncServiceError
+
+	// Update the LastDestinationPolicyService list
+	UpdateLastDestinationPolicyServices(orgID string, objectType string, objectID string, destinationPolicyServices []common.ServiceID) common.SyncServiceError
+
+	// Update the UpdateDeletedDestinationNum
+	UpdateDeletedDestinationNum(orgID string, objectType string, objectID string, deletedDestinationsNum int) common.SyncServiceError
 
 	// Mark an object's destination policy as having been received
 	MarkDestinationPolicyReceived(orgID string, objectType string, objectID string) common.SyncServiceError

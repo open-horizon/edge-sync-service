@@ -231,6 +231,9 @@ func (communication *HTTP) handleGetUpdates(writer http.ResponseWriter, request 
 // SendNotificationMessage sends a notification message from the CSS to the ESS or from the ESS to the CSS
 func (communication *HTTP) SendNotificationMessage(notificationTopic string, destType string, destID string, instanceID int64, dataID int64,
 	metaData *common.MetaData) common.SyncServiceError {
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("In SendNotificationMessage, notificationTopic: %s", notificationTopic)
+	}
 	if common.Configuration.NodeType == common.CSS {
 		// Create pending notification to be sent as a response to a GET request
 		var status string
@@ -259,6 +262,9 @@ func (communication *HTTP) SendNotificationMessage(notificationTopic string, des
 
 	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, instanceID, dataID, notificationTopic)
 
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("In SendNotificationMessage, sending request to url: %s", url)
+	}
 	var request *http.Request
 	var err error
 	if notificationTopic == common.Update || notificationTopic == common.Delete || notificationTopic == common.Deleted {
@@ -282,6 +288,9 @@ func (communication *HTTP) SendNotificationMessage(notificationTopic string, des
 		return &Error{"Failed to send HTTP request. Error: " + err.Error()}
 	}
 	defer response.Body.Close()
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("Making call to url: %v, response status code: %d", url, response.StatusCode)
+	}
 	if response.StatusCode == http.StatusNoContent {
 		switch notificationTopic {
 		case common.Update:
@@ -401,6 +410,9 @@ func (communication *HTTP) registerOrPing(url string) common.SyncServiceError {
 	}
 
 	requestURL := buildRegisterOrPingURL(url, common.Configuration.OrgID, common.Configuration.DestinationType, common.Configuration.DestinationID)
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("In httpCommunication.registerOrPing, request url %s", requestURL)
+	}
 	request, err := http.NewRequest("PUT", requestURL, nil)
 	q := request.URL.Query() // Get a copy of the query values.
 	q.Add("persistent-storage", strconv.FormatBool(Store.IsPersistent()))
@@ -414,6 +426,9 @@ func (communication *HTTP) registerOrPing(url string) common.SyncServiceError {
 	}
 	defer response.Body.Close()
 
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("In httpCommunication.registerOrPing, response code: %d", response.StatusCode)
+	}
 	if response.StatusCode == http.StatusNoContent {
 		if url == registerURL || url == registerNewURL {
 			handleRegAck()
@@ -684,6 +699,9 @@ func (communication *HTTP) extract(writer http.ResponseWriter, request *http.Req
 }
 
 func (communication *HTTP) handleObjects(writer http.ResponseWriter, request *http.Request) {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Trace("In communication handleObjects")
+	}
 	if !communication.started || !common.Running {
 		writer.WriteHeader(http.StatusServiceUnavailable)
 	}
@@ -780,6 +798,9 @@ func (communication *HTTP) handleObjects(writer http.ResponseWriter, request *ht
 		action, orgID, objectType, objectID, destType, destID, instanceID, dataID, ok := communication.extract(writer, request)
 		if !ok {
 			return
+		}
+		if trace.IsLogging(logger.TRACE) {
+			trace.Trace("In handleObjects: GET request: %s", action)
 		}
 		if action != common.Data {
 			writer.WriteHeader(http.StatusBadRequest)

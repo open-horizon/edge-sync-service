@@ -170,23 +170,40 @@ type Policy struct {
 	Timestamp int64 `json:"timestamp" bson:"timestamp"`
 }
 
-// Return true if the services of 2 policy objects are identical
-func ComparePolicyServices(existingPolicy *Policy, newPolicy *Policy) bool {
+// GetRemovedPolicyServices is the method to compare existing destination policy and new destination policy, returning removed policy services
+func GetRemovedPolicyServices(existingPolicy *Policy, newPolicy *Policy) []ServiceID {
+	removedServices := make([]ServiceID, 0)
 	for _, existingService := range existingPolicy.Services {
 		found := false
+		fmt.Printf("existingService: %s \n", existingService.ServiceName)
 		for _, newService := range newPolicy.Services {
+			fmt.Printf("newService: %s \n", newService)
 			if newService.OrgID == existingService.OrgID &&
-			   newService.ServiceName == existingService.ServiceName &&
-			   newService.Version == existingService.Version {
+				newService.ServiceName == existingService.ServiceName &&
+				newService.Version == existingService.Version {
 				found = true
 				break
+
 			}
 		}
+
 		if !found {
-			return false
+			removedServices = append(removedServices, existingService)
+			fmt.Printf("found removed service: %s", existingService.ServiceName)
 		}
 	}
-	return true
+
+	return removedServices
+}
+
+// ServiceListContains returns true if serviceIDList contains the given serviceID
+func ServiceListContains(serviceList []ServiceID, service ServiceID) bool {
+	for _, s := range serviceList {
+		if s.OrgID == service.OrgID && s.ServiceName == service.ServiceName && s.Version == service.Version {
+			return true
+		}
+	}
+	return false
 }
 
 // MetaData is the metadata that identifies and defines the sync service object.
@@ -228,6 +245,11 @@ type MetaData struct {
 	// to the appropriate set of destinations.
 	// When a DestinationPolicy is provided DestinationsList, DestType, and DestID must be omitted.
 	DestinationPolicy *Policy `json:"destinationPolicy" bson:"destination-policy"`
+
+	// LastDestinationPolicyServices is to store the last destination policy services when user update object
+	// with new destination policy services
+	// This field can only be set internally
+	LastDestinationPolicyServices []ServiceID `json:"lastDestinationPolicyServices" bson:"last-destination-policy-services"`
 
 	// Expiration is a timestamp/date indicating when the object expires.
 	// When the object expires it is automatically deleted.

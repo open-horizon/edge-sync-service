@@ -27,12 +27,13 @@ type InMemoryStorage struct {
 }
 
 type inMemoryObject struct {
-	meta               common.MetaData
-	data               []byte
-	status             string
-	remainingConsumers int
-	remainingReceivers int
-	consumedTimestamp  time.Time
+	meta                  common.MetaData
+	data                  []byte
+	status                string
+	remainingConsumers    int
+	remainingReceivers    int
+	deletedDestinationNum int
+	consumedTimestamp     time.Time
 }
 
 // Init initializes the InMemory store
@@ -416,6 +417,19 @@ func (store *InMemoryStorage) RetrieveObjectAndStatus(orgID string, objectType s
 	return nil, "", nil
 }
 
+// RetrieveObjectAndDeletedDestinationNum returns the object meta data and deletedDestinationNum with the specified para
+func (store *InMemoryStorage) RetrieveObjectAndDeletedDestinationNum(orgID string, objectType string, objectID string) (*common.MetaData, int, common.SyncServiceError) {
+	store.lock()
+	defer store.unLock()
+
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	if object, ok := store.objects[id]; ok {
+		return &object.meta, object.deletedDestinationNum, nil
+	}
+
+	return nil, -1, nil
+}
+
 // RetrieveObjectData returns the object data with the specified parameters
 func (store *InMemoryStorage) RetrieveObjectData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
 	store.lock()
@@ -475,6 +489,36 @@ func (store *InMemoryStorage) MarkObjectDeleted(orgID string, objectType string,
 	if object, ok := store.objects[id]; ok {
 		object.meta.Deleted = true
 		object.status = common.ObjDeleted
+		store.objects[id] = object
+		return nil
+	}
+
+	return notFound
+}
+
+// UpdateLastDestinationPolicyServices update the LastDestinationPolicyServices
+func (store *InMemoryStorage) UpdateLastDestinationPolicyServices(orgID string, objectType string, objectID string, destinationPolicyServices []common.ServiceID) common.SyncServiceError {
+	store.lock()
+	defer store.unLock()
+
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	if object, ok := store.objects[id]; ok {
+		object.meta.LastDestinationPolicyServices = destinationPolicyServices
+		store.objects[id] = object
+		return nil
+	}
+
+	return notFound
+}
+
+// UpdateDeletedDestinationNum updates the UpdateDeletedDestinationNum
+func (store *InMemoryStorage) UpdateDeletedDestinationNum(orgID string, objectType string, objectID string, deletedDestinationsNum int) common.SyncServiceError {
+	store.lock()
+	defer store.unLock()
+
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	if object, ok := store.objects[id]; ok {
+		object.deletedDestinationNum = deletedDestinationsNum
 		store.objects[id] = object
 		return nil
 	}
