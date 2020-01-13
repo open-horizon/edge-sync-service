@@ -120,6 +120,7 @@ func SendNotifications(notifications []common.NotificationInfo) common.SyncServi
 }
 
 func resendNotificationsForDestination(dest common.Destination, resendReceivedObjects bool) common.SyncServiceError {
+	fmt.Println("Inside notification.resendNotifications")
 	notifications, err := Store.RetrieveNotifications(dest.DestOrgID, dest.DestType, dest.DestID, resendReceivedObjects)
 	if err != nil {
 		message := fmt.Sprintf("Error in resendNotificationsForDestination. Error: %s\n", err)
@@ -140,6 +141,8 @@ func resendNotificationsForDestination(dest common.Destination, resendReceivedOb
 				common.ObjectLocks.Unlock(lockIndex)
 				continue
 			}
+
+			log.Debug(fmt.Sprintf("inside notification.resendNotifications, n.status is: %s\n", n.Status))
 
 			metaData, status, err := Store.RetrieveObjectAndStatus(n.DestOrgID, n.ObjectType, n.ObjectID)
 			if err != nil {
@@ -190,6 +193,7 @@ func resendNotificationsForDestination(dest common.Destination, resendReceivedOb
 			case common.ReceivedByDestination:
 				fallthrough
 			case common.Data:
+				log.Debug(fmt.Sprintf("inside notification.resendNotifications, inside common.Data case\n"))
 				if dest.DestType == "" {
 					common.ObjectLocks.Unlock(lockIndex)
 					continue
@@ -205,11 +209,13 @@ func resendNotificationsForDestination(dest common.Destination, resendReceivedOb
 				common.ObjectLocks.Unlock(lockIndex)
 				metaData.DestType = n.DestType
 				metaData.DestID = n.DestID
+				log.Debug(fmt.Sprintf("inside notification.resendNotifications, inside common.Data case, about to sendNotificationMessage with common.Update\n"))
 				err = Comm.SendNotificationMessage(common.Update, dest.DestType, dest.DestID, metaData.InstanceID, metaData.DataID, metaData)
 			default:
 				common.ObjectLocks.Unlock(lockIndex)
 				metaData.DestType = n.DestType
 				metaData.DestID = n.DestID
+				log.Debug(fmt.Sprintf("inside notification.resendNotifications, inside default case, about to sendNotificationMessage with %s\n", n.Status))
 				err = Comm.SendNotificationMessage(n.Status, n.DestType, n.DestID, n.InstanceID, n.DataID, metaData)
 			}
 			if err != nil {

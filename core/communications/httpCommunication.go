@@ -173,6 +173,8 @@ func (communication *HTTP) handleGetUpdates(writer http.ResponseWriter, request 
 
 	payload := make([]updateMessage, 0)
 	notifications, err := Store.RetrievePendingNotifications(orgID, destType, destID)
+	log.Debug("In handleGetUpdates. Retrieve pending %d notifications\n", len(notifications))
+
 	if err != nil {
 		if log.IsLogging(logger.ERROR) {
 			log.Error(err.Error())
@@ -188,6 +190,9 @@ func (communication *HTTP) handleGetUpdates(writer http.ResponseWriter, request 
 
 	for _, n := range notifications {
 		metaData, err := Store.RetrieveObject(n.DestOrgID, n.ObjectType, n.ObjectID)
+		log.Debug("In handleGetUpdates, for 1 notification, retrieve metadata\n")
+		log.Debug("n.status: %s\n", n.Status)
+
 		if err != nil {
 			message := fmt.Sprintf("Error in handleGetUpdates. Error: %s\n", err)
 			if log.IsLogging(logger.ERROR) {
@@ -587,14 +592,19 @@ func (communication *HTTP) Poll() bool {
 		return false
 	}
 
+	respBody := response.Body
 	var payload []updateMessage
-	err = json.NewDecoder(response.Body).Decode(&payload)
+	err = json.NewDecoder(respBody).Decode(&payload)
 	if err != nil {
 		if log.IsLogging(logger.ERROR) {
 			log.Error("Failed to unmarshal updates. Error: %s\n", err)
 		}
 		return false
 	}
+
+	bodyBytes, err := ioutil.ReadAll(respBody)
+	bodyString := string(bodyBytes)
+	log.Debug("poll response: %s", bodyString)
 
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Polled the CSS, received %d objects.\n", len(payload))

@@ -175,9 +175,7 @@ func GetRemovedPolicyServices(existingPolicy *Policy, newPolicy *Policy) []Servi
 	removedServices := make([]ServiceID, 0)
 	for _, existingService := range existingPolicy.Services {
 		found := false
-		fmt.Printf("existingService: %s \n", existingService.ServiceName)
 		for _, newService := range newPolicy.Services {
-			fmt.Printf("newService: %s \n", newService)
 			if newService.OrgID == existingService.OrgID &&
 				newService.ServiceName == existingService.ServiceName &&
 				newService.Version == existingService.Version {
@@ -189,7 +187,6 @@ func GetRemovedPolicyServices(existingPolicy *Policy, newPolicy *Policy) []Servi
 
 		if !found {
 			removedServices = append(removedServices, existingService)
-			fmt.Printf("found removed service: %s", existingService.ServiceName)
 		}
 	}
 

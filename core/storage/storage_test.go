@@ -301,6 +301,20 @@ func testStorageObjectsWithPolicy(storageType string, t *testing.T) {
 		}, false},
 	}
 
+	testServiceUpdate := common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "myorg000",
+		DestinationPolicy: &common.Policy{
+			Properties: []common.PolicyProperty{
+				{Name: "d", Value: float64(98)},
+				{Name: "e", Value: "asdf", Type: "string"},
+				{Name: "f", Value: false},
+			},
+			Constraints: []string{"xyzzy=78", "vbnm=false"},
+			Services: []common.ServiceID{
+				{OrgID: "plover", Arch: "amd64", ServiceName: "testServiceUpdate", Version: "1.0.0"},
+			},
+		},
+	}
+
 	for _, test := range tests {
 		// Delete the object first
 		if err := store.DeleteStoredObject(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID); err != nil {
@@ -423,6 +437,44 @@ func testStorageObjectsWithPolicy(storageType string, t *testing.T) {
 		t.Errorf("Received %d objects with a destination policy. Expected %d.\n",
 			len(policyInfo), 2)
 	}
+
+	// test destination policy service update
+	if _, err := store.StoreObject(testServiceUpdate, nil, common.NotReadyToSend); err != nil {
+		t.Errorf("Failed to store object (objectID = %s). Error: %s\n", testServiceUpdate.ObjectID, err.Error())
+	}
+	storedMetaData, err := store.RetrieveObject(testServiceUpdate.DestOrgID,
+		testServiceUpdate.ObjectType, testServiceUpdate.ObjectID)
+	if err != nil {
+		t.Errorf("Failed to retrieve object (objectID = %s). Error: %s\n", testServiceUpdate.ObjectID, err.Error())
+	} else {
+		if storedMetaData.DestinationPolicy == nil {
+			t.Errorf("DestinationPolicy nil in retrieved object (objectID = %s)\n", testServiceUpdate.ObjectID)
+		} else {
+			policyServices := storedMetaData.DestinationPolicy.Services
+			if len(policyServices) != len(testServiceUpdate.DestinationPolicy.Services) {
+				t.Errorf("The retrieved DestinationPolicy service %#v does not match the expected one %#v\n",
+					policyServices, testServiceUpdate.DestinationPolicy.Services)
+			} else {
+				if policyServices[0].ServiceName != testServiceUpdate.DestinationPolicy.Services[0].ServiceName {
+					t.Errorf("The retrieved DestinationPolicy service name %#v does not match the expected one %#v\n",
+						policyServices[0].ServiceName, testServiceUpdate.DestinationPolicy.Services[0].ServiceName)
+				}
+
+				lastDestinationPolicyServices := storedMetaData.LastDestinationPolicyServices
+				oldDestinationPolicyServices := tests[1].metaData.DestinationPolicy.Services
+				if len(lastDestinationPolicyServices) != len(oldDestinationPolicyServices) {
+					t.Errorf("The LastDestinationPolicyServices %#v does not match the removed destination policy services %#v\n",
+						lastDestinationPolicyServices, oldDestinationPolicyServices)
+				} else {
+					if lastDestinationPolicyServices[0].ServiceName != oldDestinationPolicyServices[0].ServiceName {
+						t.Errorf("The LastDestinationPolicyService name %#v does not match the removed destination policy service %#v\n",
+							lastDestinationPolicyServices[0].ServiceName, oldDestinationPolicyServices[0].ServiceName)
+					}
+				}
+			}
+		}
+	}
+
 }
 
 func testGetObjectWithFilters(storageType string, t *testing.T) {
