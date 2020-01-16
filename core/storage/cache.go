@@ -372,6 +372,16 @@ func (store *Cache) GetObjectsForDestination(orgID string, destType string, dest
 	return store.Store.GetObjectsForDestination(orgID, destType, destID)
 }
 
+// RetrieveObjectAndRemovedDestinationPolicyServices returns the object metadata and removedDestinationPolicyServices with the specified param, only for ESS
+func (store *Cache) RetrieveObjectAndRemovedDestinationPolicyServices(orgID string, objectType string, objectID string) (*common.MetaData, []common.ServiceID, common.SyncServiceError) {
+	return store.Store.RetrieveObjectAndRemovedDestinationPolicyServices(orgID, objectType, objectID)
+}
+
+// UpdateRemovedDestinationPolicyServices update the removedDestinationPolicyServices, only for ESS
+func (store *Cache) UpdateRemovedDestinationPolicyServices(orgID string, objectType string, objectID string, destinationPolicyServices []common.ServiceID) common.SyncServiceError {
+	return store.Store.UpdateRemovedDestinationPolicyServices(orgID, objectType, objectID, destinationPolicyServices)
+}
+
 // UpdateNotificationRecord updates/adds a notification record to the object
 func (store *Cache) UpdateNotificationRecord(notification common.Notification) common.SyncServiceError {
 	return store.Store.UpdateNotificationRecord(notification)

@@ -170,23 +170,67 @@ type Policy struct {
 	Timestamp int64 `json:"timestamp" bson:"timestamp"`
 }
 
-// Return true if the services of 2 policy objects are identical
-func ComparePolicyServices(existingPolicy *Policy, newPolicy *Policy) bool {
-	for _, existingService := range existingPolicy.Services {
-		found := false
-		for _, newService := range newPolicy.Services {
-			if newService.OrgID == existingService.OrgID &&
-			   newService.ServiceName == existingService.ServiceName &&
-			   newService.Version == existingService.Version {
-				found = true
-				break
+// GetRemovedPolicyServices is the method to compare existing destination policy and new destination policy, returning removed policy services
+func GetRemovedPolicyServices(existingPolicy *Policy, newPolicy *Policy) []ServiceID {
+	removedServices := make([]ServiceID, 0)
+	if existingPolicy == nil {
+		return removedServices
+	} else if newPolicy == nil { // existingPolicy != nil && newPolicy == nil, add all service from existingPolicy to returned list
+		return existingPolicy.Services
+	} else { // existingPolicy != nil && newPolicy != nil
+		for _, existingService := range existingPolicy.Services {
+			found := false
+			for _, newService := range newPolicy.Services {
+				if newService.OrgID == existingService.OrgID &&
+					newService.ServiceName == existingService.ServiceName &&
+					newService.Version == existingService.Version {
+					found = true
+					break
+
+				}
+			}
+
+			if !found {
+				removedServices = append(removedServices, existingService)
 			}
 		}
-		if !found {
-			return false
+		return removedServices
+	}
+}
+
+// ServiceListContains returns true if serviceIDList contains the given serviceID
+func ServiceListContains(serviceList []ServiceID, service ServiceID) bool {
+	for _, s := range serviceList {
+		if s.OrgID == service.OrgID && s.ServiceName == service.ServiceName && s.Version == service.Version {
+			return true
 		}
 	}
-	return true
+	return false
+}
+
+// RemoveServiceFromServiceList removes a service from the given service list and return it. Returns false if nothing removed from the list
+func RemoveServiceFromServiceList(serviceID string, serviceList []ServiceID) ([]ServiceID, bool) {
+	// serviceOrgID/version/serviceName
+	parts := strings.SplitN(serviceID, "/", 3)
+	if len(parts) < 3 {
+		return serviceList, false
+	}
+
+	for i, s := range serviceList {
+		if parts[0] == s.OrgID && parts[2] == s.ServiceName {
+			if policySemVerRange, err := ParseSemVerRange(s.Version); err == nil {
+				if serviceSemVer, err := ParseSemVer(parts[1]); err == nil {
+					if policySemVerRange.IsInRange(serviceSemVer) {
+						// find serviceList[i], remove it
+						serviceList[i] = serviceList[len(serviceList)-1]
+						return serviceList[:len(serviceList)-1], true
+					}
+				}
+			}
+		}
+	}
+
+	return serviceList, false
 }
 
 // MetaData is the metadata that identifies and defines the sync service object.

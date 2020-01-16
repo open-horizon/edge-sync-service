@@ -27,12 +27,13 @@ type InMemoryStorage struct {
 }
 
 type inMemoryObject struct {
-	meta               common.MetaData
-	data               []byte
-	status             string
-	remainingConsumers int
-	remainingReceivers int
-	consumedTimestamp  time.Time
+	meta                             common.MetaData
+	data                             []byte
+	status                           string
+	remainingConsumers               int
+	remainingReceivers               int
+	consumedTimestamp                time.Time
+	removedDestinationPolicyServices []common.ServiceID
 }
 
 // Init initializes the InMemory store
@@ -705,6 +706,35 @@ func (store *InMemoryStorage) RetrieveDestinationProtocol(orgID string, destType
 // GetObjectsForDestination retrieves objects that are in use on a given node
 func (store *InMemoryStorage) GetObjectsForDestination(orgID string, destType string, destID string) ([]common.ObjectStatus, common.SyncServiceError) {
 	return nil, nil
+}
+
+// RetrieveObjectAndRemovedDestinationPolicyServices returns the object metadata and removedDestinationPolicyServices with the specified param, only for ESS
+func (store *InMemoryStorage) RetrieveObjectAndRemovedDestinationPolicyServices(orgID string, objectType string, objectID string) (*common.MetaData, []common.ServiceID, common.SyncServiceError) {
+	store.lock()
+	defer store.unLock()
+
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	if object, ok := store.objects[id]; ok {
+		return &object.meta, object.removedDestinationPolicyServices, nil
+	}
+
+	emptyList := []common.ServiceID{}
+	return nil, emptyList, nil
+}
+
+// UpdateRemovedDestinationPolicyServices update the removedDestinationPolicyServices, only for ESS
+func (store *InMemoryStorage) UpdateRemovedDestinationPolicyServices(orgID string, objectType string, objectID string, destinationPolicyServices []common.ServiceID) common.SyncServiceError {
+	store.lock()
+	defer store.unLock()
+
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	if object, ok := store.objects[id]; ok {
+		object.removedDestinationPolicyServices = destinationPolicyServices
+		store.objects[id] = object
+		return nil
+	}
+
+	return notFound
 }
 
 // UpdateNotificationRecord updates/adds a notification record to the object

@@ -285,17 +285,81 @@ func handleUpdate(metaData common.MetaData, maxInflightChunks int) common.SyncSe
 		notificationDataID = notification.DataID
 	}
 
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("Finish process notification, then set status to partiallyReceived of %s %s\n", metaData.ObjectType, metaData.ObjectID)
+	}
+
 	status := common.PartiallyReceived
 	// For new objects notification.DataID will be -1, so we will send getdata for MetaOnly.
 	// metaData.DataID will be 0 for the old code versions, we don't want to ask for data in this case.
 	if metaData.Link != "" || metaData.NoData || (metaData.MetaOnly && (metaData.DataID == notificationDataID || metaData.DataID == 0)) {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("Set status to completelyReceived for %s %s\n", metaData.ObjectType, metaData.ObjectID)
+		}
 		status = common.CompletelyReceived
+	}
+
+	existingMeta, existingLastDestinationPolicyServices, err := Store.RetrieveObjectAndRemovedDestinationPolicyServices(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+	if err != nil {
+		common.ObjectLocks.Unlock(lockIndex)
+		return &notificationHandlerError{fmt.Sprintf("Error in handleUpdate: failed to get existing ESS object and existingLastDestinationPolicyServices. Error: %s\n", err)}
+	}
+	if existingMeta == nil {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("existingMeta is nil\n")
+		}
+	}
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("existingLastDestinationPolicyServices length: %d\n", len(existingLastDestinationPolicyServices))
 	}
 
 	// Store the object
 	if _, err := Store.StoreObject(metaData, nil, status); err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
 		return &notificationHandlerError{fmt.Sprintf("Error in handleUpdate: failed to store object. Error: %s\n", err)}
+	}
+
+	// update the RemovedDestinationPolicyServices for ESS
+	if common.Configuration.NodeType == common.ESS {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Trace("It is ESS, then compare new polled object with object from ESS storage\n")
+		}
+
+		if existingMeta != nil && existingMeta.DestinationPolicy != nil && metaData.DestinationPolicy != nil {
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("Starting to compare destination policy services...\n")
+			}
+			// compare existing destinationPolicy service with the destinationPolicy service in updated metadata
+			removedPolicyServices := common.GetRemovedPolicyServices(existingMeta.DestinationPolicy, metaData.DestinationPolicy)
+
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("get %d removed policy services\n", len(removedPolicyServices))
+			}
+
+			// add the removedPolicyService to ESS db object
+			for _, removedPolicyService := range removedPolicyServices {
+				if sliceContains := common.ServiceListContains(existingLastDestinationPolicyServices, removedPolicyService); !sliceContains {
+					if trace.IsLogging(logger.TRACE) {
+						trace.Trace("Adding destination policy service %s to removedDestinationPolicyServices\n", removedPolicyService.ServiceName)
+					}
+					existingLastDestinationPolicyServices = append(existingLastDestinationPolicyServices, removedPolicyService)
+				} else {
+					if trace.IsLogging(logger.TRACE) {
+						trace.Trace("existingLastDestinationPolicyServices don't contain service: %s/%s/%s\n", removedPolicyService.OrgID, removedPolicyService.Version, removedPolicyService.ServiceName)
+					}
+				}
+			}
+
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("Updating RemovedDestinationPolicyServices in storage...\n")
+			}
+
+			if err = Store.UpdateRemovedDestinationPolicyServices(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, existingLastDestinationPolicyServices); err != nil {
+				common.ObjectLocks.Unlock(lockIndex)
+				return &notificationHandlerError{fmt.Sprintf("Error in handleUpdate: failed to update removedDestinationPolicyServices. Error: %s\n", err)}
+			}
+		}
+
 	}
 
 	if status == common.CompletelyReceived {

@@ -191,6 +191,12 @@ type Storage interface {
 	// GetObjectsForDestination retrieves objects that are in use on a given node
 	GetObjectsForDestination(orgID string, destType string, destID string) ([]common.ObjectStatus, common.SyncServiceError)
 
+	// RetrieveObjectAndRemovedDestinationPolicyServices returns the object metadata and removedDestinationPolicyServices with the specified param, only for ESS
+	RetrieveObjectAndRemovedDestinationPolicyServices(orgID string, objectType string, objectID string) (*common.MetaData, []common.ServiceID, common.SyncServiceError)
+
+	// UpdateRemovedDestinationPolicyServices update the removedDestinationPolicyServices, only for ESS
+	UpdateRemovedDestinationPolicyServices(orgID string, objectType string, objectID string, destinationPolicyServices []common.ServiceID) common.SyncServiceError
+
 	// Update/add a notification record to an object
 	UpdateNotificationRecord(notification common.Notification) common.SyncServiceError
 

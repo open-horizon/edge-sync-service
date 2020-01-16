@@ -340,13 +340,6 @@ func (store *MongoStorage) StoreObject(metaData common.MetaData, data []byte, st
 			return nil, &common.InvalidRequest{Message: "Can't update the existence of Destination Policy"}
 		}
 
-		// Don't allow updates to the service reference of an existing object.
-		if existingObject.MetaData.DestinationPolicy != nil && metaData.DestinationPolicy != nil {
-			if same := common.ComparePolicyServices(existingObject.MetaData.DestinationPolicy, metaData.DestinationPolicy); !same {
-				return nil, &common.InvalidRequest{Message: "Can't update the service name, org or version in Destination Policy"}
-			}
-		}
-
 		if metaData.MetaOnly {
 			metaData.DataID = existingObject.MetaData.DataID
 			metaData.ObjectSize = existingObject.MetaData.ObjectSize
@@ -1480,6 +1473,17 @@ func (store *MongoStorage) GetObjectsForDestination(orgID string, destType strin
 		objectStatuses = append(objectStatuses, objectStatus)
 	}
 	return objectStatuses, nil
+}
+
+// RetrieveObjectAndRemovedDestinationPolicyServices returns the object metadata and removedDestinationPolicyServices with the specified param, only for ESS
+func (store *MongoStorage) RetrieveObjectAndRemovedDestinationPolicyServices(orgID string, objectType string, objectID string) (*common.MetaData, []common.ServiceID, common.SyncServiceError) {
+	removedDestinationPolicyServices := []common.ServiceID{}
+	return nil, removedDestinationPolicyServices, nil
+}
+
+// UpdateRemovedDestinationPolicyServices update the removedDestinationPolicyServices, only for ESS
+func (store *MongoStorage) UpdateRemovedDestinationPolicyServices(orgID string, objectType string, objectID string, destinationPolicyServices []common.ServiceID) common.SyncServiceError {
+	return nil
 }
 
 // UpdateNotificationRecord updates/adds a notification record to the object

@@ -97,6 +97,12 @@ func (auth *DummyAuthenticate) Authenticate(request *http.Request) (int, string,
 		return AuthEdgeNode, parts[0], parts[1] + "/" + parts[2]
 	}
 
+	// to mimic anax service authenticator
+	parts = strings.Split(appKey, "$")
+	if len(parts) == 4 {
+		return AuthService, parts[0], parts[1] + "/" + parts[2] + "/" + parts[3]
+	}
+
 	parts = strings.Split(appKey, "@")
 	if len(parts) != 2 && len(parts) != 3 {
 		return AuthFailed, "", ""
