@@ -172,174 +172,193 @@ func testHandleObjectHelper(nodeType string, storageType string, t *testing.T) {
 	defer communications.Store.Stop()
 
 	testData := []struct {
-		method             string
-		appKey             string
-		orgID              string
-		objectType         string
-		objectID           string
-		operator           string
-		metaData           *common.MetaData
-		data               []byte
-		expectedHTTPStatus int
-		webhook            *webhookUpdate
-		destinationsList   *[]string
-		testID             int
+		method              string
+		appKey              string
+		orgID               string
+		objectType          string
+		objectID            string
+		operator            string
+		metaData            *common.MetaData
+		data                []byte
+		expectedHTTPStatus  int
+		webhook             *webhookUpdate
+		destinationsList    *[]string
+		expectedDeletedFlag bool
+		testID              int
 	}{
 		{http.MethodPut, "testerAdmin@myorg222", "myorg222", "type1", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
-			[]byte("abc"), http.StatusNoContent, nil, nil, 0},
+			[]byte("abc"), http.StatusNoContent, nil, nil, false, 0},
 		{http.MethodGet, "testerAdmin@myorg222", "myorg222", "type1", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
-			[]byte("abc"), http.StatusOK, nil, nil, 1},
-		{http.MethodPut, "testerAdmin@myorg222", "myorg222", "type1", "1", "consumed", nil, nil, http.StatusBadRequest, nil, nil, 2},
-		{http.MethodPost, "testerAdmin@myorg222", "myorg222", "type1", "1", "consumed", nil, nil, http.StatusMethodNotAllowed, nil, nil, 3},
-		{http.MethodPut, "testerAdmin@myorg222", "myorg222", "type1", "1", "activate", nil, nil, http.StatusNoContent, nil, nil, 4},
-		{http.MethodGet, "testerAdmin@myorg222", "myorg222", "type1", "1", "activate", nil, nil, http.StatusMethodNotAllowed, nil, nil, 5},
-		{http.MethodGet, "testerAdmin@myorg222", "myorg222", "type1", "1", "status", nil, nil, http.StatusOK, nil, nil, 6},
-		{http.MethodGet, "testerAdmin@myorg222", "myorg222", "type1", "3", "status", nil, nil, http.StatusNotFound, nil, nil, 7},
-		{http.MethodPut, "testerAdmin@myorg222", "myorg222", "type1", "1", "status", nil, nil, http.StatusMethodNotAllowed, nil, nil, 8},
-		{http.MethodDelete, "testerAdmin@myorg222", "myorg222", "type1", "1", "", nil, nil, http.StatusNoContent, nil, nil, 9},
-		{http.MethodPut, "testerAdmin@myorg222", "myorg222", "type1", "1", "deleted", nil, nil, http.StatusNoContent, nil, nil, 10},
-		{http.MethodPost, "testerAdmin@myorg222", "myorg222", "type1", "1", "deleted", nil, nil, http.StatusMethodNotAllowed, nil, nil, 11},
-		{http.MethodGet, "testerAdmin@myorg222", "myorg222", "type1", "2", "", nil, nil, http.StatusNotFound, nil, nil, 12},
-		{http.MethodGet, "testerAdmin@myorg222", "myorg222", "type1", "", "", nil, nil, http.StatusOK, nil, nil, 13},
-		{http.MethodPost, "testerAdmin@myorg222", "myorg222", "type1", "", "", nil, nil, http.StatusMethodNotAllowed, nil, nil, 14},
+			[]byte("abc"), http.StatusOK, nil, nil, false, 1},
+		{http.MethodPut, "testerAdmin@myorg222", "myorg222", "type1", "1", "consumed", nil, nil, http.StatusBadRequest, nil, nil, false, 2},
+		{http.MethodPost, "testerAdmin@myorg222", "myorg222", "type1", "1", "consumed", nil, nil, http.StatusMethodNotAllowed, nil, nil, false, 3},
+		{http.MethodPut, "testerAdmin@myorg222", "myorg222", "type1", "1", "activate", nil, nil, http.StatusNoContent, nil, nil, false, 4},
+		{http.MethodGet, "testerAdmin@myorg222", "myorg222", "type1", "1", "activate", nil, nil, http.StatusMethodNotAllowed, nil, nil, false, 5},
+		{http.MethodGet, "testerAdmin@myorg222", "myorg222", "type1", "1", "status", nil, nil, http.StatusOK, nil, nil, false, 6},
+		{http.MethodGet, "testerAdmin@myorg222", "myorg222", "type1", "3", "status", nil, nil, http.StatusNotFound, nil, nil, false, 7},
+		{http.MethodPut, "testerAdmin@myorg222", "myorg222", "type1", "1", "status", nil, nil, http.StatusMethodNotAllowed, nil, nil, false, 8},
+		{http.MethodDelete, "testerAdmin@myorg222", "myorg222", "type1", "1", "", nil, nil, http.StatusNoContent, nil, nil, false, 9},
+		{http.MethodPut, "testerAdmin@myorg222", "myorg222", "type1", "1", "deleted", nil, nil, http.StatusNoContent, nil, nil, false, 10},
+		{http.MethodPost, "testerAdmin@myorg222", "myorg222", "type1", "1", "deleted", nil, nil, http.StatusMethodNotAllowed, nil, nil, false, 11},
+		{http.MethodGet, "testerAdmin@myorg222", "myorg222", "type1", "2", "", nil, nil, http.StatusNotFound, nil, nil, false, 12},
+		{http.MethodGet, "testerAdmin@myorg222", "myorg222", "type1", "", "", nil, nil, http.StatusOK, nil, nil, false, 13},
+		{http.MethodPost, "testerAdmin@myorg222", "myorg222", "type1", "", "", nil, nil, http.StatusMethodNotAllowed, nil, nil, false, 14},
 		{http.MethodGet, "testerAdmin@myorg222", "myorg222", "type1", "2", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
-			[]byte("abc"), http.StatusNotFound, nil, nil, 15},
-		{http.MethodGet, "testerAdmin@myorg222", "myorg222", "type1", "1/2/3", "", nil, nil, http.StatusBadRequest, nil, nil, 16},
+			[]byte("abc"), http.StatusNotFound, nil, nil, false, 15},
+		{http.MethodGet, "testerAdmin@myorg222", "myorg222", "type1", "1/2/3", "", nil, nil, http.StatusBadRequest, nil, nil, false, 16},
 		{http.MethodPost, "testerAdmin@myorg222", "myorg222", "type1", "3", "",
 			&common.MetaData{ObjectID: "3", ObjectType: "type1", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
-			[]byte("abc"), http.StatusMethodNotAllowed, nil, nil, 17},
-		{http.MethodPost, "testerAdmin@myorg222", "myorg222", "type1", "3", "data", nil, nil, http.StatusMethodNotAllowed, nil, nil, 18},
-		{http.MethodPost, "testerAdmin@myorg222", "myorg222", "type1", "3", "plover", nil, nil, http.StatusBadRequest, nil, nil, 19},
+			[]byte("abc"), http.StatusMethodNotAllowed, nil, nil, false, 17},
+		{http.MethodPost, "testerAdmin@myorg222", "myorg222", "type1", "3", "data", nil, nil, http.StatusMethodNotAllowed, nil, nil, false, 18},
+		{http.MethodPost, "testerAdmin@myorg222", "myorg222", "type1", "3", "plover", nil, nil, http.StatusBadRequest, nil, nil, false, 19},
 		{http.MethodGet, "testerAdmin@myorg222", "myorg222", "type1", "1", "destinations",
 			&common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
-			nil, http.StatusOK, nil, nil, 20},
+			nil, http.StatusOK, nil, nil, false, 20},
 		{http.MethodPut, "testerAdmin@myorg222", "myorg222", "type1", "", "", nil, nil, http.StatusNoContent,
-			&webhookUpdate{Action: "register", URL: "http://abc"}, nil, 21},
+			&webhookUpdate{Action: "register", URL: "http://abc"}, nil, false, 21},
 		{http.MethodPut, "testerAdmin@myorg222", "myorg222", "type1", "", "", nil, nil, http.StatusBadRequest,
-			&webhookUpdate{Action: "register", URL: "abc"}, nil, 22},
-		{http.MethodPut, "testerAdmin@myorg222", "myorg222", "type1", "1", "received", nil, nil, http.StatusBadRequest, nil, nil, 23},
-		{http.MethodPost, "testerAdmin@myorg222", "myorg222", "type1", "1", "received", nil, nil, http.StatusMethodNotAllowed, nil, nil, 24},
+			&webhookUpdate{Action: "register", URL: "abc"}, nil, false, 22},
+		{http.MethodPut, "testerAdmin@myorg222", "myorg222", "type1", "1", "received", nil, nil, http.StatusBadRequest, nil, nil, false, 23},
+		{http.MethodPost, "testerAdmin@myorg222", "myorg222", "type1", "1", "received", nil, nil, http.StatusMethodNotAllowed, nil, nil, false, 24},
 
 		{http.MethodPut, "testerFail@myorg222", "myorg222", "type1", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
-			[]byte("abc"), http.StatusForbidden, nil, nil, 25},
+			[]byte("abc"), http.StatusForbidden, nil, nil, false, 25},
 		{http.MethodPut, "testerAdmin@myorg", "myorg222", "type1", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
-			[]byte("abc"), http.StatusForbidden, nil, nil, 26},
+			[]byte("abc"), http.StatusForbidden, nil, nil, false, 26},
 		{http.MethodGet, "testerFail@myorg222", "myorg222", "type1", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
-			[]byte("abc"), http.StatusForbidden, nil, nil, 27},
+			[]byte("abc"), http.StatusForbidden, nil, nil, false, 27},
 		{http.MethodGet, "testerAdmin@myorg", "myorg222", "type1", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
-			[]byte("abc"), http.StatusForbidden, nil, nil, 28},
-		{http.MethodPut, "testerFail@myorg222", "myorg222", "type1", "1", "activate", nil, nil, http.StatusForbidden, nil, nil, 29},
-		{http.MethodPut, "testerAdmin@myorg", "myorg222", "type1", "1", "activate", nil, nil, http.StatusForbidden, nil, nil, 30},
-		{http.MethodGet, "testerFail@myorg222", "myorg222", "type1", "1", "status", nil, nil, http.StatusForbidden, nil, nil, 31},
-		{http.MethodGet, "testerAdmin@myorg", "myorg222", "type1", "1", "status", nil, nil, http.StatusForbidden, nil, nil, 32},
-		{http.MethodDelete, "testerFailn@myorg222", "myorg222", "type1", "1", "", nil, nil, http.StatusForbidden, nil, nil, 33},
-		{http.MethodDelete, "testerAdmin@myorg", "myorg222", "type1", "1", "", nil, nil, http.StatusForbidden, nil, nil, 34},
-		{http.MethodPut, "testerFail@myorg222", "myorg222", "type1", "1", "deleted", nil, nil, http.StatusForbidden, nil, nil, 35},
-		{http.MethodPut, "testerAdmin@myorg", "myorg222", "type1", "1", "deleted", nil, nil, http.StatusForbidden, nil, nil, 36},
-		{http.MethodGet, "testerFail@myorg222", "myorg222", "type1", "", "", nil, nil, http.StatusForbidden, nil, nil, 37},
-		{http.MethodGet, "testerAdmin@myorg", "myorg222", "type1", "", "", nil, nil, http.StatusForbidden, nil, nil, 38},
+			[]byte("abc"), http.StatusForbidden, nil, nil, false, 28},
+		{http.MethodPut, "testerFail@myorg222", "myorg222", "type1", "1", "activate", nil, nil, http.StatusForbidden, nil, nil, false, 29},
+		{http.MethodPut, "testerAdmin@myorg", "myorg222", "type1", "1", "activate", nil, nil, http.StatusForbidden, nil, nil, false, 30},
+		{http.MethodGet, "testerFail@myorg222", "myorg222", "type1", "1", "status", nil, nil, http.StatusForbidden, nil, nil, false, 31},
+		{http.MethodGet, "testerAdmin@myorg", "myorg222", "type1", "1", "status", nil, nil, http.StatusForbidden, nil, nil, false, 32},
+		{http.MethodDelete, "testerFailn@myorg222", "myorg222", "type1", "1", "", nil, nil, http.StatusForbidden, nil, nil, false, 33},
+		{http.MethodDelete, "testerAdmin@myorg", "myorg222", "type1", "1", "", nil, nil, http.StatusForbidden, nil, nil, false, 34},
+		{http.MethodPut, "testerFail@myorg222", "myorg222", "type1", "1", "deleted", nil, nil, http.StatusForbidden, nil, nil, false, 35},
+		{http.MethodPut, "testerAdmin@myorg", "myorg222", "type1", "1", "deleted", nil, nil, http.StatusForbidden, nil, nil, false, 36},
+		{http.MethodGet, "testerFail@myorg222", "myorg222", "type1", "", "", nil, nil, http.StatusForbidden, nil, nil, false, 37},
+		{http.MethodGet, "testerAdmin@myorg", "myorg222", "type1", "", "", nil, nil, http.StatusForbidden, nil, nil, false, 38},
 		{http.MethodGet, "testerFail@myorg222", "myorg222", "type1", "1", "destinations",
 			&common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
-			nil, http.StatusForbidden, nil, nil, 39},
+			nil, http.StatusForbidden, nil, nil, false, 39},
 		{http.MethodGet, "testerAdmin@myorg", "myorg222", "type1", "1", "destinations",
 			&common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
-			nil, http.StatusForbidden, nil, nil, 40},
+			nil, http.StatusForbidden, nil, nil, false, 40},
 		{http.MethodPut, "testerFail@myorg222", "myorg222", "type1", "", "", nil, nil, http.StatusForbidden,
-			&webhookUpdate{Action: "register", URL: "http://abc"}, nil, 41},
+			&webhookUpdate{Action: "register", URL: "http://abc"}, nil, false, 41},
 		{http.MethodPut, "testerAdmin@myorg", "myorg222", "type1", "", "", nil, nil, http.StatusForbidden,
-			&webhookUpdate{Action: "register", URL: "http://abc"}, nil, 42},
+			&webhookUpdate{Action: "register", URL: "http://abc"}, nil, false, 42},
 
 		{http.MethodPut, "testerUser@myorg222", "myorg222", "type1", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
-			[]byte("abc"), http.StatusForbidden, nil, nil, 43},
+			[]byte("abc"), http.StatusForbidden, nil, nil, false, 43},
 		{http.MethodGet, "testerUser@myorg222", "myorg222", "type1", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
-			[]byte("abc"), http.StatusForbidden, nil, nil, 44},
-		{http.MethodPut, "testerUser@myorg222", "myorg222", "type1", "1", "activate", nil, nil, http.StatusForbidden, nil, nil, 45},
-		{http.MethodGet, "testerUser@myorg222", "myorg222", "type1", "1", "status", nil, nil, http.StatusForbidden, nil, nil, 46},
-		{http.MethodDelete, "testerUser@myorg222", "myorg222", "type1", "1", "", nil, nil, http.StatusForbidden, nil, nil, 47},
-		{http.MethodPut, "testerUser@myorg222", "myorg222", "type1", "1", "deleted", nil, nil, http.StatusForbidden, nil, nil, 48},
-		{http.MethodGet, "testerUser@myorg222", "myorg222", "type1", "", "", nil, nil, http.StatusForbidden, nil, nil, 49},
+			[]byte("abc"), http.StatusForbidden, nil, nil, false, 44},
+		{http.MethodPut, "testerUser@myorg222", "myorg222", "type1", "1", "activate", nil, nil, http.StatusForbidden, nil, nil, false, 45},
+		{http.MethodGet, "testerUser@myorg222", "myorg222", "type1", "1", "status", nil, nil, http.StatusForbidden, nil, nil, false, 46},
+		{http.MethodDelete, "testerUser@myorg222", "myorg222", "type1", "1", "", nil, nil, http.StatusForbidden, nil, nil, false, 47},
+		{http.MethodPut, "testerUser@myorg222", "myorg222", "type1", "1", "deleted", nil, nil, http.StatusForbidden, nil, nil, false, 48},
+		{http.MethodGet, "testerUser@myorg222", "myorg222", "type1", "", "", nil, nil, http.StatusForbidden, nil, nil, false, 49},
 		{http.MethodGet, "testerUser@myorg222", "myorg222", "type1", "1", "destinations",
 			&common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
-			nil, http.StatusForbidden, nil, nil, 50},
-		{http.MethodPut, "testerUser@myorg222", "myorg222", "type1", "", "", nil, nil, http.StatusForbidden, &webhookUpdate{Action: "register", URL: "http://abc"}, nil, 51},
+			nil, http.StatusForbidden, nil, nil, false, 50},
+		{http.MethodPut, "testerUser@myorg222", "myorg222", "type1", "", "", nil, nil, http.StatusForbidden, &webhookUpdate{Action: "register", URL: "http://abc"}, nil, false, 51},
 
 		{http.MethodPut, "testerUser@myorg222", "myorg222", "type2", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type2", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
-			[]byte("abc"), http.StatusNoContent, nil, nil, 52},
+			[]byte("abc"), http.StatusNoContent, nil, nil, false, 52},
 		{http.MethodGet, "testerUser@myorg222", "myorg222", "type2", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type2", DestOrgID: "myorg222", DestID: "dev1", DestType: "device"},
-			[]byte("abc"), http.StatusOK, nil, nil, 53},
-		{http.MethodPut, "testerUser@myorg222", "myorg222", "type2", "1", "activate", nil, nil, http.StatusNoContent, nil, nil, 54},
-		{http.MethodGet, "testerUser@myorg222", "myorg222", "type2", "1", "status", nil, nil, http.StatusOK, nil, nil, 55},
-		{http.MethodGet, "testerUser@myorg222", "myorg222", "type2", "1", "destinations", nil, nil, http.StatusOK, nil, nil, 56},
-		{http.MethodDelete, "testerUser@myorg222", "myorg222", "type2", "1", "", nil, nil, http.StatusNoContent, nil, nil, 57},
-		{http.MethodPut, "testerUser@myorg222", "myorg222", "type2", "1", "deleted", nil, nil, http.StatusNoContent, nil, nil, 58},
-		{http.MethodGet, "testerUser@myorg222", "myorg222", "type2", "", "", nil, nil, http.StatusOK, nil, nil, 59},
-		{http.MethodGet, "testerUser@myorg222", "myorg222", "type2", "2", "", nil, nil, http.StatusNotFound, nil, nil, 60},
+			[]byte("abc"), http.StatusOK, nil, nil, false, 53},
+		{http.MethodPut, "testerUser@myorg222", "myorg222", "type2", "1", "activate", nil, nil, http.StatusNoContent, nil, nil, false, 54},
+		{http.MethodGet, "testerUser@myorg222", "myorg222", "type2", "1", "status", nil, nil, http.StatusOK, nil, nil, false, 55},
+		{http.MethodGet, "testerUser@myorg222", "myorg222", "type2", "1", "destinations", nil, nil, http.StatusOK, nil, nil, false, 56},
+		{http.MethodDelete, "testerUser@myorg222", "myorg222", "type2", "1", "", nil, nil, http.StatusNoContent, nil, nil, false, 57},
+		{http.MethodPut, "testerUser@myorg222", "myorg222", "type2", "1", "deleted", nil, nil, http.StatusNoContent, nil, nil, false, 58},
+		{http.MethodGet, "testerUser@myorg222", "myorg222", "type2", "", "", nil, nil, http.StatusOK, nil, nil, false, 59},
+		{http.MethodGet, "testerUser@myorg222", "myorg222", "type2", "2", "", nil, nil, http.StatusNotFound, nil, nil, false, 60},
 		{http.MethodPut, "testerUser@myorg222", "myorg222", "type2", "", "", nil, nil, http.StatusNoContent,
-			&webhookUpdate{Action: "register", URL: "http://abc"}, nil, 61},
+			&webhookUpdate{Action: "register", URL: "http://abc"}, nil, false, 61},
 
 		{http.MethodPut, "testerUser@myorg222", "myorg222", "type3", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type3", DestOrgID: "myorg222", DestID: "dev1", DestType: "device2"},
-			[]byte("abc"), http.StatusNoContent, nil, nil, 62},
+			[]byte("abc"), http.StatusNoContent, nil, nil, false, 62},
 		{http.MethodGet, "testerUser@myorg222", "myorg222", "type3", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type3", DestOrgID: "myorg222", DestID: "dev1", DestType: "device2"},
-			[]byte("abc"), http.StatusOK, nil, nil, 63},
-		{http.MethodPut, "testerUser@myorg222", "myorg222", "type3", "1", "activate", nil, nil, http.StatusNoContent, nil, nil, 64},
-		{http.MethodGet, "testerUser@myorg222", "myorg222", "type3", "1", "status", nil, nil, http.StatusOK, nil, nil, 65},
-		{http.MethodGet, "testerUser@myorg222", "myorg222", "type3", "1", "destinations", nil, nil, http.StatusOK, nil, nil, 66},
-		{http.MethodDelete, "testerUser@myorg222", "myorg222", "type3", "1", "", nil, nil, http.StatusNoContent, nil, nil, 67},
-		{http.MethodPut, "testerUser@myorg222", "myorg222", "type3", "1", "deleted", nil, nil, http.StatusNoContent, nil, nil, 68},
-		{http.MethodGet, "testerUser@myorg222", "myorg222", "type3", "", "", nil, nil, http.StatusOK, nil, nil, 69},
-		{http.MethodGet, "testerUser@myorg222", "myorg222", "type3", "2", "", nil, nil, http.StatusNotFound, nil, nil, 70},
+			[]byte("abc"), http.StatusOK, nil, nil, false, 63},
+		{http.MethodPut, "testerUser@myorg222", "myorg222", "type3", "1", "activate", nil, nil, http.StatusNoContent, nil, nil, false, 64},
+		{http.MethodGet, "testerUser@myorg222", "myorg222", "type3", "1", "status", nil, nil, http.StatusOK, nil, nil, false, 65},
+		{http.MethodGet, "testerUser@myorg222", "myorg222", "type3", "1", "destinations", nil, nil, http.StatusOK, nil, nil, false, 66},
+		{http.MethodDelete, "testerUser@myorg222", "myorg222", "type3", "1", "", nil, nil, http.StatusNoContent, nil, nil, false, 67},
+		{http.MethodPut, "testerUser@myorg222", "myorg222", "type3", "1", "deleted", nil, nil, http.StatusNoContent, nil, nil, false, 68},
+		{http.MethodGet, "testerUser@myorg222", "myorg222", "type3", "", "", nil, nil, http.StatusOK, nil, nil, false, 69},
+		{http.MethodGet, "testerUser@myorg222", "myorg222", "type3", "2", "", nil, nil, http.StatusNotFound, nil, nil, false, 70},
 		{http.MethodPut, "testerUser@myorg222", "myorg222", "type3", "", "", nil, nil, http.StatusNoContent,
-			&webhookUpdate{Action: "register", URL: "http://abc"}, nil, 71},
+			&webhookUpdate{Action: "register", URL: "http://abc"}, nil, false, 71},
 
 		{http.MethodPut, "testerSyncAdmin@myorg222", "myorg222", "type4", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type4", DestOrgID: "myorg222", DestID: "dev1", DestType: "device2"},
-			[]byte("abc"), http.StatusNoContent, nil, nil, 62},
+			[]byte("abc"), http.StatusNoContent, nil, nil, false, 72},
 		{http.MethodGet, "testerSyncAdmin@myorg222", "myorg222", "type4", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type4", DestOrgID: "myorg222", DestID: "dev1", DestType: "device2"},
-			[]byte("abc"), http.StatusOK, nil, nil, 63},
-		{http.MethodPut, "testerSyncAdmin@myorg222", "myorg222", "type4", "1", "activate", nil, nil, http.StatusNoContent, nil, nil, 64},
-		{http.MethodGet, "testerSyncAdmin@myorg222", "myorg222", "type4", "1", "status", nil, nil, http.StatusOK, nil, nil, 65},
-		{http.MethodGet, "testerSyncAdmin@myorg222", "myorg222", "type4", "1", "destinations", nil, nil, http.StatusOK, nil, nil, 66},
-		{http.MethodDelete, "testerSyncAdmin@myorg222", "myorg222", "type4", "1", "", nil, nil, http.StatusNoContent, nil, nil, 67},
-		{http.MethodPut, "testerSyncAdmin@myorg222", "myorg222", "type4", "1", "deleted", nil, nil, http.StatusNoContent, nil, nil, 68},
-		{http.MethodGet, "testerSyncAdmin@myorg222", "myorg222", "type4", "", "", nil, nil, http.StatusOK, nil, nil, 69},
-		{http.MethodGet, "testerSyncAdmin@myorg222", "myorg222", "type4", "2", "", nil, nil, http.StatusNotFound, nil, nil, 70},
+			[]byte("abc"), http.StatusOK, nil, nil, false, 73},
+		{http.MethodPut, "testerSyncAdmin@myorg222", "myorg222", "type4", "1", "activate", nil, nil, http.StatusNoContent, nil, nil, false, 74},
+		{http.MethodGet, "testerSyncAdmin@myorg222", "myorg222", "type4", "1", "status", nil, nil, http.StatusOK, nil, nil, false, 75},
+		{http.MethodGet, "testerSyncAdmin@myorg222", "myorg222", "type4", "1", "destinations", nil, nil, http.StatusOK, nil, nil, false, 76},
+		{http.MethodDelete, "testerSyncAdmin@myorg222", "myorg222", "type4", "1", "", nil, nil, http.StatusNoContent, nil, nil, false, 77},
+		{http.MethodPut, "testerSyncAdmin@myorg222", "myorg222", "type4", "1", "deleted", nil, nil, http.StatusNoContent, nil, nil, false, 78},
+		{http.MethodGet, "testerSyncAdmin@myorg222", "myorg222", "type4", "", "", nil, nil, http.StatusOK, nil, nil, false, 79},
+		{http.MethodGet, "testerSyncAdmin@myorg222", "myorg222", "type4", "2", "", nil, nil, http.StatusNotFound, nil, nil, false, 80},
 		{http.MethodPut, "testerSyncAdmin@myorg222", "myorg222", "type4", "", "", nil, nil, http.StatusNoContent,
-			&webhookUpdate{Action: "register", URL: "http://abc"}, nil, 71},
+			&webhookUpdate{Action: "register", URL: "http://abc"}, nil, false, 81},
 
 		{http.MethodPut, "testerSyncAdmin@myorg223", "myorg222", "type5", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type5", DestOrgID: "myorg222", DestID: "dev1", DestType: "device2"},
-			[]byte("abc"), http.StatusNoContent, nil, nil, 62},
+			[]byte("abc"), http.StatusNoContent, nil, nil, false, 82},
 		{http.MethodGet, "testerSyncAdmin@myorg223", "myorg222", "type5", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type5", DestOrgID: "myorg222", DestID: "dev1", DestType: "device2"},
-			[]byte("abc"), http.StatusOK, nil, nil, 63},
-		{http.MethodPut, "testerSyncAdmin@myorg223", "myorg222", "type5", "1", "activate", nil, nil, http.StatusNoContent, nil, nil, 64},
-		{http.MethodGet, "testerSyncAdmin@myorg223", "myorg222", "type5", "1", "status", nil, nil, http.StatusOK, nil, nil, 65},
-		{http.MethodGet, "testerSyncAdmin@myorg223", "myorg222", "type5", "1", "destinations", nil, nil, http.StatusOK, nil, nil, 66},
-		{http.MethodDelete, "testerSyncAdmin@myorg223", "myorg222", "type5", "1", "", nil, nil, http.StatusNoContent, nil, nil, 67},
-		{http.MethodPut, "testerSyncAdmin@myorg223", "myorg222", "type5", "1", "deleted", nil, nil, http.StatusNoContent, nil, nil, 68},
-		{http.MethodGet, "testerSyncAdmin@myorg223", "myorg222", "type5", "", "", nil, nil, http.StatusOK, nil, nil, 69},
-		{http.MethodGet, "testerSyncAdmin@myorg223", "myorg222", "type5", "2", "", nil, nil, http.StatusNotFound, nil, nil, 70},
+			[]byte("abc"), http.StatusOK, nil, nil, false, 83},
+		{http.MethodPut, "testerSyncAdmin@myorg223", "myorg222", "type5", "1", "activate", nil, nil, http.StatusNoContent, nil, nil, false, 84},
+		{http.MethodGet, "testerSyncAdmin@myorg223", "myorg222", "type5", "1", "status", nil, nil, http.StatusOK, nil, nil, false, 85},
+		{http.MethodGet, "testerSyncAdmin@myorg223", "myorg222", "type5", "1", "destinations", nil, nil, http.StatusOK, nil, nil, false, 86},
+		{http.MethodDelete, "testerSyncAdmin@myorg223", "myorg222", "type5", "1", "", nil, nil, http.StatusNoContent, nil, nil, false, 87},
+		{http.MethodPut, "testerSyncAdmin@myorg223", "myorg222", "type5", "1", "deleted", nil, nil, http.StatusNoContent, nil, nil, false, 88},
+		{http.MethodGet, "testerSyncAdmin@myorg223", "myorg222", "type5", "", "", nil, nil, http.StatusOK, nil, nil, false, 89},
+		{http.MethodGet, "testerSyncAdmin@myorg223", "myorg222", "type5", "2", "", nil, nil, http.StatusNotFound, nil, nil, false, 90},
 		{http.MethodPut, "testerSyncAdmin@myorg223", "myorg222", "type5", "", "", nil, nil, http.StatusNoContent,
-			&webhookUpdate{Action: "register", URL: "http://abc"}, nil, 71},
+			&webhookUpdate{Action: "register", URL: "http://abc"}, nil, false, 91},
 		{http.MethodPut, "testerAdmin@myorg222", "myorg222", "type1", "1", "",
 			&common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg222", DestinationsList: []string{"device: dev1>"}},
-			[]byte("abc"), http.StatusBadRequest, nil, nil, 72},
+			[]byte("abc"), http.StatusBadRequest, nil, nil, false, 92},
 		{http.MethodPut, "testerAdmin@myorg222", "myorg222", "type1", "1", "destinations", nil,
-			[]byte("abc"), http.StatusBadRequest, nil, &[]string{"<device: dev1", "device>: dev1"}, 73},
+			[]byte("abc"), http.StatusBadRequest, nil, &[]string{"<device: dev1", "device>: dev1"}, false, 93},
+
+		{http.MethodPut, "myorg222$myserviceOrg$1.0.0$myservice1", "myorg222", "testESS", "1", "",
+			&common.MetaData{ObjectID: "1", ObjectType: "type6", DestOrgID: "myorg222",
+				DestinationPolicy: &common.Policy{
+					Properties: []common.PolicyProperty{
+						{Name: "j", Value: float64(42.0)},
+						{Name: "k", Value: "ghjk"},
+						{Name: "l", Value: float64(613)},
+					},
+					Constraints: []string{"il=71", "rtyu=\"edcrfv\""},
+					Services: []common.ServiceID{
+						{OrgID: "myserviceOrg", Arch: "amd64", ServiceName: "myservice1", Version: "1.0.0"},
+					},
+				},
+			}, []byte("abc"), http.StatusNoContent, nil, nil, false, 94},
+		{http.MethodGet, "myorg222$myserviceOrg$1.0.0$myservice1", "myorg222", "testESS", "", "", nil, nil, http.StatusNoContent, nil, nil, false, 95},
+		{http.MethodGet, "myorg222$myserviceOrg$1.0.0$removed_service1", "myorg222", "testESS", "", "", nil, nil, http.StatusNoContent, nil, nil, true, 96},
+		{http.MethodGet, "myorg222$myserviceOrg$1.0.0$not_exist_service", "myorg222", "testESS", "", "", nil, nil, http.StatusNotFound, nil, nil, true, 97},
 	}
 
 	destInfo := []struct {
@@ -371,6 +390,9 @@ func testHandleObjectHelper(nodeType string, storageType string, t *testing.T) {
 	}
 
 	for _, test := range testData {
+		if common.Configuration.NodeType == common.CSS && test.objectType == "testESS" {
+			continue
+		}
 		urlString := ""
 		if common.Configuration.NodeType == common.CSS {
 			urlString = urlString + test.orgID + "/"
@@ -433,6 +455,32 @@ func testHandleObjectHelper(nodeType string, storageType string, t *testing.T) {
 				} else if nodeType != common.ESS && test.method != "destinations" {
 					t.Errorf("handleObjects of %s returned a status of %d instead of %d for test %d and %s\n", urlString,
 						writer.statusCode, test.expectedHTTPStatus, test.testID, nodeType)
+				}
+			} else if test.objectType == "testESS" {
+				// only for ESS
+				if test.method == http.MethodPut {
+					removedServices := []common.ServiceID{
+						{OrgID: "myserviceOrg", Arch: "amd64", ServiceName: "removed_service1", Version: "1.0.0"},
+						{OrgID: "myserviceOrg", Arch: "amd64", ServiceName: "removed_service2", Version: "1.0.0"},
+						{OrgID: "myserviceOrg", Arch: "amd64", ServiceName: "removed_service3", Version: "1.0.0"},
+					}
+
+					if err := store.UpdateRemovedDestinationPolicyServices("myorg222", "testESS", "1", removedServices); err != nil {
+						t.Errorf("Failed to store removedServices for ESS. Error: %s\n", err.Error())
+					}
+
+				} else if test.method == http.MethodGet {
+					// test deleted flag for different auth
+					responseMetas := []common.MetaData{}
+					json.Unmarshal(writer.body.Bytes(), responseMetas)
+					for _, responseMeta := range responseMetas {
+						if responseMeta.ObjectType == test.objectType && responseMeta.ObjectID == test.objectID {
+							if responseMeta.Deleted != test.expectedDeletedFlag {
+								t.Errorf("Got unexpeced deleted flag for test: %d", test.testID)
+							}
+
+						}
+					}
 				}
 			}
 		} else if nodeType != common.ESS && test.method != "destinations" {

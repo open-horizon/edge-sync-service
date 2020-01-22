@@ -422,6 +422,26 @@ func GetObjectData(orgID string, objectType string, objectID string) (io.Reader,
 	return store.RetrieveObjectData(orgID, objectType, objectID)
 }
 
+// GetRemovedDestinationPolicyServicesFromESS get the removedDestinationPolicyServices list
+// Call the storage module to get the object's removedDestinationPolicyServices
+func GetRemovedDestinationPolicyServicesFromESS(orgID string, objectType string, objectID string) ([]common.ServiceID, common.SyncServiceError) {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In GetRemovedDestinationPolicyServicesFromESS. Get RemovedDestinationPolicyServices for object %s %s\n", objectType, objectID)
+	}
+
+	common.HealthStatus.ClientRequestReceived()
+
+	lockIndex := common.HashStrings(orgID, objectType, objectID)
+	apiObjectLocks.RLock(lockIndex)
+	defer apiObjectLocks.RUnlock(lockIndex)
+
+	_, removedDestinationPolicyServices, err := store.RetrieveObjectAndRemovedDestinationPolicyServices(orgID, objectType, objectID)
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In GetRemovedDestinationPolicyServicesFromESS. Get %d RemovedDestinationPolicyServices for object %s %s\n", len(removedDestinationPolicyServices), objectType, objectID)
+	}
+	return removedDestinationPolicyServices, err
+}
+
 // PutObjectData stores an object's data
 // Call the storage module to store the object's data
 // Return true if the object was found and updated
@@ -633,10 +653,13 @@ func ObjectReceived(orgID string, objectType string, objectID string) common.Syn
 	return err
 }
 
-// ObjectDeleted is called when an app indicates that it deleted the object
+// ObjectDeleted is called when an app indicates that 1) it deleted the object, or 2) service acknowlege service reference change
+// For 1):
 // Send "deleted" notification to the object's origin
 // Call the storage module to delete the object if deleted by all the consumers
-func ObjectDeleted(orgID string, objectType string, objectID string) common.SyncServiceError {
+// For 2):
+// service will be removed from ESS lastDestinationPolicyServices array
+func ObjectDeleted(userID string, orgID string, objectType string, objectID string) common.SyncServiceError {
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In ObjectDeleted. Deleted %s %s\n", objectType, objectID)
 	}
@@ -649,6 +672,9 @@ func ObjectDeleted(orgID string, objectType string, objectID string) common.Sync
 
 	common.ObjectLocks.Lock(lockIndex)
 
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("Retrieve object and status for %s %s\n", objectType, objectID)
+	}
 	metaData, status, err := store.RetrieveObjectAndStatus(orgID, objectType, objectID)
 	if err != nil {
 		if log.IsLogging(logger.ERROR) {
@@ -657,6 +683,11 @@ func ObjectDeleted(orgID string, objectType string, objectID string) common.Sync
 		common.ObjectLocks.Unlock(lockIndex)
 		return err
 	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("Status of %s %s is: %s\n", objectType, objectID, status)
+	}
+
 	if status == "" {
 		if log.IsLogging(logger.ERROR) {
 			log.Error("Failed to find object %s to confirm deletion.", orgID+":"+objectType+":"+objectID)
@@ -665,29 +696,110 @@ func ObjectDeleted(orgID string, objectType string, objectID string) common.Sync
 		return &common.InvalidRequest{Message: "Failed to find object to confirm deletion"}
 	}
 
-	if status != common.ObjDeleted {
-		message := fmt.Sprintf("Invalid attempt to confirm deletion of object in status %s\n", status)
-		if log.IsLogging(logger.ERROR) {
-			log.Error(message)
-		}
-		common.ObjectLocks.Unlock(lockIndex)
-		return &common.InvalidRequest{Message: message}
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("metaData.Deleted of %s %s is: %t\n", objectType, objectID, metaData.Deleted)
 	}
 
-	if c, err := store.DecrementAndReturnRemainingConsumers(orgID, objectType, objectID); err != nil {
-		if log.IsLogging(logger.ERROR) {
-			log.Error("Error in objectDeleted: failed to decrement consumers count. Error: %s\n", err)
+	if metaData.Deleted {
+		if status != common.ObjDeleted {
+			message := fmt.Sprintf("Invalid attempt to confirm deletion of object in status %s\n", status)
+			if log.IsLogging(logger.ERROR) {
+				log.Error(message)
+			}
+			common.ObjectLocks.Unlock(lockIndex)
+			return &common.InvalidRequest{Message: message}
 		}
-		common.ObjectLocks.Unlock(lockIndex)
-	} else if c == 0 {
-		notificationsInfo, err := communications.PrepareObjectStatusNotification(*metaData, common.Deleted)
-		common.ObjectLocks.Unlock(lockIndex)
+
+		if c, err := store.DecrementAndReturnRemainingConsumers(orgID, objectType, objectID); err != nil {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("Error in objectDeleted: failed to decrement consumers count. Error: %s\n", err)
+			}
+			common.ObjectLocks.Unlock(lockIndex)
+		} else if c == 0 {
+			notificationsInfo, err := communications.PrepareObjectStatusNotification(*metaData, common.Deleted)
+			common.ObjectLocks.Unlock(lockIndex)
+			if err != nil {
+				return err
+			}
+			return communications.SendNotifications(notificationsInfo)
+		} else {
+			common.ObjectLocks.Unlock(lockIndex)
+		}
+
+	} else {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("metaData.Deleted of %s %s is: %t, get lastRemovedPolicyServices\n", objectType, objectID, metaData.Deleted)
+		}
+
+		_, lastRemovedPolicyServices, err := store.RetrieveObjectAndRemovedDestinationPolicyServices(orgID, objectType, objectID)
 		if err != nil {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("Failed to find lastDestinationPolicyServices for object %s to confirm service reference change. Error: %s", orgID+":"+objectType+":"+objectID, err.Error())
+			}
+			common.ObjectLocks.Unlock(lockIndex)
 			return err
 		}
-		return communications.SendNotifications(notificationsInfo)
-	} else {
+
+		if len(lastRemovedPolicyServices) == 0 {
+			message := fmt.Sprintln("Invalid attempt to confirm deletion of object with empty lastRemovedPolicyServices list")
+			if log.IsLogging(logger.ERROR) {
+				log.Error(message)
+			}
+			common.ObjectLocks.Unlock(lockIndex)
+			return &common.InvalidRequest{Message: message}
+		}
+
+		// only for debugging:
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("length of lastRemovedPolicyServices: %d\n", len(lastRemovedPolicyServices))
+			trace.Debug("Get lastRemovedPolicyServices: \n")
+			for _, s := range lastRemovedPolicyServices {
+				trace.Debug("%s/%s/%s \n", s.OrgID, s.Version, s.ServiceName)
+			}
+
+			trace.Debug("Remove serviceID: %s from ESS lastRemovedPolicyServices\n", userID)
+			trace.Debug("lastRemovedPolicyServices length before removal: %d\n", len(lastRemovedPolicyServices))
+		}
+
+		updatedLastRemovePolicyServices, removed := common.RemoveServiceFromServiceList(userID, lastRemovedPolicyServices)
+		if !removed {
+			message := fmt.Sprintln("Invalid attempt to confirm deletion of object for service not in lastRemovedPolicyServices")
+			if log.IsLogging(logger.ERROR) {
+				log.Error(message)
+			}
+			common.ObjectLocks.Unlock(lockIndex)
+			return &common.InvalidRequest{Message: message}
+		}
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("lastRemovedPolicyServices length after removal: %d\n", len(updatedLastRemovePolicyServices))
+		}
+
+		if err = store.UpdateRemovedDestinationPolicyServices(orgID, objectType, objectID, updatedLastRemovePolicyServices); err != nil {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("Failed to update lastDestinationPolicyServices for object %s to confirm service reference change. Error: %s", orgID+":"+objectType+":"+objectID, err.Error())
+			}
+			common.ObjectLocks.Unlock(lockIndex)
+			return err
+		}
+
+		// only for debugging:
+		if trace.IsLogging(logger.DEBUG) {
+			_, lastRemovedPolicyServices, err = store.RetrieveObjectAndRemovedDestinationPolicyServices(orgID, objectType, objectID)
+			trace.Debug("Get lastRemovedPolicyServices again: \n")
+			if err != nil {
+				trace.Debug("RetrieveObjectAndRemovedDestinationPolicyServices err: %s\n", err)
+				common.ObjectLocks.Unlock(lockIndex)
+			}
+			for _, s := range lastRemovedPolicyServices {
+				trace.Debug("%s/%s/%s \n", s.OrgID, s.Version, s.ServiceName)
+			}
+
+		}
+
+		// keep this line
 		common.ObjectLocks.Unlock(lockIndex)
+
 	}
 
 	return nil
@@ -1001,6 +1113,18 @@ func UpdateObjectDestinations(orgID string, objectType string, objectID string, 
 	if len(updateNotificationsInfo) != 0 {
 		if err := communications.SendNotifications(updateNotificationsInfo); err != nil {
 			return err
+		}
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In set destination. removed destination for object %s %s: \n", objectType, objectID)
+		for _, deleted := range deletedDestinations {
+			trace.Debug("%s: %s", deleted.Destination.DestType, deleted.Destination.DestID)
+		}
+
+		trace.Debug("In set destination. added destination for object %s %s: \n", objectType, objectID)
+		for _, added := range addedDestinations {
+			trace.Debug("%s: %s", added.Destination.DestType, added.Destination.DestID)
 		}
 	}
 	return nil

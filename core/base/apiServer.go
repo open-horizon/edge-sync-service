@@ -525,7 +525,7 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleObjects. Get %s %s\n", objectType, objectID)
 		}
-		if code, _ := canUserAccessObject(request, orgID, objectType, objectID); code == security.AuthFailed {
+		if code, _ := canUserAccessObject(request, orgID, objectType, objectID, false); code == security.AuthFailed {
 			writer.WriteHeader(http.StatusForbidden)
 			writer.Write(unauthorizedBytes)
 			return
@@ -590,7 +590,7 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleObjects. Delete %s %s\n", objectType, objectID)
 		}
-		if code, _ := canUserAccessObject(request, orgID, objectType, objectID); code == security.AuthFailed {
+		if code, _ := canUserAccessObject(request, orgID, objectType, objectID, false); code == security.AuthFailed {
 			writer.WriteHeader(http.StatusForbidden)
 			writer.Write(unauthorizedBytes)
 			return
@@ -824,11 +824,14 @@ func handleListObjectsWithFilters(orgID string, writer http.ResponseWriter, requ
 }
 
 func handleObjectOperation(operation string, orgID string, objectType string, objectID string, writer http.ResponseWriter, request *http.Request) {
-	if code, _ := canUserAccessObject(request, orgID, objectType, objectID); code == security.AuthFailed {
-		writer.WriteHeader(http.StatusForbidden)
-		writer.Write(unauthorizedBytes)
-		return
+	if operation != "deleted" {
+		if code, _ := canUserAccessObject(request, orgID, objectType, objectID, false); code == security.AuthFailed {
+			writer.WriteHeader(http.StatusForbidden)
+			writer.Write(unauthorizedBytes)
+			return
+		}
 	}
+
 	switch operation {
 	case "consumed":
 		handleObjectConsumed(orgID, objectType, objectID, writer, request)
@@ -952,11 +955,18 @@ func handleObjectConsumed(orgID string, objectType string, objectID string, writ
 //     schema:
 //       type: string
 func handleObjectDeleted(orgID string, objectType string, objectID string, writer http.ResponseWriter, request *http.Request) {
+	code, serviceID := canUserAccessObject(request, orgID, objectType, objectID, true)
+	if code == security.AuthFailed {
+		writer.WriteHeader(http.StatusForbidden)
+		writer.Write(unauthorizedBytes)
+		return
+	}
+
 	if request.Method == http.MethodPut {
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleObjects. Deleted %s %s\n", objectType, objectID)
 		}
-		if err := ObjectDeleted(orgID, objectType, objectID); err != nil {
+		if err := ObjectDeleted(serviceID, orgID, objectType, objectID); err != nil {
 			communications.SendErrorResponse(writer, err, "Failed to confirm object's deletion. Error: ", 0)
 		} else {
 			writer.WriteHeader(http.StatusNoContent)
@@ -1515,7 +1525,7 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 		trace.Debug("In handleObjects. List %s, Method %s, orgID %s, objectType %s. Include received %t\n",
 			objectType, request.Method, orgID, objectType, received)
 	}
-	code, userID := canUserAccessObject(request, orgID, objectType, "")
+	code, userID := canUserAccessObject(request, orgID, objectType, "", true) //objectID == "", so checkLastDestinationPolicyServices will not be used
 	if code == security.AuthFailed {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
@@ -1530,9 +1540,25 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 		} else {
 			result = make([]common.MetaData, 0)
 			for _, object := range metaData {
-				if canServiceAccessObject(userID, object.DestinationPolicy) {
-					result = append(result, object)
+				//removedDestinationPolicyServices := []common.ServiceID{}
+				if removedDestinationPolicyServices, err := GetRemovedDestinationPolicyServicesFromESS(orgID, object.ObjectType, object.ObjectID); err != nil {
+					communications.SendErrorResponse(writer, err, "Failed to fetch removedDestinationPolicyServices for object. Error: ", 0)
+				} else {
+					if canServiceAccessObject(userID, object.DestinationPolicy, removedDestinationPolicyServices, true) {
+						if serviceContainedInLastDestinationPolicyServices(userID, removedDestinationPolicyServices) {
+							shadowObj := object
+							shadowObj.Deleted = true
+							result = append(result, shadowObj)
+							if trace.IsLogging(logger.DEBUG) {
+								trace.Debug("In handleObjects. object.deleted: %t, shadowObj.deleted: %t for object %s %s\n",
+									object.Deleted, shadowObj.Deleted, object.ObjectType, object.ObjectID)
+							}
+						} else {
+							result = append(result, object)
+						}
+					}
 				}
+
 			}
 		}
 
@@ -1601,7 +1627,7 @@ func handleListAllObjects(orgID string, objectType string, writer http.ResponseW
 		trace.Debug("In handleObjects. List %s, Method %s, orgID %s, objectType %s\n",
 			objectType, request.Method, orgID, objectType)
 	}
-	code, userID := canUserAccessObject(request, orgID, objectType, "")
+	code, userID := canUserAccessObject(request, orgID, objectType, "", false)
 	if code == security.AuthFailed {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
@@ -1615,8 +1641,9 @@ func handleListAllObjects(orgID string, objectType string, writer http.ResponseW
 			result = objects
 		} else {
 			result = make([]common.ObjectDestinationPolicy, 0)
+			oldPolicyServices := make([]common.ServiceID, 0)
 			for _, object := range objects {
-				if canServiceAccessObject(userID, object.DestinationPolicy) {
+				if canServiceAccessObject(userID, object.DestinationPolicy, oldPolicyServices, false) {
 					result = append(result, object)
 				}
 			}
@@ -1828,7 +1855,7 @@ func handleWebhook(orgID string, objectType string, writer http.ResponseWriter, 
 		writer.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	code, _ := canUserAccessObject(request, orgID, objectType, "")
+	code, _ := canUserAccessObject(request, orgID, objectType, "", false)
 	if code == security.AuthFailed || code == security.AuthService {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
@@ -2484,7 +2511,7 @@ func handleACLUpdate(request *http.Request, aclType string, orgID string, parts 
 	}
 }
 
-func canUserAccessObject(request *http.Request, orgID, objectType, objectID string) (int, string) {
+func canUserAccessObject(request *http.Request, orgID, objectType, objectID string, checkLastDestinationPolicyServices bool) (int, string) {
 	code, userID := security.CanUserAccessObject(request, orgID, objectType)
 	if code != security.AuthService || common.Configuration.NodeType == common.CSS || objectID == "" {
 		return code, userID
@@ -2494,31 +2521,63 @@ func canUserAccessObject(request *http.Request, orgID, objectType, objectID stri
 	apiObjectLocks.RLock(lockIndex)
 	defer apiObjectLocks.RUnlock(lockIndex)
 
-	metadata, err := store.RetrieveObject(orgID, objectType, objectID)
-	if err == nil && metadata != nil && canServiceAccessObject(userID, metadata.DestinationPolicy) {
+	metadata, removedDestinationPolicyServices, err := store.RetrieveObjectAndRemovedDestinationPolicyServices(orgID, objectType, objectID)
+	if err == nil && metadata != nil && canServiceAccessObject(userID, metadata.DestinationPolicy, removedDestinationPolicyServices, checkLastDestinationPolicyServices) {
 		return code, userID
 	}
 	return security.AuthFailed, ""
 }
 
-func canServiceAccessObject(serviceID string, policy *common.Policy) bool {
+func canServiceAccessObject(serviceID string, policy *common.Policy, oldPolicyServices []common.ServiceID, checkLastDestinationPolicyServices bool) bool {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In canServiceAccessObject. serviceID: %s\n", serviceID)
+	}
 	if policy == nil || len(policy.Services) == 0 {
 		return true
 	}
-	// serviceOrgID/arch/version/serviceName
+	// serviceOrgID/version/serviceName
 	parts := strings.SplitN(serviceID, "/", 3)
 	if len(parts) < 3 {
 		return false
 	}
+	serviceFoundInDestinationPolicy := false
 	for _, service := range policy.Services {
 		if parts[0] == service.OrgID && parts[2] == service.ServiceName {
-			if policySemVerRange, err := common.ParseSemVerRange(service.Version); err != nil {
-				return false
-			} else if serviceSemVer, err := common.ParseSemVer(parts[1]); err != nil {
-				return false
-			} else {
-				if policySemVerRange.IsInRange(serviceSemVer) {
-					return true
+			if policySemVerRange, err := common.ParseSemVerRange(service.Version); err == nil {
+				if serviceSemVer, err := common.ParseSemVer(parts[1]); err == nil {
+					if policySemVerRange.IsInRange(serviceSemVer) {
+						serviceFoundInDestinationPolicy = true
+					}
+				}
+			}
+		}
+	}
+
+	if serviceFoundInDestinationPolicy {
+		return true
+	}
+
+	// If checkLastDestinationPolicyServices flag is true && authentication serviceID is found in oldDestinationPolicyService, this metadata object is accessible
+	if checkLastDestinationPolicyServices {
+		return serviceContainedInLastDestinationPolicyServices(serviceID, oldPolicyServices)
+	}
+
+	return false
+}
+
+func serviceContainedInLastDestinationPolicyServices(serviceID string, oldPolicyServices []common.ServiceID) bool {
+	// serviceOrgID/version/serviceName
+	parts := strings.SplitN(serviceID, "/", 3)
+	if len(parts) < 3 {
+		return false
+	}
+	for _, oldService := range oldPolicyServices {
+		if parts[0] == oldService.OrgID && parts[2] == oldService.ServiceName {
+			if policySemVerRange, err := common.ParseSemVerRange(oldService.Version); err == nil {
+				if serviceSemVer, err := common.ParseSemVer(parts[1]); err == nil {
+					if policySemVerRange.IsInRange(serviceSemVer) {
+						return true
+					}
 				}
 			}
 		}

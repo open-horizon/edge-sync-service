@@ -16,12 +16,14 @@ func setupDB(dbType string) {
 	if dbType == common.Mongo {
 		common.Configuration.MongoDbName = "d_test_db"
 		store = &storage.MongoStorage{}
-	} else {
+	} else if dbType == common.Bolt {
 		dir, _ := os.Getwd()
 		common.Configuration.PersistenceRootPath = dir + "/persist"
 		boltStore := &storage.BoltStorage{}
 		boltStore.Cleanup()
 		store = boltStore
+	} else {
+		store = &storage.InMemoryStorage{}
 	}
 }
 
@@ -497,7 +499,7 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 		}
 
 		// Mark deleted (should fail)
-		if err := ObjectDeleted(row.orgID, row.objectType, row.objectID); err == nil {
+		if err := ObjectDeleted("", row.orgID, row.objectType, row.objectID); err == nil {
 			t.Errorf("objectDeleted marked the sender's object as deleted  (objectID = %s)", row.objectID)
 		}
 
@@ -538,7 +540,102 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 	}
 }
 
+func TestESSObjectDeletedAPI(t *testing.T) {
+	setupDB(common.Bolt)
+	testESSObjectDeletedAPI(store, t)
+
+	setupDB(common.InMemory)
+	testESSObjectDeletedAPI(store, t)
+}
+
+func testESSObjectDeletedAPI(store storage.Storage, t *testing.T) {
+	communications.Store = store
+	common.InitObjectLocks()
+
+	if err := store.Init(); err != nil {
+		t.Errorf("Failed to initialize storage driver. Error: %s\n", err.Error())
+	}
+	defer store.Stop()
+
+	//common.Configuration.NodeType = common.ESS
+
+	validObjects := []struct {
+		orgID      string
+		objectType string
+		objectID   string
+		metaData   common.MetaData
+		data       []byte
+	}{
+		{"myorg777", "type2", "1",
+			common.MetaData{ObjectID: "1", ObjectType: "type2", DestOrgID: "myorg777",
+				DestinationPolicy: &common.Policy{
+					Properties: []common.PolicyProperty{
+						{Name: "j", Value: float64(42.0)},
+						{Name: "k", Value: "ghjk"},
+						{Name: "l", Value: float64(613)},
+					},
+					Constraints: []string{"il=71", "rtyu=\"edcrfv\""},
+					Services: []common.ServiceID{
+						{OrgID: "myorg777", Arch: "amd64", ServiceName: "service1", Version: "1.0.0"},
+					},
+				},
+			},
+			[]byte("abc"),
+		},
+	}
+
+	common.Configuration.NodeType = common.CSS
+
+	for _, row := range validObjects {
+		// Update object
+		err := UpdateObject(row.orgID, row.objectType, row.objectID, row.metaData, row.data)
+		if err != nil {
+			t.Errorf("updateObject failed to update (objectID = %s). Error: %s", row.objectID, err.Error())
+		}
+
+		// ESS
+		removedServices := []common.ServiceID{
+			{OrgID: "myorg777", Arch: "amd64", ServiceName: "removed_service1", Version: "1.0.0"},
+			{OrgID: "myorg777", Arch: "amd64", ServiceName: "removed_service2", Version: "1.0.0"},
+			{OrgID: "myorg777", Arch: "amd64", ServiceName: "removed_service3", Version: "1.0.0"},
+		}
+
+		common.Configuration.NodeType = common.ESS
+
+		serviceID := "myorg777/1.0.0/removed_service1"
+		// before update removedDestinationPolicyServices, objectDeleted should fail
+		if err := ObjectDeleted(serviceID, row.orgID, row.objectType, row.objectID); err == nil {
+			t.Errorf("objectDeleted should fail if removedDestinationPolicyServices list is empty (objectID = %s)", row.objectID)
+		}
+
+		if err := store.UpdateRemovedDestinationPolicyServices(row.orgID, row.objectType, row.objectID, removedServices); err != nil {
+			t.Errorf("Failed to store removedServices. Error: %s", err.Error())
+		}
+
+		if err := ObjectDeleted(serviceID, row.orgID, row.objectType, row.objectID); err != nil {
+			t.Errorf("objectDeleted marked the sender's object as deleted  (objectID = %s)", row.objectID)
+		}
+
+		updatedRemovedServices, err := GetRemovedDestinationPolicyServicesFromESS(row.orgID, row.objectType, row.objectID)
+		if err != nil {
+			t.Errorf("Faild to GetRemovedDestinationPolicyServicesFromESS (objectID = %s)", row.objectID)
+		}
+
+		if len(updatedRemovedServices) != 2 {
+			t.Errorf("Wrong updatedRemovedServices after objectDeleted")
+		}
+
+		for _, service := range updatedRemovedServices {
+			if service.OrgID == "myorg777" && service.ServiceName == "removed_service1" && service.Version == "1.0.0" {
+				t.Errorf("RemovedDestinationPolicyServices should not contain service: %s/%s/%s", service.OrgID, service.Version, service.ServiceName)
+			}
+		}
+	}
+
+}
+
 func TestObjectDestinationsAPI(t *testing.T) {
+	common.Configuration.NodeType = common.CSS
 	setupDB(common.Mongo)
 	testObjectDestinationsAPI(store, t)
 
