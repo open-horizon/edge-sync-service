@@ -313,6 +313,7 @@ func handleResend(writer http.ResponseWriter, request *http.Request) {
 	}
 }
 
+// POST /api/v1/shutdown?essunregister=true
 func handleShutdown(writer http.ResponseWriter, request *http.Request) {
 	setCacheControlHeaders(writer)
 
@@ -328,6 +329,19 @@ func handleShutdown(writer http.ResponseWriter, request *http.Request) {
 
 		restart := strings.ToLower(request.URL.Query().Get("restart"))
 		quiesceString := request.URL.Query().Get("quiesce")
+
+		essUnregister := false
+		if common.Configuration.NodeType == common.ESS {
+			unregisterString := request.URL.Query().Get("essunregister")
+			var err error
+			if unregisterString != "" {
+				essUnregister, err = strconv.ParseBool(unregisterString)
+				if err != nil {
+					writer.WriteHeader(http.StatusBadRequest)
+					return
+				}
+			}
+		}
 
 		go func() {
 			timer := time.NewTimer(time.Duration(1) * time.Second)
@@ -346,7 +360,7 @@ func handleShutdown(writer http.ResponseWriter, request *http.Request) {
 				// If BlockUntilShutdown was called, don't let Stop() unblock
 				blocking := waitingOnBlockChannel
 				waitingOnBlockChannel = false
-				Stop(quieceTime)
+				Stop(quieceTime, essUnregister)
 
 				if log.IsLogging(logger.INFO) {
 					log.Info("Restarting the Sync Service")
@@ -354,7 +368,7 @@ func handleShutdown(writer http.ResponseWriter, request *http.Request) {
 				Start("", false)
 				waitingOnBlockChannel = blocking
 			} else {
-				Stop(quieceTime)
+				Stop(quieceTime, essUnregister)
 			}
 		}()
 	} else {

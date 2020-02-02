@@ -50,6 +50,11 @@ func (communication *TestComm) RegisterNew() common.SyncServiceError {
 	return nil
 }
 
+// Unregister ESS
+func (communication *TestComm) Unregister() common.SyncServiceError {
+	return nil
+}
+
 // SendPing sends a ping message from ESS to CSS
 func (communication *TestComm) SendPing() common.SyncServiceError {
 	return nil

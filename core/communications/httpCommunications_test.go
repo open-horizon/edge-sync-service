@@ -568,7 +568,7 @@ func testHTTPCommSetup(nodeType string) string {
 		dir, _ := os.Getwd()
 		common.Configuration.PersistenceRootPath = dir + "/persist"
 		boltStore := &storage.BoltStorage{}
-		boltStore.Cleanup()
+		boltStore.Cleanup(true)
 		Store = boltStore
 	}
 

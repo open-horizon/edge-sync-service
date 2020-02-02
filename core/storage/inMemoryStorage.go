@@ -78,6 +78,11 @@ func (store *InMemoryStorage) Stop() {
 func (store *InMemoryStorage) PerformMaintenance() {
 }
 
+// Cleanup erase the on disk Bolt database only for ESS and test
+func (store *InMemoryStorage) Cleanup(isTest bool) common.SyncServiceError {
+	return nil
+}
+
 // StoreObject stores an object
 func (store *InMemoryStorage) StoreObject(metaData common.MetaData, data []byte, status string) ([]common.StoreDestinationStatus, common.SyncServiceError) {
 	store.lock()
@@ -705,6 +710,11 @@ func (store *InMemoryStorage) RetrieveDestinationProtocol(orgID string, destType
 
 // GetObjectsForDestination retrieves objects that are in use on a given node
 func (store *InMemoryStorage) GetObjectsForDestination(orgID string, destType string, destID string) ([]common.ObjectStatus, common.SyncServiceError) {
+	return nil, nil
+}
+
+// RetrieveAllObjectsAndUpdateDestinationListForDestination retrieves objects that are in use on a given node and returns the list of metadata
+func (store *InMemoryStorage) RetrieveAllObjectsAndUpdateDestinationListForDestination(orgID string, destType string, destID string) ([]common.MetaData, common.SyncServiceError) {
 	return nil, nil
 }
 

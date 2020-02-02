@@ -44,6 +44,9 @@ type Communicator interface {
 	// RegisterNew sends a new registration message to be sent by an ESS
 	RegisterNew() common.SyncServiceError
 
+	// Unregister ESS
+	Unregister() common.SyncServiceError
+
 	// SendPing sends a ping message from ESS to CSS
 	SendPing() common.SyncServiceError
 

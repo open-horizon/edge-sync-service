@@ -38,7 +38,7 @@ func TestNotifications(t *testing.T) {
 	if err := Store.Init(); err != nil {
 		t.Errorf("Failed to initialize storage driver. Error: %s\n", err.Error())
 	}
-	boltStore.Cleanup()
+	boltStore.Cleanup(true)
 
 	defer Store.Stop()
 
@@ -225,7 +225,7 @@ func TestActivateObjects(t *testing.T) {
 	//Store = &storage.InMemoryStorage{}
 	common.Configuration.NodeType = common.CSS
 	boltStore := &storage.BoltStorage{}
-	boltStore.Cleanup()
+	boltStore.Cleanup(true)
 	Store = boltStore
 	dir, _ := os.Getwd()
 	common.Configuration.PersistenceRootPath = dir + "/persist"

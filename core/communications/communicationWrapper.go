@@ -131,6 +131,20 @@ func (communication *Wrapper) RegisterNew() common.SyncServiceError {
 	return comm.RegisterNew()
 }
 
+// Unregister ESS
+// TODO: implement Unregister() method for mqttCommunication
+func (communication *Wrapper) Unregister() common.SyncServiceError {
+	if common.Configuration.CommunicationProtocol == "http" {
+		comm, err := communication.selectCommunicator(common.Configuration.CommunicationProtocol, "", "", "")
+		if err != nil {
+			return err
+		}
+		return comm.Unregister()
+	}
+
+	return &Error{"ESS unregister only support in http communication protocol\n"}
+}
+
 // HandleRegAck handles a registration acknowledgement message from the CSS
 func (communication *Wrapper) HandleRegAck() {
 	comm, err := communication.selectCommunicator(common.Configuration.CommunicationProtocol, "", "", "")

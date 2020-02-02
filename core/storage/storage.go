@@ -32,6 +32,9 @@ type Storage interface {
 	// PerformMaintenance performs store's maintenance
 	PerformMaintenance()
 
+	// Cleanup erase the on disk Bolt databass only for ESS and test
+	Cleanup(isTest bool) common.SyncServiceError
+
 	// Store an object
 	// If the object already exists, return the changes in its destinations list (for CSS) - return the list of deleted destinations
 	StoreObject(metaData common.MetaData, data []byte, status string) ([]common.StoreDestinationStatus, common.SyncServiceError)
@@ -190,6 +193,9 @@ type Storage interface {
 
 	// GetObjectsForDestination retrieves objects that are in use on a given node
 	GetObjectsForDestination(orgID string, destType string, destID string) ([]common.ObjectStatus, common.SyncServiceError)
+
+	// RetrieveAllObjectsAndUpdateDestinationListForDestination retrieves objects that are in use on a given node and returns the list of metadata
+	RetrieveAllObjectsAndUpdateDestinationListForDestination(orgID string, destType string, destID string) ([]common.MetaData, common.SyncServiceError)
 
 	// RetrieveObjectAndRemovedDestinationPolicyServices returns the object metadata and removedDestinationPolicyServices with the specified param, only for ESS
 	RetrieveObjectAndRemovedDestinationPolicyServices(orgID string, objectType string, objectID string) (*common.MetaData, []common.ServiceID, common.SyncServiceError)

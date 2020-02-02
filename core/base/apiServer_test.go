@@ -1031,7 +1031,7 @@ func testAPIServerSetup(nodeType string, storageType string) string {
 		dir, _ := os.Getwd()
 		common.Configuration.PersistenceRootPath = dir + "/persist"
 		boltStore := &storage.BoltStorage{}
-		boltStore.Cleanup()
+		boltStore.Cleanup(true)
 		communications.Store = boltStore
 	}
 

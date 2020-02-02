@@ -24,6 +24,7 @@ import (
 
 const registerURL = "/spi/v1/register/"
 const registerNewURL = "/spi/v1/register-new/"
+const unregisterURL = "/spi/v1/unregister/"
 const pingURL = "/spi/v1/ping/"
 const objectRequestURL = "/spi/v1/objects/"
 
@@ -54,6 +55,7 @@ func (communication *HTTP) StartCommunication() common.SyncServiceError {
 	if common.Configuration.NodeType == common.CSS {
 		http.Handle(registerURL, http.StripPrefix(registerURL, http.HandlerFunc(communication.handleRegister)))
 		http.Handle(registerNewURL, http.StripPrefix(registerNewURL, http.HandlerFunc(communication.handleRegisterNew)))
+		http.Handle(unregisterURL, http.StripPrefix(unregisterURL, http.HandlerFunc(communication.handleUnregister)))
 		http.Handle(pingURL, http.StripPrefix(pingURL, http.HandlerFunc(communication.handlePing)))
 		http.Handle(objectRequestURL, http.StripPrefix(objectRequestURL, http.HandlerFunc(communication.handleObjects)))
 	} else {
@@ -231,6 +233,10 @@ func (communication *HTTP) handleGetUpdates(writer http.ResponseWriter, request 
 // SendNotificationMessage sends a notification message from the CSS to the ESS or from the ESS to the CSS
 func (communication *HTTP) SendNotificationMessage(notificationTopic string, destType string, destID string, instanceID int64, dataID int64,
 	metaData *common.MetaData) common.SyncServiceError {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In SendNotificationMessage for %s. notificationTopic: %s destType: %s destID: %s\n", common.Configuration.NodeType, notificationTopic, destType, destID)
+	}
+
 	if common.Configuration.NodeType == common.CSS {
 		// Create pending notification to be sent as a response to a GET request
 		var status string
@@ -391,6 +397,51 @@ func (communication *HTTP) handleRegisterNew(writer http.ResponseWriter, request
 	communication.handleRegisterOrPing(registerNewURL, writer, request)
 }
 
+// CSS handle unregister spi call
+func (communication *HTTP) handleUnregister(writer http.ResponseWriter, request *http.Request) {
+	communication.handleUnregisterHelper(unregisterURL, writer, request)
+}
+
+func (communication *HTTP) handleUnregisterHelper(url string, writer http.ResponseWriter, request *http.Request) {
+	if !communication.started || !common.Running {
+		writer.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In handleUnregisterHelper, handling unregister %s", unregisterURL)
+	}
+
+	if request.Method == http.MethodPut {
+		ok, orgID, destType, destID := security.ValidateSPIRequestIdentity(request)
+		if !ok {
+			writer.WriteHeader(http.StatusForbidden)
+			writer.Write(unauthorizedBytes)
+			return
+		}
+
+		destination := common.Destination{DestOrgID: orgID, DestType: destType, DestID: destID, Communication: common.HTTPProtocol,
+			CodeVersion: "1.0"}
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In handleUnregisterHelper, calling handleUnregistration...\n")
+		}
+		err := handleUnregistration(destination)
+
+		if err == nil {
+			writer.WriteHeader(http.StatusNoContent)
+		} else {
+			if log.IsLogging(logger.ERROR) {
+				log.Error(err.Error())
+			}
+			SendErrorResponse(writer, err, "", 0)
+		}
+
+	} else {
+		writer.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
 func (communication *HTTP) handlePing(writer http.ResponseWriter, request *http.Request) {
 	communication.handleRegisterOrPing(pingURL, writer, request)
 }
@@ -431,6 +482,59 @@ func (communication *HTTP) registerOrPing(url string) common.SyncServiceError {
 	return communication.createError(response, "register/ping")
 }
 
+// ESS unregister itself
+func (communication *HTTP) unregister(url string) common.SyncServiceError {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In unregister. url: %s\n", url)
+	}
+	if common.Configuration.NodeType != common.ESS {
+		return nil
+	}
+
+	// 1. make call to /spi/v1/unregister, CSS will remove ESS from destination list
+	requestURL := buildUnregisterURL(url, common.Configuration.OrgID, common.Configuration.DestinationType, common.Configuration.DestinationID)
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In unregister. request url: %s\n", requestURL)
+	}
+	request, err := http.NewRequest("PUT", requestURL, nil)
+
+	security.AddIdentityToSPIRequest(request, requestURL)
+
+	response, err := communication.requestWrapper.do(request)
+	if err != nil {
+		return &Error{"Failed to send HTTP request to unregister. Error: " + err.Error()}
+	}
+	defer response.Body.Close()
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In unregister. response.StatusCode: %d\n", response.StatusCode)
+		bodyBytes, err := ioutil.ReadAll(response.Body)
+		if err != nil {
+			trace.Debug("In unregister. Err from reading respone body: %s", err)
+		}
+		bodyString := string(bodyBytes)
+		trace.Debug("In unregister. response.Body: %s\n", bodyString)
+	}
+	if response.StatusCode != http.StatusNoContent && response.StatusCode != http.StatusNotFound {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("Failed to unregister, received HTTP code %d %s", response.StatusCode, response.Status)
+		}
+		return communication.createError(response, "unregister")
+	}
+
+	// 2. remove ESS local storage
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In unregister. removing ESS local storage.\n")
+	}
+	if err := Store.Cleanup(false); err != nil {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("Failed to cleanup ESS database, Error: %s", err)
+		}
+		return err
+	}
+	return nil
+}
+
 // Register sends a registration message to be sent by an ESS
 func (communication *HTTP) Register() common.SyncServiceError {
 	return communication.registerOrPing(registerURL)
@@ -450,6 +554,11 @@ func (communication *HTTP) RegisterAsNew(destination common.Destination) common.
 // RegisterNew sends a new registration message to be sent by an ESS
 func (communication *HTTP) RegisterNew() common.SyncServiceError {
 	return communication.registerOrPing(registerNewURL)
+}
+
+// Unregister ESS
+func (communication *HTTP) Unregister() common.SyncServiceError {
+	return communication.unregister(unregisterURL)
 }
 
 // SendPing sends a ping message from ESS to CSS
@@ -1031,6 +1140,20 @@ func buildResendURL(orgID string) string {
 
 func buildRegisterOrPingURL(url string, orgID string, destType string, destID string) string {
 	// common.HTTPCSSURL + url + orgID + "/" + destType + "/" + destID
+	var strBuilder strings.Builder
+	strBuilder.Grow(len(common.HTTPCSSURL) + len(url) + len(orgID) + len(destType) + len(destID) + 2)
+	strBuilder.WriteString(common.HTTPCSSURL)
+	strBuilder.WriteString(url)
+	strBuilder.WriteString(orgID)
+	strBuilder.WriteByte('/')
+	strBuilder.WriteString(destType)
+	strBuilder.WriteByte('/')
+	strBuilder.WriteString(destID)
+	return strBuilder.String()
+}
+
+func buildUnregisterURL(url string, orgID string, destType string, destID string) string {
+	// common.HTTPCSSURL + unregister_url + orgID + "/" + destType + "/" + destID
 	var strBuilder strings.Builder
 	strBuilder.Grow(len(common.HTTPCSSURL) + len(url) + len(orgID) + len(destType) + len(destID) + 2)
 	strBuilder.WriteString(common.HTTPCSSURL)

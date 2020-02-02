@@ -1074,6 +1074,14 @@ func (communication *MQTT) Register() common.SyncServiceError {
 	return communication.sendRegisterOrPing(common.Register)
 }
 
+// TODO: implement unregister for mqtt
+func (communication *MQTT) unregister(command string) common.SyncServiceError {
+	if common.Configuration.NodeType != common.ESS {
+		return nil
+	}
+	return nil
+}
+
 func (communication *MQTT) sendNotificationWithDestination(command string, destination common.Destination) common.SyncServiceError {
 	messagePayload := &messagePayload{Version: common.Version, Command: command}
 	messageJSON, err := json.Marshal(messagePayload)
@@ -1094,6 +1102,11 @@ func (communication *MQTT) RegisterAck(destination common.Destination) common.Sy
 // RegisterNew sends a new registration message to be sent by an ESS
 func (communication *MQTT) RegisterNew() common.SyncServiceError {
 	return communication.sendRegisterOrPing(common.RegisterNew)
+}
+
+// Unregister ESS
+func (communication *MQTT) Unregister() common.SyncServiceError {
+	return communication.unregister(common.Unregister)
 }
 
 // RegisterAsNew send a notification from a CSS to a ESS that the ESS has to send a registerNew message in order
