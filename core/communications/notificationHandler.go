@@ -154,6 +154,57 @@ func handleRegisterNew(dest common.Destination, persistentStorage bool) common.S
 	return nil
 }
 
+// CSS: handle ESS unregister
+func handleUnregistration(dest common.Destination) common.SyncServiceError {
+	if common.Configuration.NodeType == common.ESS {
+		return &notificationHandlerError{"Error: Only CSS can handle the unregistration"}
+	}
+
+	if !common.IsValidName(dest.DestType) || !common.IsValidName(dest.DestID) {
+		return &notificationHandlerError{("Error in handleUnregistration: destination contains invalid characters")}
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("Handling unregistration of %s %s\n", dest.DestType, dest.DestID)
+	}
+
+	// 1. get all metadata object used by the unregistering node and update destination for object
+	var err common.SyncServiceError
+	metadataList := make([]common.MetaData, 0)
+	if metadataList, err = Store.RetrieveAllObjectsAndUpdateDestinationListForDestination(dest.DestOrgID, dest.DestType, dest.DestID); err != nil {
+		trace.Error("Failed to retrieve objects for destination and update destinations for those objects %s %s %s, Error: %s\n", dest.DestOrgID, dest.DestType, dest.DestID, err)
+		return err
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("Get %d Metadata for destination %s %s %s: \n", len(metadataList), dest.DestOrgID, dest.DestType, dest.DestID)
+		for _, meta := range metadataList {
+			trace.Debug("%s/%s\n", meta.ObjectType, meta.ObjectID)
+		}
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("Deleting notification records for destination %s %s %s: \n", dest.DestOrgID, dest.DestType, dest.DestID)
+	}
+
+	// 2. deleted all notification records for the unregistered destination
+	if err := Store.DeleteNotificationRecords(dest.DestOrgID, "", "", dest.DestType, dest.DestID); err != nil {
+		trace.Error("Failed to delete notification records for destination %s %s %s, Error: %s\n", dest.DestOrgID, dest.DestType, dest.DestID, err)
+		return err
+	}
+	for _, metaData := range metadataList {
+		removeNotificationChunksInfo(metaData, metaData.OriginType, metaData.OriginID)
+	}
+
+	// 3. delete ESS node from destintion bucket
+	if err := Store.DeleteDestination(dest.DestOrgID, dest.DestType, dest.DestID); err != nil {
+		trace.Error("Failed to delete destination %s %s %s, Error: %s\n", dest.DestOrgID, dest.DestType, dest.DestID, err)
+		return err
+	}
+
+	return nil
+}
+
 // CSS: handle ESS ping
 func handlePing(dest common.Destination) common.SyncServiceError {
 	if common.Configuration.NodeType == common.ESS {

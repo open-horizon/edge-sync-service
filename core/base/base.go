@@ -271,63 +271,92 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 }
 
 // Stop stops the Sync Server
-func Stop(quiesceTime int) {
+func Stop(quiesceTime int, unregisterSelf bool) {
 	startStopLock.Lock()
 	defer startStopLock.Unlock()
 
-	common.Running = false
-
-	leader.StopLeadershipPeriodicUpdate()
-
-	if trace.IsLogging(logger.INFO) {
-		trace.Info("Stopping in %d seconds", quiesceTime)
+	keepGoing := true
+	if common.Configuration.NodeType == common.ESS || unregisterSelf {
+		// call unregister
+		keepGoing = false
+		if err := communications.Comm.Unregister(); err != nil {
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("In base. err from  unregister: %s\n", err)
+			}
+		}
+		dbPath := common.Configuration.PersistenceRootPath + "/sync/db/ess-sync.db"
+		time.Sleep(time.Duration(1) * time.Second)
+		_, err := os.Stat(dbPath)
+		if os.IsNotExist(err) {
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("In base. ess db is deleted, because got this err when retrieve db file: %s\n", err)
+			}
+			// ess db already been deleted, keep stopping the server
+			keepGoing = true
+		}
 	}
 
-	if quiesceTime > 0 {
-		timer := time.NewTimer(time.Duration(quiesceTime) * time.Second)
-		<-timer.C
+	if !keepGoing {
+		if trace.IsLogging(logger.ERROR) {
+			trace.Error("Got error from ESS unregister, continue on ESS stop.")
+		}
 	}
 
-	stopHTTPServing()
+	if keepGoing {
+		common.Running = false
 
-	communication.StopCommunication()
+		leader.StopLeadershipPeriodicUpdate()
 
-	security.Stop()
+		if trace.IsLogging(logger.INFO) {
+			trace.Info("Stopping in %d seconds", quiesceTime)
+		}
 
-	resendStopChannel <- 1
-	if resendTimer != nil {
-		resendTimer.Stop()
+		if quiesceTime > 0 {
+			timer := time.NewTimer(time.Duration(quiesceTime) * time.Second)
+			<-timer.C
+		}
+
+		stopHTTPServing()
+
+		communication.StopCommunication()
+
+		security.Stop()
+
+		resendStopChannel <- 1
+		if resendTimer != nil {
+			resendTimer.Stop()
+		}
+
+		activateStopChannel <- 1
+		if activateTimer != nil {
+			activateTimer.Stop()
+		}
+
+		maintenanceStopChannel <- 1
+		if maintenanceTimer != nil {
+			maintenanceTimer.Stop()
+		}
+
+		pingStopChannel <- 1
+		if pingTicker != nil {
+			pingTicker.Stop()
+		}
+
+		removeESSStopChannel <- 1
+		if removeESSTicker != nil {
+			removeESSTicker.Stop()
+		}
+
+		common.BlockUntilNoRunningGoRoutines()
+
+		store.Stop()
+
+		if waitingOnBlockChannel {
+			blockChannel <- 1
+		}
+
+		started = false
 	}
-
-	activateStopChannel <- 1
-	if activateTimer != nil {
-		activateTimer.Stop()
-	}
-
-	maintenanceStopChannel <- 1
-	if maintenanceTimer != nil {
-		maintenanceTimer.Stop()
-	}
-
-	pingStopChannel <- 1
-	if pingTicker != nil {
-		pingTicker.Stop()
-	}
-
-	removeESSStopChannel <- 1
-	if removeESSTicker != nil {
-		removeESSTicker.Stop()
-	}
-
-	common.BlockUntilNoRunningGoRoutines()
-
-	store.Stop()
-
-	if waitingOnBlockChannel {
-		blockChannel <- 1
-	}
-
-	started = false
 }
 
 // BlockUntilShutdown blocks the current "thread"

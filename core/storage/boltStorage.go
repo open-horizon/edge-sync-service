@@ -196,13 +196,21 @@ func (store *BoltStorage) PerformMaintenance() {
 	}
 }
 
-// Cleanup erase the on disk Bolt database
-func (store *BoltStorage) Cleanup() {
-	if err := os.Remove(common.Configuration.PersistenceRootPath + "/sync/db/sync.db"); err != nil {
+// Cleanup erase the on disk Bolt database only for ESS and test
+func (store *BoltStorage) Cleanup(isTest bool) common.SyncServiceError {
+	var dbPath string
+	if isTest {
+		dbPath = common.Configuration.PersistenceRootPath + "/sync/db/sync.db"
+	} else {
+		dbPath = common.Configuration.PersistenceRootPath + "/sync/db/ess-sync.db"
+	}
+	if err := os.Remove(dbPath); err != nil {
 		if log.IsLogging(logger.ERROR) {
 			log.Error("Failed to remove Bolt database")
 		}
+		return err
 	}
+	return nil
 }
 
 // StoreObject stores an object
@@ -1338,6 +1346,52 @@ func (store *BoltStorage) GetObjectsForDestination(orgID string, destType string
 		objectStatuses = append(objectStatuses, objectStatus)
 	}
 	return objectStatuses, nil
+}
+
+// RetrieveAllObjectsAndUpdateDestinationListForDestination retrieves objects that are in use on a given node and returns the list of metadata
+func (store *BoltStorage) RetrieveAllObjectsAndUpdateDestinationListForDestination(destOrgID string, destType string, destID string) ([]common.MetaData, common.SyncServiceError) {
+	// 1. retrieve metadata
+	metadataList := make([]common.MetaData, 0)
+
+	function := func(object boltObject) {
+		for _, destination := range object.Destinations {
+			if destOrgID == destination.Destination.DestOrgID && destType == destination.Destination.DestType && destID == destination.Destination.DestID {
+				metadataList = append(metadataList, object.Meta)
+				break
+			}
+		}
+	}
+
+	if err := store.retrieveObjectsHelper(function); err != nil {
+		return nil, err
+	}
+
+	// 2. update destination
+	function2 := func(object boltObject) (*boltObject, common.SyncServiceError) {
+		found := false
+		updatedDestinationList := make([]common.StoreDestinationStatus, 0)
+		for _, destination := range object.Destinations {
+			if destOrgID == destination.Destination.DestOrgID && destType == destination.Destination.DestType && destID == destination.Destination.DestID {
+				// find the object to update destinations
+				found = true
+			} else {
+				updatedDestinationList = append(updatedDestinationList, destination)
+			}
+		}
+
+		if found {
+			object.Destinations = updatedDestinationList
+			return &object, nil
+		}
+
+		return nil, nil
+	}
+
+	if err := store.updateObjectsHelper(function2); err != nil {
+		return nil, err
+	}
+
+	return metadataList, nil
 }
 
 // RetrieveObjectAndRemovedDestinationPolicyServices returns the object metadata and removedDestinationPolicyServices with the specified param, only for ESS

@@ -33,7 +33,7 @@ func TestBoltStorageNotifications(t *testing.T) {
 
 func TestBoltStorageDestinations(t *testing.T) {
 	store := &BoltStorage{}
-	store.Cleanup()
+	store.Cleanup(true)
 	common.Configuration.NodeType = common.ESS
 	dir, _ := os.Getwd()
 	common.Configuration.PersistenceRootPath = dir + "/persist"
@@ -101,7 +101,7 @@ func TestBoltStorageDestinations(t *testing.T) {
 	}
 
 	// CSS
-	store.Cleanup()
+	store.Cleanup(true)
 	common.Configuration.NodeType = common.CSS
 
 	for _, test := range tests {
@@ -156,7 +156,7 @@ func TestBoltStorageDestinations(t *testing.T) {
 
 func TestBoltCacheStorageDestinations(t *testing.T) {
 	boltStore := &BoltStorage{}
-	boltStore.Cleanup()
+	boltStore.Cleanup(true)
 	store := &Cache{Store: boltStore}
 	if err := store.Init(); err != nil {
 		t.Errorf("Failed to initialize storage driver. Error: %s\n", err.Error())

@@ -20,7 +20,7 @@ func setupDB(dbType string) {
 		dir, _ := os.Getwd()
 		common.Configuration.PersistenceRootPath = dir + "/persist"
 		boltStore := &storage.BoltStorage{}
-		boltStore.Cleanup()
+		boltStore.Cleanup(true)
 		store = boltStore
 	} else {
 		store = &storage.InMemoryStorage{}
@@ -808,7 +808,7 @@ func TestObjectWithPolicyAPI(t *testing.T) {
 	dir, _ := os.Getwd()
 	common.Configuration.PersistenceRootPath = dir + "/persist"
 	boltStore := &storage.BoltStorage{}
-	boltStore.Cleanup()
+	boltStore.Cleanup(true)
 	store = boltStore
 	testObjectWithPolicyAPI(store, t)
 }

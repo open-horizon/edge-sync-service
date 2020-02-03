@@ -269,6 +269,11 @@ func (store *MongoStorage) PerformMaintenance() {
 	store.checkObjects()
 }
 
+// Cleanup erase the on disk Bolt database only for ESS and test
+func (store *MongoStorage) Cleanup(isTest bool) common.SyncServiceError {
+	return nil
+}
+
 // GetObjectsToActivate returns inactive objects that are ready to be activated
 func (store *MongoStorage) GetObjectsToActivate() ([]common.MetaData, common.SyncServiceError) {
 	currentTime := time.Now().UTC().Format(time.RFC3339)
@@ -1473,6 +1478,56 @@ func (store *MongoStorage) GetObjectsForDestination(orgID string, destType strin
 		objectStatuses = append(objectStatuses, objectStatus)
 	}
 	return objectStatuses, nil
+}
+
+// RetrieveAllObjectsAndUpdateDestinationListForDestination retrieves objects that are in use on a given node and the destination status
+func (store *MongoStorage) RetrieveAllObjectsAndUpdateDestinationListForDestination(destOrgID string, destType string, destID string) ([]common.MetaData, common.SyncServiceError) {
+	result := []object{}
+
+	query := bson.M{}
+	subquery := bson.M{
+		"$elemMatch": bson.M{
+			"destination.destination-org-id": destOrgID,
+			"destination.destination-type":   destType,
+			"destination.destination-id":     destID,
+		},
+	}
+	query["destinations"] = subquery
+
+	if err := store.fetchAll(objects, query, nil, &result); err != nil {
+		switch err {
+		case mgo.ErrNotFound:
+			return nil, nil
+		default:
+			return nil, &Error{fmt.Sprintf("Failed to fetch the objects for destination %s %s %s from storage. Error: %s.", destOrgID, destType, destID, err)}
+		}
+	}
+
+	metaDatas := make([]common.MetaData, len(result))
+	for i, r := range result {
+		metaDatas[i] = r.MetaData
+		updatedDestinationList := make([]common.StoreDestinationStatus, 0)
+		for _, dest := range r.Destinations {
+			if dest.Destination.DestOrgID == destOrgID && dest.Destination.DestType == destType && dest.Destination.DestID == destID {
+			} else {
+				updatedDestinationList = append(updatedDestinationList, dest)
+			}
+		}
+
+		query := bson.M{
+			"$set":         bson.M{"destinations": updatedDestinationList},
+			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+		}
+		if err := store.update(objects, bson.M{"_id": r.ID, "last-update": r.LastUpdate}, query); err != nil {
+			if err == mgo.ErrNotFound {
+				continue
+			}
+			emptyMeta := make([]common.MetaData, 0)
+			return emptyMeta, &Error{fmt.Sprintf("Failed to update object's destinations. Error: %s.", err)}
+		}
+
+	}
+	return metaDatas, nil
 }
 
 // RetrieveObjectAndRemovedDestinationPolicyServices returns the object metadata and removedDestinationPolicyServices with the specified param, only for ESS

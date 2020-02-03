@@ -30,7 +30,7 @@ func TestNotificationHandler(t *testing.T) {
 	common.Configuration.PersistenceRootPath = dir + "/persist"
 	common.Configuration.StorageProvider = common.Bolt
 	boltStore := &storage.BoltStorage{}
-	boltStore.Cleanup()
+	boltStore.Cleanup(true)
 	Store = boltStore
 	if err := Store.Init(); err != nil {
 		t.Errorf("Failed to initialize storage driver. Error: %s\n", err.Error())
@@ -954,7 +954,7 @@ func setUpStorage(storageType string) (storage.Storage, error) {
 		dir, _ := os.Getwd()
 		common.Configuration.PersistenceRootPath = dir + "/persist"
 		boltStore := &storage.BoltStorage{}
-		boltStore.Cleanup()
+		boltStore.Cleanup(true)
 		store = &storage.Cache{Store: boltStore}
 	} else {
 		common.Configuration.MongoDbName = "d_test_db"

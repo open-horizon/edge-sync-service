@@ -55,6 +55,11 @@ func (store *Cache) PerformMaintenance() {
 	store.Store.PerformMaintenance()
 }
 
+// Cleanup erase the on disk Bolt database only for ESS and test
+func (store *Cache) Cleanup(isTest bool) common.SyncServiceError {
+	return store.Store.Cleanup(isTest)
+}
+
 // StoreObject stores an object
 func (store *Cache) StoreObject(metaData common.MetaData, data []byte, status string) ([]common.StoreDestinationStatus, common.SyncServiceError) {
 	return store.Store.StoreObject(metaData, data, status)
@@ -370,6 +375,11 @@ func (store *Cache) RetrieveDestinationProtocol(orgID string, destType string, d
 // GetObjectsForDestination retrieves objects that are in use on a given node
 func (store *Cache) GetObjectsForDestination(orgID string, destType string, destID string) ([]common.ObjectStatus, common.SyncServiceError) {
 	return store.Store.GetObjectsForDestination(orgID, destType, destID)
+}
+
+// RetrieveAllObjectsAndUpdateDestinationListForDestination retrieves objects that are in use on a given node and returns the list of metadata
+func (store *Cache) RetrieveAllObjectsAndUpdateDestinationListForDestination(orgID string, destType string, destID string) ([]common.MetaData, common.SyncServiceError) {
+	return store.Store.RetrieveAllObjectsAndUpdateDestinationListForDestination(orgID, destType, destID)
 }
 
 // RetrieveObjectAndRemovedDestinationPolicyServices returns the object metadata and removedDestinationPolicyServices with the specified param, only for ESS
