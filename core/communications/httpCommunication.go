@@ -829,6 +829,7 @@ func (communication *HTTP) handleObjects(writer http.ResponseWriter, request *ht
 			if extractErr != nil {
 				err = extractErr
 			} else {
+				metaData.OwnerID = orgID + "/" + destID
 				err = handleUpdate(*metaData, 1)
 			}
 		case common.Updated:

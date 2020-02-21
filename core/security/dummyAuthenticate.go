@@ -9,6 +9,7 @@ import (
 	"github.com/open-horizon/edge-sync-service/common"
 	"github.com/open-horizon/edge-utilities/logger"
 	"github.com/open-horizon/edge-utilities/logger/log"
+	"github.com/open-horizon/edge-utilities/logger/trace"
 )
 
 // DummyAuthenticate is the dummy implementation of the Authenticate interface.
@@ -91,10 +92,18 @@ func (auth *DummyAuthenticate) Authenticate(request *http.Request) (int, string,
 	if !ok {
 		return AuthFailed, "", ""
 	}
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In dummyAuthenticate.Authenticate: appKey is %s", appKey)
+	}
 
 	parts := strings.Split(appKey, "/")
 	if len(parts) == 3 {
 		return AuthEdgeNode, parts[0], parts[1] + "/" + parts[2]
+	}
+
+	// CSS appKey is (org/userID), used by CSS hznAuthenticator to create object
+	if len(parts) == 2 {
+		return AuthAdmin, parts[0], parts[1]
 	}
 
 	// to mimic anax service authenticator

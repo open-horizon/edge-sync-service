@@ -360,6 +360,10 @@ type MetaData struct {
 	// ChunkSize is an internal field indicating the maximal message payload size.
 	// This field should not be set by users.
 	ChunkSize int `json:"chunkSize" bson:"chunk-size"`
+
+	// OwnerID is an internal field indicating who creates the object
+	// This field should not be set by users
+	OwnerID string `json:"ownerID" bson:"owner-id"`
 }
 
 // ChunkInfo describes chunks for multi-inflight data transfer.
