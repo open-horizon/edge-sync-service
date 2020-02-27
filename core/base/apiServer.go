@@ -1454,7 +1454,7 @@ func handleObjectGetData(orgID string, objectType string, objectID string, write
 //   type: string
 // - name: payload
 //   in: body
-//   description: The object's new data
+//   description: The object's new data. When read data bytes from a file, please set application/octet-stream as Content-Type in header.
 //   required: true
 //   schema:
 //     type: string
@@ -1952,11 +1952,21 @@ func handleUpdateObject(orgID string, objectType string, objectID string, writer
 	var payload objectUpdate
 	err := json.NewDecoder(request.Body).Decode(&payload)
 	if err == nil {
-		if !security.CanUserCreateObject(request, orgID, &payload.Meta) {
+		validateUser, userOrgID, userID := security.CanUserCreateObject(request, orgID, &payload.Meta)
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In handleObjects. validateUser %t %s %s\n", validateUser, userOrgID, userID)
+		}
+		if !validateUser {
 			writer.WriteHeader(http.StatusForbidden)
 			writer.Write(unauthorizedBytes)
 			return
 		}
+
+		// update the ownerID field
+		if common.Configuration.NodeType == common.CSS && payload.Meta.OwnerID != userOrgID+"/"+userID {
+			payload.Meta.OwnerID = userOrgID + "/" + userID
+		}
+
 		if err := UpdateObject(orgID, objectType, objectID, payload.Meta, payload.Data); err == nil {
 			writer.WriteHeader(http.StatusNoContent)
 		} else {

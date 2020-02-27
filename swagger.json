@@ -586,7 +586,7 @@
             "required": true
           },
           {
-            "description": "The object's new data",
+            "description": "The object's new data. When read data bytes from a file, please set application/octet-stream as Content-Type in header.",
             "name": "payload",
             "in": "body",
             "required": true,
@@ -1938,6 +1938,11 @@
           "description": "OriginType is the type of origin of the object. Set by the internal code.\nRead only field, should not be set by users.",
           "type": "string",
           "x-go-name": "OriginType"
+        },
+        "ownerID": {
+          "description": "OwnerID is an internal field indicating who creates the object\nThis field should not be set by users",
+          "type": "string",
+          "x-go-name": "OwnerID"
         },
         "sourceDataUri": {
           "description": "SourceDataURI is a URI indicating where the sender of the object should read the data from.\nCurrently only file URIs are supported.\nThis field is available only when working with the ESS.\nOptional field, if omitted the object's data should be provided by the user.",
