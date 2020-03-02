@@ -24,6 +24,9 @@
           "application/json",
           "text/plain"
         ],
+        "tags": [
+          "CSS"
+        ],
         "summary": "List all known destinations.",
         "operationId": "handleDestinations",
         "parameters": [
@@ -66,6 +69,9 @@
         "produces": [
           "application/json",
           "text/plain"
+        ],
+        "tags": [
+          "CSS"
         ],
         "summary": "List all objects that are in use by the destination.",
         "operationId": "handleDestinationObjects",
@@ -124,6 +130,10 @@
           "application/json",
           "text/plain"
         ],
+        "tags": [
+          "CSS",
+          "ESS"
+        ],
         "summary": "Get health status of the sync service node.",
         "operationId": "handleHealth",
         "parameters": [
@@ -153,6 +163,572 @@
         }
       }
     },
+    "/api/v1/objects/{objectType}": {
+      "get": {
+        "description": "Get objects of the specified object type. Either get all of the objects or just those objects that have pending (unconsumed) updates.\nAn application would typically invoke the latter API periodically to check for updates (an alternative is to use a webhook).",
+        "produces": [
+          "application/json",
+          "text/plain"
+        ],
+        "tags": [
+          "ESS"
+        ],
+        "summary": "Get objects of the specified type.",
+        "operationId": "handleListObjects",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The object type of the objects to return",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "boolean",
+            "description": "When returning updated objects only, whether or not to include the objects that have been marked as received by the application",
+            "name": "received",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated objects response",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/MetaData"
+              }
+            }
+          },
+          "404": {
+            "description": "No updated objects found",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve the updated objects",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "put": {
+        "description": "Register or delete a webhook for the specified object type.\nA webhook is used to process notifications on updates for objects of the specified object type.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "text/plain"
+        ],
+        "tags": [
+          "ESS"
+        ],
+        "summary": "Register or delete a webhook.",
+        "operationId": "handleWebhook",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The object type of the objects for the webhook",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "description": "The webhook's data",
+            "name": "payload",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/webhookUpdate"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Webhook registered/deleted",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to update the webhook's data",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{objectType}/{objectID}": {
+      "get": {
+        "description": "Get the metadata of an object of the specified object type and object ID.\nThe metadata indicates if the objects includes data which can then be obtained using the appropriate API.",
+        "produces": [
+          "application/json",
+          "text/plain"
+        ],
+        "tags": [
+          "ESS"
+        ],
+        "summary": "Get an object.",
+        "operationId": "handleGetObject",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The object type of the object to return",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object to return",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Object response",
+            "schema": {
+              "$ref": "#/definitions/MetaData"
+            }
+          },
+          "404": {
+            "description": "Object not found",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve the object",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "put": {
+        "description": "Update/create the object of the specified object type and object ID.\nIf an object with the same type and ID exists that object is updated, otherwise a new object is created.",
+        "produces": [
+          "text/plain"
+        ],
+        "tags": [
+          "ESS"
+        ],
+        "summary": "Update/create an object.",
+        "operationId": "handleUpdateObject",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The object type of the object to update/create",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object to update/create",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "payload",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/objectUpdate"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Object updated",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to update/create the object",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "delete": {
+        "description": "Delete the object of the specified object type and object ID.\nDestinations of the object will be notified that the object has been deleted.",
+        "produces": [
+          "text/plain"
+        ],
+        "tags": [
+          "ESS"
+        ],
+        "summary": "Delete an object.",
+        "operationId": "handleDeleteObject",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The object type of the object to delete",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object to delete",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Object deleted",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to delete the object",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{objectType}/{objectID}/activate": {
+      "put": {
+        "description": "Mark the object of the specified object type and object ID as active.\nAn object can be created as inactive which means it is not delivered to its destinations.\nThis API is used to activate such objects and initiate the distribution of the object to its destinations.",
+        "produces": [
+          "text/plain"
+        ],
+        "tags": [
+          "ESS"
+        ],
+        "summary": "Mark an object as active.",
+        "operationId": "handleActivateObject",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The object type of the object to mark as active",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object to mark as active",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Object marked as active",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to mark the object active",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{objectType}/{objectID}/consumed": {
+      "put": {
+        "description": "Mark the object of the specified object type and object ID as having been consumed by the application.\nAfter the object is marked as consumed it will not be delivered to the application again (even if the sync service is restarted).",
+        "produces": [
+          "text/plain"
+        ],
+        "tags": [
+          "ESS"
+        ],
+        "summary": "Mark an object as consumed.",
+        "operationId": "handleObjectConsumed",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The object type of the object to mark as consumed",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object to mark as consumed",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Object marked as consumed",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to mark the object consumed",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{objectType}/{objectID}/data": {
+      "get": {
+        "description": "Get the data of the object of the specified object type and object ID.\nThe metadata of the object indicates if the object includes data (noData is false).",
+        "produces": [
+          "application/octet-stream",
+          "text/plain"
+        ],
+        "tags": [
+          "ESS"
+        ],
+        "summary": "Get the data of an object.",
+        "operationId": "handleObjectGetData",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The object type of the object whose data will be retrieved",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object whose data will be retrieved",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Object data",
+            "schema": {
+              "type": "string",
+              "format": "binary"
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve the object's data",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "put": {
+        "description": "Update the data of the object of the specified object type and object ID.\nThe data can be updated without modifying the object's metadata.",
+        "consumes": [
+          "application/octet-stream"
+        ],
+        "produces": [
+          "text/plain"
+        ],
+        "tags": [
+          "ESS"
+        ],
+        "summary": "Update the data of an object.",
+        "operationId": "handleObjectPutData",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The object type of the object whose data will be updated",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object whose data will be updated",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "description": "The object's new data. When read data bytes from a file, please set application/octet-stream as Content-Type in header.",
+            "name": "payload",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "binary"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Object data updated",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "404": {
+            "description": "The specified object doesn't exist",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to update the object's data",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{objectType}/{objectID}/policyreceived": {
+      "put": {
+        "description": "Mark the object of the specified object type and object ID as having its destination policy received\nAfter the object is marked as such it will not be delivered to the application listing objects with\na destination policy, unless it adds \"received=true\" to the query parameters.",
+        "produces": [
+          "text/plain"
+        ],
+        "tags": [
+          "ESS"
+        ],
+        "summary": "Mark an object's destination policy as having been received.",
+        "operationId": "handlePolicyReceived",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The object type of the object to mark as having its destination policy received",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object to mark as having its destination policy received",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Object marked as having its destination policy received",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to mark the object as having its destination policy received",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{objectType}/{objectID}/received": {
+      "put": {
+        "description": "Mark the object of the specified object type and object ID as having been received by the application.\nAfter the object is marked as received it will only be delivered to the application again if specified in the objects request.",
+        "produces": [
+          "text/plain"
+        ],
+        "tags": [
+          "ESS"
+        ],
+        "summary": "Mark an object as received.",
+        "operationId": "handleObjectReceived",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The object type of the object to mark as received",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object to mark as received",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Object marked as received",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to mark the object received",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{objectType}/{objectID}/status": {
+      "get": {
+        "description": "Get the status of the object of the specified object type and object ID.\nThe status can be one of the following:\nnotReady - The object is not ready to be sent to destinations.\nready - The object is ready to be sent to destinations.\nreceived - The object's metadata has been received but not all its data.\ncompletelyReceived - The full object (metadata and data) has been received.\nconsumed - The object has been consumed by the application.\ndeleted - The object was deleted.",
+        "produces": [
+          "text/plain"
+        ],
+        "tags": [
+          "ESS"
+        ],
+        "summary": "Get the status of an object.",
+        "operationId": "handleObjectStatus",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The object type of the object whose status will be retrieved",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object whose status will be retrieved",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Object status",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "notReady",
+                "ready",
+                "received",
+                "completelyReceived",
+                "consumed",
+                "deleted"
+              ]
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve the object's status",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
     "/api/v1/objects/{orgID}/{objectType}": {
       "get": {
         "description": "Get objects of the specified object type. Either get all of the objects or just those objects that have pending (unconsumed) updates.\nAn application would typically invoke the latter API periodically to check for updates (an alternative is to use a webhook).",
@@ -160,12 +736,15 @@
           "application/json",
           "text/plain"
         ],
+        "tags": [
+          "CSS"
+        ],
         "summary": "Get objects of the specified type.",
         "operationId": "handleListObjects",
         "parameters": [
           {
             "type": "string",
-            "description": "The orgID of the objects to return. Present only when working with a CSS, removed from the path when working with an ESS",
+            "description": "The orgID of the objects to return",
             "name": "orgID",
             "in": "path",
             "required": true
@@ -216,12 +795,15 @@
         "produces": [
           "text/plain"
         ],
+        "tags": [
+          "CSS"
+        ],
         "summary": "Register or delete a webhook.",
         "operationId": "handleWebhook",
         "parameters": [
           {
             "type": "string",
-            "description": "The orgID of the objects for the webhook. Present only when working with a CSS, removed from the path when working with an ESS",
+            "description": "The orgID of the objects for the webhook",
             "name": "orgID",
             "in": "path",
             "required": true
@@ -266,12 +848,15 @@
           "application/json",
           "text/plain"
         ],
+        "tags": [
+          "CSS"
+        ],
         "summary": "Get an object.",
         "operationId": "handleGetObject",
         "parameters": [
           {
             "type": "string",
-            "description": "The orgID of the object to return. Present only when working with a CSS, removed from the path when working with an ESS",
+            "description": "The orgID of the object to return.",
             "name": "orgID",
             "in": "path",
             "required": true
@@ -317,12 +902,15 @@
         "produces": [
           "text/plain"
         ],
+        "tags": [
+          "CSS"
+        ],
         "summary": "Update/create an object.",
         "operationId": "handleUpdateObject",
         "parameters": [
           {
             "type": "string",
-            "description": "The orgID of the object to update/create. Present only when working with a CSS, removed from the path when working with an ESS",
+            "description": "The orgID of the object to update/create",
             "name": "orgID",
             "in": "path",
             "required": true
@@ -370,12 +958,15 @@
         "produces": [
           "text/plain"
         ],
+        "tags": [
+          "CSS"
+        ],
         "summary": "Delete an object.",
         "operationId": "handleDeleteObject",
         "parameters": [
           {
             "type": "string",
-            "description": "The orgID of the object to delete. Present only when working with a CSS, removed from the path when working with an ESS",
+            "description": "The orgID of the object to delete.",
             "name": "orgID",
             "in": "path",
             "required": true
@@ -417,12 +1008,15 @@
         "produces": [
           "text/plain"
         ],
+        "tags": [
+          "CSS"
+        ],
         "summary": "Mark an object as active.",
         "operationId": "handleActivateObject",
         "parameters": [
           {
             "type": "string",
-            "description": "The orgID of the object to mark as active. Present only when working with a CSS, removed from the path when working with an ESS",
+            "description": "The orgID of the object to mark as active",
             "name": "orgID",
             "in": "path",
             "required": true
@@ -464,12 +1058,15 @@
         "produces": [
           "text/plain"
         ],
+        "tags": [
+          "CSS"
+        ],
         "summary": "Mark an object as consumed.",
         "operationId": "handleObjectConsumed",
         "parameters": [
           {
             "type": "string",
-            "description": "The orgID of the object to mark as consumed. Present only when working with a CSS, removed from the path when working with an ESS",
+            "description": "The orgID of the object to mark as consumed.",
             "name": "orgID",
             "in": "path",
             "required": true
@@ -512,12 +1109,15 @@
           "application/octet-stream",
           "text/plain"
         ],
+        "tags": [
+          "CSS"
+        ],
         "summary": "Get the data of an object.",
         "operationId": "handleObjectGetData",
         "parameters": [
           {
             "type": "string",
-            "description": "The orgID of the object whose data will be retrieved. Present only when working with a CSS, removed from the path when working with an ESS",
+            "description": "The orgID of the object whose data will be retrieved",
             "name": "orgID",
             "in": "path",
             "required": true
@@ -561,12 +1161,15 @@
         "produces": [
           "text/plain"
         ],
+        "tags": [
+          "CSS"
+        ],
         "summary": "Update the data of an object.",
         "operationId": "handleObjectPutData",
         "parameters": [
           {
             "type": "string",
-            "description": "The orgID of the object whose data will be updated. Present only when working with a CSS, removed from the path when working with an ESS",
+            "description": "The orgID of the object whose data will be updated",
             "name": "orgID",
             "in": "path",
             "required": true
@@ -624,6 +1227,10 @@
         "produces": [
           "text/plain"
         ],
+        "tags": [
+          "CSS",
+          "ESS"
+        ],
         "summary": "The service confirms object deletion.",
         "operationId": "handleObjectDeleted",
         "parameters": [
@@ -670,6 +1277,9 @@
         "description": "Get the list of sync service (ESS) nodes which are the destinations of the object of the specified object type and object ID.\nThe delivery status of the object is provided for each destination along with its type and ID.\nThis is a CSS only API.",
         "produces": [
           "text/plain"
+        ],
+        "tags": [
+          "CSS"
         ],
         "summary": "Get the destinations of an object.",
         "operationId": "handleObjectDestinations",
@@ -721,6 +1331,9 @@
         ],
         "produces": [
           "text/plain"
+        ],
+        "tags": [
+          "CSS"
         ],
         "summary": "Set the destinations of an object.",
         "operationId": "handleObjectDestinationsUpdate",
@@ -781,12 +1394,15 @@
         "produces": [
           "text/plain"
         ],
+        "tags": [
+          "CSS"
+        ],
         "summary": "Mark an object's destination policy as having been received.",
         "operationId": "handlePolicyReceived",
         "parameters": [
           {
             "type": "string",
-            "description": "The orgID of the object to mark as having its destination policy received. Present only when working with a CSS, removed from the path when working with an ESS",
+            "description": "The orgID of the object to mark as having its destination policy received.",
             "name": "orgID",
             "in": "path",
             "required": true
@@ -828,12 +1444,15 @@
         "produces": [
           "text/plain"
         ],
+        "tags": [
+          "CSS"
+        ],
         "summary": "Mark an object as received.",
         "operationId": "handleObjectReceived",
         "parameters": [
           {
             "type": "string",
-            "description": "The orgID of the object to mark as received.",
+            "description": "The orgID of the object to mark as received",
             "name": "orgID",
             "in": "path",
             "required": true
@@ -875,12 +1494,15 @@
         "produces": [
           "text/plain"
         ],
+        "tags": [
+          "CSS"
+        ],
         "summary": "Get the status of an object.",
         "operationId": "handleObjectStatus",
         "parameters": [
           {
             "type": "string",
-            "description": "The orgID of the object whose status will be retrieved. Present only when working with a CSS, removed from the path when working with an ESS",
+            "description": "The orgID of the object whose status will be retrieved",
             "name": "orgID",
             "in": "path",
             "required": true
@@ -931,16 +1553,12 @@
           "application/json",
           "text/plain"
         ],
+        "tags": [
+          "ESS"
+        ],
         "summary": "Get objects with a destination policy of the specified type.",
         "operationId": "handleListAllObjects",
         "parameters": [
-          {
-            "type": "string",
-            "description": "The orgID of the objects to return. Present only when working with a CSS, removed from the path when working with an ESS",
-            "name": "orgID",
-            "in": "path",
-            "required": true
-          },
           {
             "type": "string",
             "description": "The object type of the objects to return",
@@ -988,12 +1606,15 @@
           "application/json",
           "text/plain"
         ],
+        "tags": [
+          "CSS"
+        ],
         "summary": "Get objects that have destination policies.",
         "operationId": "handleListObjectsWithDestinationPolicy",
         "parameters": [
           {
             "type": "string",
-            "description": "The orgID of the updated objects to return. Present only when working with a CSS, removed from the path when working with an ESS",
+            "description": "The orgID of the updated objects to return",
             "name": "orgID",
             "in": "path",
             "required": true
@@ -1056,6 +1677,9 @@
         "produces": [
           "application/json",
           "text/plain"
+        ],
+        "tags": [
+          "CSS"
         ],
         "summary": "Get objects satisfy the given filters",
         "operationId": "handleListObjectsWithFilters",
@@ -1160,12 +1784,80 @@
         }
       }
     },
+    "/api/v1/objects?destination_policy=true": {
+      "get": {
+        "description": "Get the list of objects that have destination policies.\nAn application would typically invoke this API periodically to check for updates.",
+        "produces": [
+          "application/json",
+          "text/plain"
+        ],
+        "tags": [
+          "ESS"
+        ],
+        "summary": "Get objects that have destination policies.",
+        "operationId": "handleListObjectsWithDestinationPolicy",
+        "parameters": [
+          {
+            "type": "boolean",
+            "description": "Must be true to indicate that objects with destinationPolicy are to be retrieved",
+            "name": "destination_policy",
+            "in": "query",
+            "required": true
+          },
+          {
+            "type": "boolean",
+            "description": "Whether or not to include the objects that have been marked as received by the application",
+            "name": "received",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "The ID of the service (orgID/serviceName) to which objects have affinity, whose Destination Policy should be fetched.",
+            "name": "service",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "Objects that have a Destination Policy which was updated since the specified UTC time in nanoseconds should be fetched.",
+            "name": "since",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Object destination policy response",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ObjectDestinationPolicy"
+              }
+            }
+          },
+          "404": {
+            "description": "No updated objects found",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve the updated objects",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
     "/api/v1/organizations": {
       "get": {
         "description": "Get the list of existing organizations. Relevant to CSS only.",
         "produces": [
           "application/json",
           "text/plain"
+        ],
+        "tags": [
+          "CSS"
         ],
         "summary": "Get organizations.",
         "operationId": "handleGetOrganizations",
@@ -1196,9 +1888,12 @@
     },
     "/api/v1/organizations/{orgID}": {
       "put": {
-        "description": "Store organization information.",
+        "description": "Store organization information. Relevant to CSS only.",
         "produces": [
           "text/plain"
+        ],
+        "tags": [
+          "CSS"
         ],
         "summary": "Update organization.",
         "operationId": "handleOrganizations",
@@ -1235,9 +1930,12 @@
         }
       },
       "delete": {
-        "description": "Remove organization information and clean up all resources (objects, destinations, etc.) all resources (objects, destinations, etc.) associated\nwith the deleted organization.",
+        "description": "Remove organization information and clean up all resources (objects, destinations, etc.) all resources (objects, destinations, etc.) associated\nwith the deleted organization. Relevant to CSS only.",
         "produces": [
           "text/plain"
+        ],
+        "tags": [
+          "CSS"
         ],
         "summary": "Delete organization.",
         "operationId": "handleDeleteOrganization",
@@ -1272,6 +1970,9 @@
         "produces": [
           "text/plain"
         ],
+        "tags": [
+          "ESS"
+        ],
         "summary": "Request to resend objects.",
         "operationId": "handleResend",
         "responses": {
@@ -1294,6 +1995,9 @@
       "get": {
         "produces": [
           "text/plain"
+        ],
+        "tags": [
+          "CSS"
         ],
         "summary": "Retrieve the list of destination or object ACLs for an organization.",
         "operationId": "handleACLGetAll",
@@ -1346,6 +2050,9 @@
       "get": {
         "produces": [
           "text/plain"
+        ],
+        "tags": [
+          "CSS"
         ],
         "summary": "Retrieve the list of usernames from an ACL for a destination type or an object type.",
         "operationId": "handleACLGet",
@@ -1404,6 +2111,9 @@
         "description": "Bulk add/remove of username(s) to/from an ACL for a destination type or an object type. If the\nfirst username is being added, the ACL is created. If the last username is removed, the ACL\nis deleted.",
         "produces": [
           "text/plain"
+        ],
+        "tags": [
+          "CSS"
         ],
         "summary": "Bulk add/remove of username(s) to/from an ACL for a destination type or an object type.",
         "operationId": "handleBulkACLUpdate",
@@ -1464,6 +2174,9 @@
         "produces": [
           "text/plain"
         ],
+        "tags": [
+          "CSS"
+        ],
         "summary": "Add a username to an ACL for a destination type or an object type.",
         "operationId": "handleACLUpdate",
         "parameters": [
@@ -1519,6 +2232,9 @@
         "description": "Remove a username from an ACL for a destination type or an object type. If the last username is removed,\nthe ACL is deleted as well.",
         "produces": [
           "text/plain"
+        ],
+        "tags": [
+          "CSS"
         ],
         "summary": "Remove a username from an ACL for a destination type or an object type.",
         "operationId": "handleACLDelete",

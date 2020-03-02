@@ -152,6 +152,9 @@ func handleDestinations(writer http.ResponseWriter, request *http.Request) {
 		//
 		// ---
 		//
+		// tags:
+		// - CSS
+		//
 		// produces:
 		// - application/json
 		// - text/plain
@@ -204,6 +207,9 @@ func handleDestinations(writer http.ResponseWriter, request *http.Request) {
 		// This is a CSS only API.
 		//
 		// ---
+		//
+		// tags:
+		// - CSS
 		//
 		// produces:
 		// - application/json
@@ -271,6 +277,9 @@ func handleDestinations(writer http.ResponseWriter, request *http.Request) {
 // An application only needs to use this API in case the data it previously obtained from the ESS was lost.
 //
 // ---
+//
+// tags:
+// - ESS
 //
 // produces:
 // - text/plain
@@ -501,6 +510,9 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 	//
 	// ---
 	//
+	// tags:
+	// - CSS
+	//
 	// produces:
 	// - application/json
 	// - text/plain
@@ -508,9 +520,53 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 	// parameters:
 	// - name: orgID
 	//   in: path
-	//   description: The orgID of the object to return. Present only when working with a CSS, removed from the path when working with an ESS
+	//   description: The orgID of the object to return.
 	//   required: true
 	//   type: string
+	// - name: objectType
+	//   in: path
+	//   description: The object type of the object to return
+	//   required: true
+	//   type: string
+	// - name: objectID
+	//   in: path
+	//   description: The object ID of the object to return
+	//   required: true
+	//   type: string
+	//
+	// responses:
+	//   '200':
+	//     description: Object response
+	//     schema:
+	//       "$ref": "#/definitions/MetaData"
+	//   '404':
+	//     description: Object not found
+	//     schema:
+	//       type: string
+	//   '500':
+	//     description: Failed to retrieve the object
+	//     schema:
+	//       type: string
+
+	// ======================================================================================
+
+	// swagger:operation GET /api/v1/objects/{objectType}/{objectID} handleGetObject
+	//
+	// Get an object.
+	//
+	// Get the metadata of an object of the specified object type and object ID.
+	// The metadata indicates if the objects includes data which can then be obtained using the appropriate API.
+	//
+	// ---
+	//
+	// tags:
+	// - ESS
+	//
+	// produces:
+	// - application/json
+	// - text/plain
+	//
+	// parameters:
 	// - name: objectType
 	//   in: path
 	//   description: The object type of the object to return
@@ -571,15 +627,57 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 	//
 	// ---
 	//
+	// tags:
+	// - CSS
+	//
 	// produces:
 	// - text/plain
 	//
 	// parameters:
 	// - name: orgID
 	//   in: path
-	//   description: The orgID of the object to delete. Present only when working with a CSS, removed from the path when working with an ESS
+	//   description: The orgID of the object to delete.
 	//   required: true
 	//   type: string
+	// - name: objectType
+	//   in: path
+	//   description: The object type of the object to delete
+	//   required: true
+	//   type: string
+	// - name: objectID
+	//   in: path
+	//   description: The object ID of the object to delete
+	//   required: true
+	//   type: string
+	//
+	// responses:
+	//   '204':
+	//     description: Object deleted
+	//     schema:
+	//       type: string
+	//   '500':
+	//     description: Failed to delete the object
+	//     schema:
+	//       type: string
+
+	// ======================================================================================
+
+	// swagger:operation DELETE /api/v1/objects/{objectType}/{objectID} handleDeleteObject
+	//
+	// Delete an object.
+	//
+	// Delete the object of the specified object type and object ID.
+	// Destinations of the object will be notified that the object has been deleted.
+	//
+	// ---
+	//
+	// tags:
+	// - ESS
+	//
+	// produces:
+	// - text/plain
+	//
+	// parameters:
 	// - name: objectType
 	//   in: path
 	//   description: The object type of the object to delete
@@ -631,6 +729,9 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 // This is a CSS only API.
 //
 // ---
+//
+// tags:
+// - CSS
 //
 // produces:
 // - application/json
@@ -886,15 +987,57 @@ func handleObjectOperation(operation string, orgID string, objectType string, ob
 //
 // ---
 //
+// tags:
+// - CSS
+//
 // produces:
 // - text/plain
 //
 // parameters:
 // - name: orgID
 //   in: path
-//   description: The orgID of the object to mark as consumed. Present only when working with a CSS, removed from the path when working with an ESS
+//   description: The orgID of the object to mark as consumed.
 //   required: true
 //   type: string
+// - name: objectType
+//   in: path
+//   description: The object type of the object to mark as consumed
+//   required: true
+//   type: string
+// - name: objectID
+//   in: path
+//   description: The object ID of the object to mark as consumed
+//   required: true
+//   type: string
+//
+// responses:
+//   '204':
+//     description: Object marked as consumed
+//     schema:
+//       type: string
+//   '500':
+//     description: Failed to mark the object consumed
+//     schema:
+//       type: string
+
+// ======================================================================================
+
+// swagger:operation PUT /api/v1/objects/{objectType}/{objectID}/consumed handleObjectConsumed
+//
+// Mark an object as consumed.
+//
+// Mark the object of the specified object type and object ID as having been consumed by the application.
+// After the object is marked as consumed it will not be delivered to the application again (even if the sync service is restarted).
+//
+// ---
+//
+// tags:
+// - ESS
+//
+// produces:
+// - text/plain
+//
+// parameters:
 // - name: objectType
 //   in: path
 //   description: The object type of the object to mark as consumed
@@ -938,6 +1081,10 @@ func handleObjectConsumed(orgID string, objectType string, objectID string, writ
 // The application should invoke this API after it completed the actions associated with deleting the object.
 //
 // ---
+//
+// tags:
+// - CSS
+// - ESS
 //
 // produces:
 // - text/plain
@@ -1000,15 +1147,58 @@ func handleObjectDeleted(orgID string, objectType string, objectID string, write
 //
 // ---
 //
+// tags:
+// - CSS
+//
 // produces:
 // - text/plain
 //
 // parameters:
 // - name: orgID
 //   in: path
-//   description: The orgID of the object to mark as having its destination policy received. Present only when working with a CSS, removed from the path when working with an ESS
+//   description: The orgID of the object to mark as having its destination policy received.
 //   required: true
 //   type: string
+// - name: objectType
+//   in: path
+//   description: The object type of the object to mark as having its destination policy received
+//   required: true
+//   type: string
+// - name: objectID
+//   in: path
+//   description: The object ID of the object to mark as having its destination policy received
+//   required: true
+//   type: string
+//
+// responses:
+//   '204':
+//     description: Object marked as having its destination policy received
+//     schema:
+//       type: string
+//   '500':
+//     description: Failed to mark the object as having its destination policy received
+//     schema:
+//       type: string
+
+// ======================================================================================
+
+// swagger:operation PUT /api/v1/objects/{objectType}/{objectID}/policyreceived handlePolicyReceived
+//
+// Mark an object's destination policy as having been received.
+//
+// Mark the object of the specified object type and object ID as having its destination policy received
+// After the object is marked as such it will not be delivered to the application listing objects with
+// a destination policy, unless it adds "received=true" to the query parameters.
+//
+// ---
+//
+// tags:
+// - ESS
+//
+// produces:
+// - text/plain
+//
+// parameters:
 // - name: objectType
 //   in: path
 //   description: The object type of the object to mark as having its destination policy received
@@ -1057,15 +1247,57 @@ func handlePolicyReceived(orgID string, objectType string, objectID string, writ
 //
 // ---
 //
+// tags:
+// - CSS
+//
 // produces:
 // - text/plain
 //
 // parameters:
 // - name: orgID
 //   in: path
-//   description: The orgID of the object to mark as received.
+//   description: The orgID of the object to mark as received
 //   required: true
 //   type: string
+// - name: objectType
+//   in: path
+//   description: The object type of the object to mark as received
+//   required: true
+//   type: string
+// - name: objectID
+//   in: path
+//   description: The object ID of the object to mark as received
+//   required: true
+//   type: string
+//
+// responses:
+//   '204':
+//     description: Object marked as received
+//     schema:
+//       type: string
+//   '500':
+//     description: Failed to mark the object received
+//     schema:
+//       type: string
+
+// ======================================================================================
+
+// swagger:operation PUT /api/v1/objects/{objectType}/{objectID}/received handleObjectReceived
+//
+// Mark an object as received.
+//
+// Mark the object of the specified object type and object ID as having been received by the application.
+// After the object is marked as received it will only be delivered to the application again if specified in the objects request.
+//
+// ---
+//
+// tags:
+// - ESS
+//
+// produces:
+// - text/plain
+//
+// parameters:
 // - name: objectType
 //   in: path
 //   description: The object type of the object to mark as received
@@ -1111,15 +1343,58 @@ func handleObjectReceived(orgID string, objectType string, objectID string, writ
 //
 // ---
 //
+// tags:
+// - CSS
+//
 // produces:
 // - text/plain
 //
 // parameters:
 // - name: orgID
 //   in: path
-//   description: The orgID of the object to mark as active. Present only when working with a CSS, removed from the path when working with an ESS
+//   description: The orgID of the object to mark as active
 //   required: true
 //   type: string
+// - name: objectType
+//   in: path
+//   description: The object type of the object to mark as active
+//   required: true
+//   type: string
+// - name: objectID
+//   in: path
+//   description: The object ID of the object to mark as active
+//   required: true
+//   type: string
+//
+// responses:
+//   '204':
+//     description: Object marked as active
+//     schema:
+//       type: string
+//   '500':
+//     description: Failed to mark the object active
+//     schema:
+//       type: string
+
+// ======================================================================================
+
+// swagger:operation PUT /api/v1/objects/{objectType}/{objectID}/activate handleActivateObject
+//
+// Mark an object as active.
+//
+// Mark the object of the specified object type and object ID as active.
+// An object can be created as inactive which means it is not delivered to its destinations.
+// This API is used to activate such objects and initiate the distribution of the object to its destinations.
+//
+// ---
+//
+// tags:
+// - ESS
+//
+// produces:
+// - text/plain
+//
+// parameters:
 // - name: objectType
 //   in: path
 //   description: The object type of the object to mark as active
@@ -1171,15 +1446,65 @@ func handleActivateObject(orgID string, objectType string, objectID string, writ
 //
 // ---
 //
+// tags:
+// - CSS
+//
 // produces:
 // - text/plain
 //
 // parameters:
 // - name: orgID
 //   in: path
-//   description: The orgID of the object whose status will be retrieved. Present only when working with a CSS, removed from the path when working with an ESS
+//   description: The orgID of the object whose status will be retrieved
 //   required: true
 //   type: string
+// - name: objectType
+//   in: path
+//   description: The object type of the object whose status will be retrieved
+//   required: true
+//   type: string
+// - name: objectID
+//   in: path
+//   description: The object ID of the object whose status will be retrieved
+//   required: true
+//   type: string
+//
+// responses:
+//   '200':
+//     description: Object status
+//     schema:
+//       type: string
+//       enum: [notReady, ready, received, completelyReceived, consumed, deleted]
+//   '500':
+//     description: Failed to retrieve the object's status
+//     schema:
+//       type: string
+
+// ======================================================================================
+
+// swagger:operation GET /api/v1/objects/{objectType}/{objectID}/status handleObjectStatus
+//
+// Get the status of an object.
+//
+// Get the status of the object of the specified object type and object ID.
+// The status can be one of the following:
+//   notReady - The object is not ready to be sent to destinations.
+//   ready - The object is ready to be sent to destinations.
+//   received - The object's metadata has been received but not all its data.
+//   completelyReceived - The full object (metadata and data) has been received.
+//   consumed - The object has been consumed by the application.
+//   deleted - The object was deleted.
+//
+//
+// ---
+//
+// tags:
+// - ESS
+//
+// produces:
+// - text/plain
+//
+// parameters:
 // - name: objectType
 //   in: path
 //   description: The object type of the object whose status will be retrieved
@@ -1235,6 +1560,9 @@ func handleObjectDestinations(orgID string, objectType string, objectID string, 
 		// This is a CSS only API.
 		//
 		// ---
+		//
+		// tags:
+		// - CSS
 		//
 		// produces:
 		// - text/plain
@@ -1296,6 +1624,9 @@ func handleObjectDestinations(orgID string, objectType string, objectID string, 
 		// This is a CSS only API.
 		//
 		// ---
+		//
+		// tags:
+		// - CSS
 		//
 		// consumes:
 		// - application/json
@@ -1368,6 +1699,9 @@ func handleObjectDestinations(orgID string, objectType string, objectID string, 
 //
 // ---
 //
+// tags:
+// - CSS
+//
 // produces:
 // - application/octet-stream
 // - text/plain
@@ -1375,9 +1709,50 @@ func handleObjectDestinations(orgID string, objectType string, objectID string, 
 // parameters:
 // - name: orgID
 //   in: path
-//   description: The orgID of the object whose data will be retrieved. Present only when working with a CSS, removed from the path when working with an ESS
+//   description: The orgID of the object whose data will be retrieved
 //   required: true
 //   type: string
+// - name: objectType
+//   in: path
+//   description: The object type of the object whose data will be retrieved
+//   required: true
+//   type: string
+// - name: objectID
+//   in: path
+//   description: The object ID of the object whose data will be retrieved
+//   required: true
+//   type: string
+//
+// responses:
+//   '200':
+//     description: Object data
+//     schema:
+//       type: string
+//       format: binary
+//   '500':
+//     description: Failed to retrieve the object's data
+//     schema:
+//       type: string
+
+// ======================================================================================
+
+// swagger:operation GET /api/v1/objects/{objectType}/{objectID}/data handleObjectGetData
+//
+// Get the data of an object.
+//
+// Get the data of the object of the specified object type and object ID.
+// The metadata of the object indicates if the object includes data (noData is false).
+//
+// ---
+//
+// tags:
+// - ESS
+//
+// produces:
+// - application/octet-stream
+// - text/plain
+//
+// parameters:
 // - name: objectType
 //   in: path
 //   description: The object type of the object whose data will be retrieved
@@ -1430,6 +1805,9 @@ func handleObjectGetData(orgID string, objectType string, objectID string, write
 //
 // ---
 //
+// tags:
+// - CSS
+//
 // consumes:
 // - application/octet-stream
 //
@@ -1439,9 +1817,62 @@ func handleObjectGetData(orgID string, objectType string, objectID string, write
 // parameters:
 // - name: orgID
 //   in: path
-//   description: The orgID of the object whose data will be updated. Present only when working with a CSS, removed from the path when working with an ESS
+//   description: The orgID of the object whose data will be updated
 //   required: true
 //   type: string
+// - name: objectType
+//   in: path
+//   description: The object type of the object whose data will be updated
+//   required: true
+//   type: string
+// - name: objectID
+//   in: path
+//   description: The object ID of the object whose data will be updated
+//   required: true
+//   type: string
+// - name: payload
+//   in: body
+//   description: The object's new data. When read data bytes from a file, please set application/octet-stream as Content-Type in header.
+//   required: true
+//   schema:
+//     type: string
+//     format: binary
+//
+// responses:
+//   '204':
+//     description: Object data updated
+//     schema:
+//       type: string
+//   '404':
+//     description: The specified object doesn't exist
+//     schema:
+//       type: string
+//   '500':
+//     description: Failed to update the object's data
+//     schema:
+//       type: string
+
+// ======================================================================================
+
+// swagger:operation PUT /api/v1/objects/{objectType}/{objectID}/data handleObjectPutData
+//
+// Update the data of an object.
+//
+// Update the data of the object of the specified object type and object ID.
+// The data can be updated without modifying the object's metadata.
+//
+// ---
+//
+// tags:
+// - ESS
+//
+// consumes:
+// - application/octet-stream
+//
+// produces:
+// - text/plain
+//
+// parameters:
 // - name: objectType
 //   in: path
 //   description: The object type of the object whose data will be updated
@@ -1497,6 +1928,9 @@ func handleObjectPutData(orgID string, objectType string, objectID string, write
 //
 // ---
 //
+// tags:
+// - CSS
+//
 // produces:
 // - application/json
 // - text/plain
@@ -1504,7 +1938,7 @@ func handleObjectPutData(orgID string, objectType string, objectID string, write
 // parameters:
 // - name: orgID
 //   in: path
-//   description: The orgID of the objects to return. Present only when working with a CSS, removed from the path when working with an ESS
+//   description: The orgID of the objects to return
 //   required: true
 //   type: string
 // - name: objectType
@@ -1533,6 +1967,53 @@ func handleObjectPutData(orgID string, objectType string, objectID string, write
 //     description: Failed to retrieve the updated objects
 //     schema:
 //       type: string
+
+// ======================================================================================
+
+// swagger:operation GET /api/v1/objects/{objectType} handleListObjects
+//
+// Get objects of the specified type.
+//
+// Get objects of the specified object type. Either get all of the objects or just those objects that have pending (unconsumed) updates.
+// An application would typically invoke the latter API periodically to check for updates (an alternative is to use a webhook).
+//
+// ---
+//
+// tags:
+// - ESS
+//
+// produces:
+// - application/json
+// - text/plain
+//
+// parameters:
+// - name: objectType
+//   in: path
+//   description: The object type of the objects to return
+//   required: true
+//   type: string
+// - name: received
+//   in: query
+//   description: When returning updated objects only, whether or not to include the objects that have been marked as received by the application
+//   required: false
+//   type: boolean
+//
+// responses:
+//   '200':
+//     description: Updated objects response
+//     schema:
+//       type: array
+//       items:
+//         "$ref": "#/definitions/MetaData"
+//   '404':
+//     description: No updated objects found
+//     schema:
+//       type: string
+//   '500':
+//     description: Failed to retrieve the updated objects
+//     schema:
+//       type: string
+
 func handleListUpdatedObjects(orgID string, objectType string, received bool, writer http.ResponseWriter,
 	request *http.Request) {
 	if trace.IsLogging(logger.DEBUG) {
@@ -1600,6 +2081,9 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 //
 // ---
 //
+// tags:
+// - CSS
+//
 // produces:
 // - application/json
 // - text/plain
@@ -1607,9 +2091,54 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 // parameters:
 // - name: orgID
 //   in: path
-//   description: The orgID of the objects to return. Present only when working with a CSS, removed from the path when working with an ESS
+//   description: The orgID of the objects to return
 //   required: true
 //   type: string
+// - name: objectType
+//   in: path
+//   description: The object type of the objects to return
+//   required: true
+//   type: string
+// - name: all_objects
+//   in: query
+//   description: Whether or not to include all objects. If false only updated objects will be returned.
+//   required: true
+//   type: boolean
+//
+// responses:
+//   '200':
+//     description: Objects with a destination policy response
+//     schema:
+//       type: array
+//       items:
+//         "$ref": "#/definitions/ObjectDestinationPolicy"
+//   '404':
+//     description: No objects with a destination policy found
+//     schema:
+//       type: string
+//   '500':
+//     description: Failed to retrieve the updated objects
+//     schema:
+//       type: string
+
+// ======================================================================================
+
+// swagger:operation GET /api/v1/objects/{orgID}/{objectType}?all_objects=true handleListAllObjects
+//
+// Get objects with a destination policy of the specified type.
+//
+// Get all objects of the specified object type that have a destination policy.
+//
+// ---
+//
+// tags:
+// - ESS
+//
+// produces:
+// - application/json
+// - text/plain
+//
+// parameters:
 // - name: objectType
 //   in: path
 //   description: The object type of the objects to return
@@ -1688,6 +2217,9 @@ func handleListAllObjects(orgID string, objectType string, writer http.ResponseW
 //
 // ---
 //
+// tags:
+// - CSS
+//
 // produces:
 // - application/json
 // - text/plain
@@ -1695,9 +2227,67 @@ func handleListAllObjects(orgID string, objectType string, writer http.ResponseW
 // parameters:
 // - name: orgID
 //   in: path
-//   description: The orgID of the updated objects to return. Present only when working with a CSS, removed from the path when working with an ESS
+//   description: The orgID of the updated objects to return
 //   required: true
 //   type: string
+// - name: destination_policy
+//   in: query
+//   description: Must be true to indicate that objects with destinationPolicy are to be retrieved
+//   required: true
+//   type: boolean
+// - name: received
+//   in: query
+//   description: Whether or not to include the objects that have been marked as received by the application
+//   required: false
+//   type: boolean
+// - name: service
+//   in: query
+//   description: The ID of the service (orgID/serviceName) to which objects have affinity,
+//        whose Destination Policy should be fetched.
+//   required: false
+//   type: string
+// - name: since
+//   in: query
+//   description: Objects that have a Destination Policy which was updated since the specified UTC time in nanoseconds should be fetched.
+//   required: false
+//   type: integer
+//   format: int64
+//
+// responses:
+//   '200':
+//     description: Object destination policy response
+//     schema:
+//       type: array
+//       items:
+//         "$ref": "#/definitions/ObjectDestinationPolicy"
+//   '404':
+//     description: No updated objects found
+//     schema:
+//       type: string
+//   '500':
+//     description: Failed to retrieve the updated objects
+//     schema:
+//       type: string
+
+// ======================================================================================
+
+// swagger:operation GET /api/v1/objects?destination_policy=true handleListObjectsWithDestinationPolicy
+//
+// Get objects that have destination policies.
+//
+// Get the list of objects that have destination policies.
+// An application would typically invoke this API periodically to check for updates.
+//
+// ---
+//
+// tags:
+// - ESS
+//
+// produces:
+// - application/json
+// - text/plain
+//
+// parameters:
 // - name: destination_policy
 //   in: query
 //   description: Must be true to indicate that objects with destinationPolicy are to be retrieved
@@ -1831,6 +2421,9 @@ func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWr
 //
 // ---
 //
+// tags:
+// - CSS
+//
 // consumes:
 // - application/json
 //
@@ -1840,9 +2433,52 @@ func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWr
 // parameters:
 // - name: orgID
 //   in: path
-//   description: The orgID of the objects for the webhook. Present only when working with a CSS, removed from the path when working with an ESS
+//   description: The orgID of the objects for the webhook
 //   required: true
 //   type: string
+// - name: objectType
+//   in: path
+//   description: The object type of the objects for the webhook
+//   required: true
+//   type: string
+// - name: payload
+//   in: body
+//   description: The webhook's data
+//   required: true
+//   schema:
+//     "$ref": "#/definitions/webhookUpdate"
+//
+// responses:
+//   '204':
+//     description: Webhook registered/deleted
+//     schema:
+//       type: string
+//   '500':
+//     description: Failed to update the webhook's data
+//     schema:
+//       type: string
+
+// ======================================================================================
+
+// swagger:operation PUT /api/v1/objects/{objectType} handleWebhook
+//
+// Register or delete a webhook.
+//
+// Register or delete a webhook for the specified object type.
+// A webhook is used to process notifications on updates for objects of the specified object type.
+//
+// ---
+//
+// tags:
+// - ESS
+//
+// consumes:
+// - application/json
+//
+// produces:
+// - text/plain
+//
+// parameters:
 // - name: objectType
 //   in: path
 //   description: The object type of the objects for the webhook
@@ -1910,15 +2546,62 @@ func handleWebhook(orgID string, objectType string, writer http.ResponseWriter, 
 //
 // ---
 //
+// tags:
+// - CSS
+//
 // produces:
 // - text/plain
 //
 // parameters:
 // - name: orgID
 //   in: path
-//   description: The orgID of the object to update/create. Present only when working with a CSS, removed from the path when working with an ESS
+//   description: The orgID of the object to update/create
 //   required: true
 //   type: string
+// - name: objectType
+//   in: path
+//   description: The object type of the object to update/create
+//   required: true
+//   type: string
+// - name: objectID
+//   in: path
+//   description: The object ID of the object to update/create
+//   required: true
+//   type: string
+// - name: payload
+//   in: body
+//   required: true
+//   schema:
+//     "$ref": "#/definitions/objectUpdate"
+//
+// responses:
+//   '204':
+//     description: Object updated
+//     schema:
+//       type: string
+//   '500':
+//     description: Failed to update/create the object
+//     schema:
+//       type: string
+
+// ======================================================================================
+
+// swagger:operation PUT /api/v1/objects/{objectType}/{objectID} handleUpdateObject
+//
+// Update/create an object.
+//
+// Update/create the object of the specified object type and object ID.
+// If an object with the same type and ID exists that object is updated, otherwise a new object is created.
+//
+// ---
+//
+// tags:
+// - ESS
+//
+// produces:
+// - text/plain
+//
+// parameters:
 // - name: objectType
 //   in: path
 //   description: The object type of the object to update/create
@@ -1984,6 +2667,9 @@ func handleUpdateObject(orgID string, objectType string, objectID string, writer
 // Get the list of existing organizations. Relevant to CSS only.
 //
 // ---
+//
+// tags:
+// - CSS
 //
 // produces:
 // - application/json
@@ -2086,9 +2772,12 @@ func handleOrganizations(writer http.ResponseWriter, request *http.Request) {
 	// Delete organization.
 	//
 	// Remove organization information and clean up all resources (objects, destinations, etc.) all resources (objects, destinations, etc.) associated
-	// with the deleted organization.
+	// with the deleted organization. Relevant to CSS only.
 	//
 	// ---
+	//
+	// tags:
+	// - CSS
 	//
 	// produces:
 	// - text/plain
@@ -2123,9 +2812,12 @@ func handleOrganizations(writer http.ResponseWriter, request *http.Request) {
 	//
 	// Update organization.
 	//
-	// Store organization information.
+	// Store organization information. Relevant to CSS only.
 	//
 	// ---
+	//
+	// tags:
+	// - CSS
 	//
 	// produces:
 	// - text/plain
@@ -2243,6 +2935,9 @@ func handleSecurity(writer http.ResponseWriter, request *http.Request) {
 //
 // ---
 //
+// tags:
+// - CSS
+//
 // produces:
 // - text/plain
 //
@@ -2301,6 +2996,9 @@ func handleACLGet(aclType string, orgID string, parts []string, writer http.Resp
 		//
 		// ---
 		//
+		// tags:
+		// - CSS
+		//
 		// produces:
 		// - text/plain
 		//
@@ -2348,6 +3046,9 @@ func handleACLGet(aclType string, orgID string, parts []string, writer http.Resp
 		// Retrieve the list of destination or object ACLs for an organization.
 		//
 		// ---
+		//
+		// tags:
+		// - CSS
 		//
 		// produces:
 		// - text/plain
@@ -2417,6 +3118,9 @@ func handleACLUpdate(request *http.Request, aclType string, orgID string, parts 
 		//
 		// ---
 		//
+		// tags:
+		// - CSS
+		//
 		// produces:
 		// - text/plain
 		//
@@ -2470,6 +3174,9 @@ func handleACLUpdate(request *http.Request, aclType string, orgID string, parts 
 		// is deleted.
 		//
 		// ---
+		//
+		// tags:
+		// - CSS
 		//
 		// produces:
 		// - text/plain
@@ -2624,6 +3331,10 @@ type healthReport struct {
 // Get health status of the sync service node.
 //
 // ---
+//
+// tags:
+// - CSS
+// - ESS
 //
 // produces:
 // - application/json
