@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	bolt "github.com/etcd-io/bbolt"
 	"github.com/open-horizon/edge-sync-service/common"
 	"github.com/open-horizon/edge-sync-service/core/dataURI"
 	"github.com/open-horizon/edge-utilities/logger"
 	"github.com/open-horizon/edge-utilities/logger/log"
 	"github.com/open-horizon/edge-utilities/logger/trace"
+	bolt "go.etcd.io/bbolt"
 )
 
 const timebaseBucketName = "syncTimebase"

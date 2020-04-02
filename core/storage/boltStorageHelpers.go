@@ -3,9 +3,9 @@ package storage
 import (
 	"encoding/json"
 
-	bolt "github.com/etcd-io/bbolt"
 	"github.com/open-horizon/edge-sync-service/common"
 	"github.com/open-horizon/edge-sync-service/core/dataURI"
+	bolt "go.etcd.io/bbolt"
 )
 
 func (store *BoltStorage) retrieveObjectsHelper(retrieve func(boltObject)) common.SyncServiceError {

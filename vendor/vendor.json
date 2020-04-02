@@ -19,14 +19,6 @@
 			"versionExact": "v1.1.1"
 		},
 		{
-			"checksumSHA1": "ySzd4wbbkGYl9Ch1dJbJOAmNXWQ=",
-			"path": "github.com/etcd-io/bbolt",
-			"revision": "63597a96ec0ad9e6d43c3fc81e809909e0237461",
-			"revisionTime": "2019-01-28T18:11:30Z",
-			"version": "=v1.3.2",
-			"versionExact": "v1.3.2"
-		},
-		{
 			"checksumSHA1": "5paEOrPNmte9PRyvpBF8HTDjQD4=",
 			"path": "github.com/globalsign/mgo",
 			"revision": "113d3961e7311526535a1ef7042196563d442761",
@@ -81,6 +73,12 @@
 			"revisionTime": "2018-09-17T14:00:05Z",
 			"version": "=v1.1.0",
 			"versionExact": "v1.1.0"
+		},
+		{
+			"checksumSHA1": "W/PCjyIexX/4JYyy0xQ9s4GjwVk=",
+			"path": "go.etcd.io/bbolt",
+			"revision": "68cc10a767ea1c6b9e8dcb9847317ff192d6d974",
+			"revisionTime": "2020-03-19T20:29:37Z"
 		},
 		{
 			"checksumSHA1": "f3Y7JIZH61oMmp8nphqe8Mg+XoU=",
