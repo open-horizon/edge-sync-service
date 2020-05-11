@@ -3037,7 +3037,7 @@
           "x-go-name": "Address"
         },
         "org-id": {
-          "description": "Organization OD",
+          "description": "Organization ID",
           "type": "string",
           "x-go-name": "OrgID"
         }
