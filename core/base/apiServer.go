@@ -61,7 +61,7 @@ type webhookUpdate struct {
 // organization includes the organization's id and broker address
 // swagger:model
 type organization struct {
-	// Organization OD
+	// Organization ID
 	OrgID string `json:"org-id"`
 
 	// Broker address
