@@ -1,6 +1,6 @@
-// Package main Edge Syncronization Service
+// Package main Model Management System
 //
-// This is the main package of the edge synchronization service
+// The Model Management System (MMS) delivers AI models and other files needed by edge services to the edge nodes where those services are running. MMS has two components, and therefore two APIs: Cloud Sync Service (CSS) is the MMS component that runs on the management hub that users or devops processes use to load models/files into MMS. The Edge Sync Service (ESS) runs on each edge node and is the API that edge services interact with to get the models/files and find out about updates.
 //
 //   schemes: http
 //   host: localhost
