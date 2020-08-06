@@ -373,9 +373,9 @@ func testHandleObjectHelper(nodeType string, storageType string, t *testing.T) {
 		key     string
 		user    common.ACLentry
 	}{
-		{"objects", "type2", common.ACLentry{ACLType: security.ACLUser, Username: "testUser", ACLRole: security.ACLWriter}},
+		{"objects", "type2", common.ACLentry{ACLType: security.ACLUser, Username: "testerUser", ACLRole: security.ACLWriter}},
 		{"objects", "type3", common.ACLentry{ACLType: security.ACLUser, Username: "*", ACLRole: security.ACLWriter}},
-		{"destinations", "device", common.ACLentry{ACLType: security.ACLUser, Username: "testUser", ACLRole: security.ACLWriter}},
+		{"destinations", "device", common.ACLentry{ACLType: security.ACLUser, Username: "testerUser", ACLRole: security.ACLWriter}},
 		{"destinations", "device2", common.ACLentry{ACLType: security.ACLUser, Username: "*", ACLRole: security.ACLWriter}},
 	}
 
