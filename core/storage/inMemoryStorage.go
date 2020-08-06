@@ -932,17 +932,17 @@ func (store *InMemoryStorage) RetrieveUpdatedOrganizations(time time.Time) ([]co
 }
 
 // AddUsersToACL adds users to an ACL
-func (store *InMemoryStorage) AddUsersToACL(aclType string, orgID string, key string, usernames []string) common.SyncServiceError {
+func (store *InMemoryStorage) AddUsersToACL(aclType string, orgID string, key string, usernames []common.ACLentry) common.SyncServiceError {
 	return nil
 }
 
 // RemoveUsersFromACL removes users from an ACL
-func (store *InMemoryStorage) RemoveUsersFromACL(aclType string, orgID string, key string, usernames []string) common.SyncServiceError {
+func (store *InMemoryStorage) RemoveUsersFromACL(aclType string, orgID string, key string, usernames []common.ACLentry) common.SyncServiceError {
 	return nil
 }
 
 // RetrieveACL retrieves the list of usernames on an ACL
-func (store *InMemoryStorage) RetrieveACL(aclType string, orgID string, key string) ([]string, common.SyncServiceError) {
+func (store *InMemoryStorage) RetrieveACL(aclType string, orgID string, key string, aclUserType string) ([]common.ACLentry, common.SyncServiceError) {
 	return nil, nil
 }
 

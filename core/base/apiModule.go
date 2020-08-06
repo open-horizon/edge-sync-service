@@ -1158,7 +1158,7 @@ func RegisterWebhook(orgID string, objectType string, webhook string) common.Syn
 
 // AddUsersToACL adds users to an ACL.
 // Note: Adding the first user to such an ACL automatically creates it.
-func AddUsersToACL(aclType string, orgID string, key string, usernames []string) common.SyncServiceError {
+func AddUsersToACL(aclType string, orgID string, key string, usernames []common.ACLentry) common.SyncServiceError {
 	common.HealthStatus.ClientRequestReceived()
 
 	apiLock.Lock()
@@ -1168,24 +1168,24 @@ func AddUsersToACL(aclType string, orgID string, key string, usernames []string)
 
 // RemoveUsersFromACL removes users from an ACL.
 // Note: Removing the last user from such an ACL automatically deletes it.
-func RemoveUsersFromACL(aclType string, orgID string, key string, usernames []string) common.SyncServiceError {
+func RemoveUsersFromACL(aclType string, orgID string, key string, users []common.ACLentry) common.SyncServiceError {
 	common.HealthStatus.ClientRequestReceived()
 
 	apiLock.Lock()
 	defer apiLock.Unlock()
-	return store.RemoveUsersFromACL(aclType, orgID, key, usernames)
+	return store.RemoveUsersFromACL(aclType, orgID, key, users)
 }
 
 // RetrieveACL retrieves the list of users in the specified ACL
-func RetrieveACL(aclType string, orgID string, key string) ([]string, common.SyncServiceError) {
+func RetrieveACL(aclType string, orgID string, key string, aclUserType string) ([]common.ACLentry, common.SyncServiceError) {
 	common.HealthStatus.ClientRequestReceived()
 
 	apiLock.RLock()
 	defer apiLock.RUnlock()
-	return store.RetrieveACL(aclType, orgID, key)
+	return store.RetrieveACL(aclType, orgID, key, aclUserType)
 }
 
-// RetrieveACLsInOrg retrieves the list of ACLs of the specified type in an organization
+// RetrieveACLsInOrg retrieves the list of ACLs (object type/destination type) of the specified type in an organization
 func RetrieveACLsInOrg(aclType string, orgID string) ([]string, common.SyncServiceError) {
 	common.HealthStatus.ClientRequestReceived()
 

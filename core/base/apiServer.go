@@ -68,15 +68,15 @@ type organization struct {
 	Address string `json:"address"`
 }
 
-// bulkACLUpdate is the payload used when performing a bulk update on an ACL (either adding usernames to an
-// ACL or removing usernames from an ACL.
+// bulkACLUpdate is the payload used when performing a bulk update on an ACL (either adding uses to an
+// ACL or removing users from an ACL.
 // swagger:model
 type bulkACLUpdate struct {
-	// Action is an action, which can be either add (to add usernames) or remove (to remove usernames)
+	// Action is an action, which can be either add (to add users) or remove (to remove users)
 	Action string `json:"action"`
 
-	// Usernames is an array of usernames to be added or removed from the ACL as appropriate
-	Usernames []string `json:"usernames"`
+	// aclUsers is an array of ACL entries to be added or removed from the ACL as appropriate. Don's specify ACLRole if action is "remove"
+	Users []common.ACLentry `json:"users"`
 }
 
 func setupAPIServer() {
@@ -1908,15 +1908,36 @@ func handleObjectPutData(orgID string, objectType string, objectID string, write
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In handleObjects. Update data %s %s\n", objectType, objectID)
 	}
-	if found, err := PutObjectData(orgID, objectType, objectID, request.Body); err == nil {
-		if !found {
-			writer.WriteHeader(http.StatusNotFound)
-		} else {
-			writer.WriteHeader(http.StatusNoContent)
-		}
-	} else {
+
+	// Retrieve metadata
+	if metaData, err := GetObject(orgID, objectType, objectID); err != nil {
 		communications.SendErrorResponse(writer, err, "", 0)
+	} else {
+		if metaData == nil {
+			writer.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		validateUser, userOrgID, userID := security.CanUserCreateObject(request, orgID, metaData)
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In handleObjectPutData. validateUser %t %s %s\n", validateUser, userOrgID, userID)
+		}
+		if !validateUser {
+			writer.WriteHeader(http.StatusForbidden)
+			writer.Write(unauthorizedBytes)
+			return
+		}
+		if found, err := PutObjectData(orgID, objectType, objectID, request.Body); err == nil {
+			if !found {
+				writer.WriteHeader(http.StatusNotFound)
+			} else {
+				writer.WriteHeader(http.StatusNoContent)
+			}
+		} else {
+			communications.SendErrorResponse(writer, err, "", 0)
+		}
 	}
+
 }
 
 // swagger:operation GET /api/v1/objects/{orgID}/{objectType} handleListObjects
@@ -2901,7 +2922,7 @@ func handleSecurity(writer http.ResponseWriter, request *http.Request) {
 
 	switch request.Method {
 	case http.MethodDelete:
-		if len(parts) != 2 {
+		if len(parts) != 3 {
 			writer.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -2912,13 +2933,32 @@ func handleSecurity(writer http.ResponseWriter, request *http.Request) {
 			writer.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		handleACLGet(aclType, orgID, parts, writer)
+		allKeysString := request.URL.Query().Get("all_keys")
+		allKeys := false
+		if allKeysString != "" {
+			var err error
+			allKeys, err = strconv.ParseBool(allKeysString)
+			if err != nil {
+				writer.WriteHeader(http.StatusBadRequest)
+				return
+			}
+		}
 
-	case http.MethodPut:
-		if len(parts) == 0 {
-			writer.WriteHeader(http.StatusBadRequest)
+		objOrDestType := ""
+		objOrDestType = request.URL.Query().Get("key")
+
+		//acl user type
+		aclUserType := ""
+		aclUserType = request.URL.Query().Get("acl_usertype")
+
+		if aclUserType != "" && aclUserType != security.ACLUser && aclUserType != security.ACLNode {
+			communications.SendErrorResponse(writer, nil, fmt.Sprintf("Invalid acl user type %s in URL. If specified, the value should be \"user\" or \"node\"", aclUserType), http.StatusBadRequest)
 			return
 		}
+
+		handleACLGet(aclType, orgID, objOrDestType, aclUserType, writer, allKeys)
+
+	case http.MethodPut:
 		handleACLUpdate(request, aclType, orgID, parts, writer)
 
 	default:
@@ -2926,11 +2966,11 @@ func handleSecurity(writer http.ResponseWriter, request *http.Request) {
 	}
 }
 
-// swagger:operation DELETE /api/v1/security/{type}/{orgID}/{key}/{username} handleACLDelete
+// swagger:operation DELETE /api/v1/security/{type}/{orgID}/{key}/{aclUserType}/{username} handleACLDelete
 //
-// Remove a username from an ACL for a destination type or an object type.
+// Remove a user from an ACL for a destination type or an object type.
 //
-// Remove a username from an ACL for a destination type or an object type. If the last username is removed,
+// Remove a user from an ACL for a destination type or an object type. If the last username is removed,
 // the ACL is deleted as well.
 //
 // ---
@@ -2958,6 +2998,12 @@ func handleSecurity(writer http.ResponseWriter, request *http.Request) {
 //   description: The destination type or object type that is being protected by the ACL.
 //   required: true
 //   type: string
+// - name: acl_usertype
+//   in: path
+//   description: The acl user type of given username to be deleted
+//   required: true
+//   type: string
+//   enum: [user, node]
 // - name: username
 //   in: path
 //   description: The username to remove from the specified ACL.
@@ -2974,195 +3020,131 @@ func handleSecurity(writer http.ResponseWriter, request *http.Request) {
 //     schema:
 //       type: string
 func handleACLDelete(aclType string, orgID string, parts []string, writer http.ResponseWriter) {
-	usernames := append(make([]string, 0), parts[1])
-	if err := RemoveUsersFromACL(aclType, orgID, parts[0], usernames); err == nil {
+	users := make([]common.ACLentry, 0)
+	user := common.ACLentry{
+		Username: parts[2],
+		ACLType:  parts[1],
+		ACLRole:  security.ACLReader, // can be any value, this value will not be used when remove acl from database
+	}
+	users = append(users, user)
+	if err := RemoveUsersFromACL(aclType, orgID, parts[0], users); err == nil {
 		writer.WriteHeader(http.StatusNoContent)
 	} else {
 		communications.SendErrorResponse(writer, err, "", 0)
 	}
 }
 
-func handleACLGet(aclType string, orgID string, parts []string, writer http.ResponseWriter) {
-	var results []string
-	var err error
-	var requestType string
+func handleACLGet(aclType string, orgID string, key string, aclUserType string, writer http.ResponseWriter, allKeysParam bool) {
+	// Get all ACLs
 
-	if len(parts) == 1 {
-		// Get a single ACL
+	// swagger:operation GET /api/v1/security/{type}/{orgID} handleACLGetAll
+	//
+	// Retrieve the list of destination type or object type of ACLs for an organization.
+	//
+	// ---
+	//
+	// tags:
+	// - CSS
+	//
+	// produces:
+	// - text/plain
+	//
+	// parameters:
+	// - name: type
+	//   in: path
+	//   description: The type of the ACL whose username list should be retrieved.
+	//   required: true
+	//   type: string
+	//   enum: [destinations, objects]
+	// - name: orgID
+	//   in: path
+	//   description: The orgID in which the ACL for the destination type or object type exists.
+	//   required: true
+	//   type: string
+	// - name: all_keys
+	//   in: query
+	//   description: If true, display object/destination types that has ACL list associated with
+	//   required: false
+	//   type: boolean
+	// - name: key
+	//   in: query
+	//   description: The destination type or object type that is being protected by the ACL.
+	//   required: false
+	//   type: string
+	// - name: acl_usertype
+	//   in: query
+	//   description: The acl user type (user or node) to retrieve.
+	//   required: false
+	//   type: string
 
-		// swagger:operation GET /api/v1/security/{type}/{orgID}/{key} handleACLGet
-		//
-		// Retrieve the list of usernames from an ACL for a destination type or an object type.
-		//
-		// ---
-		//
-		// tags:
-		// - CSS
-		//
-		// produces:
-		// - text/plain
-		//
-		// parameters:
-		// - name: type
-		//   in: path
-		//   description: The type of the ACL whose username list should be retrieved.
-		//   required: true
-		//   type: string
-		//   enum: [destinations, objects]
-		// - name: orgID
-		//   in: path
-		//   description: The orgID in which the ACL for the destination type or object type exists.
-		//   required: true
-		//   type: string
-		// - name: key
-		//   in: path
-		//   description: The destination type or object type that is being protected by the ACL.
-		//   required: true
-		//   type: string
-		//
-		// responses:
-		//   '200':
-		//     description: The list of usernames was retrieved from the specified ACL.
-		//     schema:
-		//       type: array
-		//       items:
-		//         type: string
-		//   '404':
-		//     description: ACL not found
-		//     schema:
-		//       type: string
-		//   '500':
-		//     description: Failed to retrieve the usernames from the specified ACL.
-		//     schema:
-		//       type: string
+	//
+	// responses:
+	//   '200':
+	//     description: The list of ACLs retrieved of the specified type.
+	//     schema:
+	//       type: array
+	//       items:
+	//         type: string
+	//   '404':
+	//     description: No ACLs found
+	//     schema:
+	//       type: string
+	//   '500':
+	//     description: Failed to retrieve the list of ACLs retrieved of the specified type.
+	//     schema:
+	//       type: string
 
-		results, err = RetrieveACL(aclType, orgID, parts[0])
-		requestType = "usernames"
-	} else {
-		// Get all ACLs
+	requestType := "ACLs"
+	if allKeysParam {
+		keys, err := RetrieveACLsInOrg(aclType, orgID)
+		if err != nil {
+			communications.SendErrorResponse(writer, err, "", 0)
+			return
+		}
 
-		// swagger:operation GET /api/v1/security/{type}/{orgID} handleACLGetAll
-		//
-		// Retrieve the list of destination or object ACLs for an organization.
-		//
-		// ---
-		//
-		// tags:
-		// - CSS
-		//
-		// produces:
-		// - text/plain
-		//
-		// parameters:
-		// - name: type
-		//   in: path
-		//   description: The type of the ACL whose username list should be retrieved.
-		//   required: true
-		//   type: string
-		//   enum: [destinations, objects]
-		// - name: orgID
-		//   in: path
-		//   description: The orgID in which the ACL for the destination type or object type exists.
-		//   required: true
-		//   type: string
-		//
-		// responses:
-		//   '200':
-		//     description: The list of ACLs retrieved of the specified type.
-		//     schema:
-		//       type: array
-		//       items:
-		//         type: string
-		//   '404':
-		//     description: No ACLs found
-		//     schema:
-		//       type: string
-		//   '500':
-		//     description: Failed to retrieve the list of ACLs retrieved of the specified type.
-		//     schema:
-		//       type: string
-
-		requestType = "ACLs"
-		results, err = RetrieveACLsInOrg(aclType, orgID)
-	}
-
-	if err != nil {
-		communications.SendErrorResponse(writer, err, "", 0)
-		return
-	}
-
-	if len(results) == 0 {
-		writer.WriteHeader(http.StatusNotFound)
-	} else {
-		if data, err := json.MarshalIndent(results, "", "  "); err != nil {
-			message := fmt.Sprintf("Failed to marshal the list of %s. Error: ", requestType)
-			communications.SendErrorResponse(writer, err, message, 0)
+		if len(keys) == 0 {
+			writer.WriteHeader(http.StatusNotFound)
 		} else {
-			writer.Header().Add(contentType, applicationJSON)
-			writer.WriteHeader(http.StatusOK)
-			if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
-				log.Error("Failed to write response body, error: " + err.Error())
+			if data, err := json.MarshalIndent(keys, "", "  "); err != nil {
+				message := fmt.Sprintf("Failed to marshal the list of %s. Error: ", requestType)
+				communications.SendErrorResponse(writer, err, message, 0)
+			} else {
+				writer.Header().Add(contentType, applicationJSON)
+				writer.WriteHeader(http.StatusOK)
+				if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+					log.Error("Failed to write response body, error: " + err.Error())
+				}
 			}
 		}
+
+	} else {
+		users, err := RetrieveACL(aclType, orgID, key, aclUserType)
+		if err != nil {
+			communications.SendErrorResponse(writer, err, "", 0)
+			return
+		}
+
+		if len(users) == 0 {
+			writer.WriteHeader(http.StatusNotFound)
+		} else {
+			if data, err := json.MarshalIndent(users, "", "  "); err != nil {
+				message := fmt.Sprintf("Failed to marshal the list of %s. Error: ", requestType)
+				communications.SendErrorResponse(writer, err, message, 0)
+			} else {
+				writer.Header().Add(contentType, applicationJSON)
+				writer.WriteHeader(http.StatusOK)
+				if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+					log.Error("Failed to write response body, error: " + err.Error())
+				}
+			}
+		}
+
 	}
+
 }
 
 func handleACLUpdate(request *http.Request, aclType string, orgID string, parts []string, writer http.ResponseWriter) {
-	if len(parts) == 2 {
-		// swagger:operation PUT /api/v1/security/{type}/{orgID}/{key}/{username} handleACLUpdate
-		//
-		// Add a username to an ACL for a destination type or an object type.
-		//
-		// Add a username to an ACL for a destination type or an object type. If the first username is being added,
-		// the ACL is created.
-		//
-		// ---
-		//
-		// tags:
-		// - CSS
-		//
-		// produces:
-		// - text/plain
-		//
-		// parameters:
-		// - name: type
-		//   in: path
-		//   description: The type of the ACL to which the specified username will be added.
-		//   required: true
-		//   type: string
-		//   enum: [destinations, objects]
-		// - name: orgID
-		//   in: path
-		//   description: The orgID in which the ACL for the destination type or object type exists.
-		//   required: true
-		//   type: string
-		// - name: key
-		//   in: path
-		//   description: The destination type or object type that is being protected by the ACL.
-		//   required: true
-		//   type: string
-		// - name: username
-		//   in: path
-		//   description: The username to add to the specified ACL.
-		//   required: true
-		//   type: string
-		//
-		// responses:
-		//   '204':
-		//     description: The username was added to the specified ACL.
-		//     schema:
-		//       type: string
-		//   '500':
-		//     description: Failed to add the username to the specified ACL.
-		//     schema:
-		//       type: string
-		usernames := append(make([]string, 0), parts[1])
-		if err := AddUsersToACL(aclType, orgID, parts[0], usernames); err == nil {
-			writer.WriteHeader(http.StatusNoContent)
-		} else {
-			communications.SendErrorResponse(writer, err, "", 0)
-		}
-	} else {
+	if len(parts) == 1 {
 		// Bulk add or bulk delete
 
 		// swagger:operation PUT /api/v1/security/{type}/{orgID}/{key} handleBulkACLUpdate
@@ -3170,6 +3152,98 @@ func handleACLUpdate(request *http.Request, aclType string, orgID string, parts 
 		// Bulk add/remove of username(s) to/from an ACL for a destination type or an object type.
 		//
 		// Bulk add/remove of username(s) to/from an ACL for a destination type or an object type. If the
+		// first username is being added, the ACL is created. If the last username is removed, the ACL
+		// is deleted.
+		//
+		// ---
+		//
+		// tags:
+		// - CSS
+		//
+		// produces:
+		// - text/plain
+		//
+		// parameters:
+		// - name: type
+		//   in: path
+		//   description: The type of the ACL to which the specified user(s) will be added/removed.
+		//   required: true
+		//   type: string
+		//   enum: [destinations, objects]
+		// - name: orgID
+		//   in: path
+		//   description: The orgID in which the ACL for the destination type or object type exists.
+		//   required: true
+		//   type: string
+		// - name: key
+		//   in: path
+		//   description: The destination type or object type that is being protected by the ACL.
+		//   required: true
+		//   type: string
+		// - name: payload
+		//   in: body
+		//   required: true
+		//   schema:
+		//     "$ref": "#/definitions/bulkACLUpdate"
+		//
+		// responses:
+		//   '204':
+		//     description: The user(s) were added/removed to/from the specified ACL.
+		//     schema:
+		//       type: string
+		//   '500':
+		//     description: Failed to add/remove the user(s)to/from the specified ACL.
+		//     schema:
+		//       type: string
+		var payload bulkACLUpdate
+		err := json.NewDecoder(request.Body).Decode(&payload)
+		if err == nil {
+
+			var updateErr error
+			var updatedPayload *[]common.ACLentry
+			if strings.EqualFold(payload.Action, "remove") {
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Debug("In handleSecurity. Bulk remove usernames %s\n", parts[0])
+				}
+				if err = security.CheckRemoveACLInputFormat(payload.Users); err != nil {
+					communications.SendErrorResponse(writer, err, "Invalid ACL entry for update. Error: ", http.StatusBadRequest)
+				} else {
+					updateErr = RemoveUsersFromACL(aclType, orgID, parts[0], payload.Users)
+				}
+			} else if strings.EqualFold(payload.Action, "add") {
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Debug("In handleSecurity. Bulk add usernames %s\n", parts[0])
+				}
+				if updatedPayload, err = security.CheckAddACLInputFormat(aclType, payload.Users); err != nil {
+					communications.SendErrorResponse(writer, err, "Invalid ACL entry for update. Error: ", http.StatusBadRequest)
+				} else if updatedPayload != nil {
+					for _, user := range *updatedPayload {
+						fmt.Printf("API check: user acl info is %s:%s:%s \n", user.ACLType, user.Username, user.ACLRole)
+					}
+					updateErr = AddUsersToACL(aclType, orgID, parts[0], *updatedPayload)
+				} else {
+					updateErr = AddUsersToACL(aclType, orgID, parts[0], payload.Users)
+				}
+
+			} else {
+				communications.SendErrorResponse(writer, nil, fmt.Sprintf("Invalid action (%s) in payload.", payload.Action), http.StatusBadRequest)
+			}
+			if updateErr == nil {
+				writer.WriteHeader(http.StatusNoContent)
+			} else {
+				communications.SendErrorResponse(writer, updateErr, "", 0)
+			}
+		} else {
+			communications.SendErrorResponse(writer, err, "Invalid JSON for update. Error: ", http.StatusBadRequest)
+		}
+	} else if len(parts) == 0 {
+		// Bulk add or bulk delete ACL username/nodename for all object or destination types
+
+		// swagger:operation PUT /api/v1/security/{type}/{orgID} handleBulkACLUpdateForAllTypes
+		//
+		// Bulk add/remove of user(s) to/from an ACL for all destination types or all object types.
+		//
+		// Bulk add/remove of user(s) to/from an ACL for all destination types or all object types. If the
 		// first username is being added, the ACL is created. If the last username is removed, the ACL
 		// is deleted.
 		//
@@ -3193,11 +3267,6 @@ func handleACLUpdate(request *http.Request, aclType string, orgID string, parts 
 		//   description: The orgID in which the ACL for the destination type or object type exists.
 		//   required: true
 		//   type: string
-		// - name: key
-		//   in: path
-		//   description: The destination type or object type that is being protected by the ACL.
-		//   required: true
-		//   type: string
 		// - name: payload
 		//   in: body
 		//   required: true
@@ -3216,18 +3285,36 @@ func handleACLUpdate(request *http.Request, aclType string, orgID string, parts 
 		var payload bulkACLUpdate
 		err := json.NewDecoder(request.Body).Decode(&payload)
 		if err == nil {
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("In handleSecurity. Bulk add/remove usernames for all %s types\n", aclType)
+			}
 
 			var updateErr error
+			var updatedPayload *[]common.ACLentry
 			if strings.EqualFold(payload.Action, "remove") {
 				if trace.IsLogging(logger.DEBUG) {
-					trace.Debug("In handleSecurity. Bulk remove usernames %s\n", parts[0])
+					trace.Debug("In handleSecurity. Bulk remove usernames for all %s types\n", aclType)
 				}
-				updateErr = RemoveUsersFromACL(aclType, orgID, parts[0], payload.Usernames)
+				if err = security.CheckRemoveACLInputFormat(payload.Users); err != nil {
+					communications.SendErrorResponse(writer, err, "Invalid ACL entry for update. Error: ", http.StatusBadRequest)
+				} else {
+					updateErr = RemoveUsersFromACL(aclType, orgID, "", payload.Users)
+				}
 			} else if strings.EqualFold(payload.Action, "add") {
 				if trace.IsLogging(logger.DEBUG) {
-					trace.Debug("In handleSecurity. Bulk add usernames %s\n", parts[0])
+					trace.Debug("In handleSecurity. Bulk add usernames for all %s types\n", aclType)
 				}
-				updateErr = AddUsersToACL(aclType, orgID, parts[0], payload.Usernames)
+				// check payload.Usernames in correct format: user:{username}:{aclrole} or node:{nodename}:{aclrole}
+				if updatedPayload, err = security.CheckAddACLInputFormat(aclType, payload.Users); err != nil {
+					communications.SendErrorResponse(writer, err, "Invalid ACL entry for update. Error: ", http.StatusBadRequest)
+				} else if updatedPayload != nil {
+					for _, user := range *updatedPayload {
+						fmt.Printf("API check: user acl info is %s:%s:%s \n", user.ACLType, user.Username, user.ACLRole)
+					}
+					updateErr = AddUsersToACL(aclType, orgID, "", *updatedPayload)
+				} else {
+					updateErr = AddUsersToACL(aclType, orgID, "", payload.Users)
+				}
 			} else {
 				communications.SendErrorResponse(writer, nil, fmt.Sprintf("Invalid action (%s) in payload.", payload.Action), http.StatusBadRequest)
 			}

@@ -369,12 +369,14 @@ func testHandleObjectHelper(nodeType string, storageType string, t *testing.T) {
 	}
 
 	aclInfo := []struct {
-		aclType  string
-		key      string
-		username string
+		aclType string
+		key     string
+		user    common.ACLentry
 	}{
-		{"objects", "type2", "testerUser"}, {"objects", "type3", "*"},
-		{"destinations", "device", "testerUser"}, {"destinations", "device2", "*"},
+		{"objects", "type2", common.ACLentry{ACLType: security.ACLUser, Username: "testUser", ACLRole: security.ACLWriter}},
+		{"objects", "type3", common.ACLentry{ACLType: security.ACLUser, Username: "*", ACLRole: security.ACLWriter}},
+		{"destinations", "device", common.ACLentry{ACLType: security.ACLUser, Username: "testUser", ACLRole: security.ACLWriter}},
+		{"destinations", "device2", common.ACLentry{ACLType: security.ACLUser, Username: "*", ACLRole: security.ACLWriter}},
 	}
 
 	for _, dest := range destInfo {
@@ -384,7 +386,7 @@ func testHandleObjectHelper(nodeType string, storageType string, t *testing.T) {
 	}
 
 	for _, info := range aclInfo {
-		if err := store.AddUsersToACL(info.aclType, "myorg222", info.key, []string{info.username}); err != nil {
+		if err := store.AddUsersToACL(info.aclType, "myorg222", info.key, []common.ACLentry{info.user}); err != nil {
 			t.Errorf("Failed to set up %s ACL. Error: %s\n", info.aclType, err.Error())
 		}
 	}
@@ -490,7 +492,7 @@ func testHandleObjectHelper(nodeType string, storageType string, t *testing.T) {
 	}
 
 	for _, info := range aclInfo {
-		if err := store.RemoveUsersFromACL(info.aclType, "myorg222", info.key, []string{info.username}); err != nil {
+		if err := store.RemoveUsersFromACL(info.aclType, "myorg222", info.key, []common.ACLentry{info.user}); err != nil {
 			t.Errorf("Failed to cleanup %s ACL. Error: %s\n", info.aclType, err.Error())
 		}
 	}

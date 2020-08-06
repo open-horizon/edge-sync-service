@@ -519,6 +519,13 @@ type NotificationInfo struct {
 	MetaData          *MetaData
 }
 
+// ACLentry contains ACL information about each user
+type ACLentry struct {
+	Username string
+	ACLType  string
+	ACLRole  string
+}
+
 // Object status
 const (
 	NotReadyToSend     = "notReady"           // The object is not ready to be sent to the other side

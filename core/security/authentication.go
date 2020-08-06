@@ -20,6 +20,7 @@ type Authentication interface {
 	Start()
 }
 
+// Auth code
 const (
 	// AuthFailed is returned by Authenticate when a call to Athenticate fails
 	AuthFailed = iota
@@ -38,4 +39,29 @@ const (
 
 	// AuthService is returned by Authenticate when the authenticated user is a Service
 	AuthService
+
+	// AuthNodeUser is returned by Authenticate when the authenticate user uses exchange nodeId and nodeToken
+	AuthNodeUser
+)
+
+// ACL user type
+const (
+	// Indicate this entry of ACL is for exchange user
+	ACLUser = "user"
+
+	// Indicate this entry of ACL is for exchange node
+	ACLNode = "node"
+)
+
+// ACL role, only AuthAdmin and AuthSyncAdmin can modify ACL list. This is currently only be used for "objects" ACL. ACL role only applies to "objects". Use "n/a"
+// for destination acls
+const (
+	// username/nodename in ACL list with ACLWriter role has read/write access
+	ACLWriter = "aclWriter"
+
+	// username/nodename in ACL list with ACLReader role has read access only
+	ACLReader = "aclReader"
+
+	// role for destinations acl
+	ACLNA = "na"
 )

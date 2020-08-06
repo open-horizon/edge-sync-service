@@ -513,18 +513,18 @@ func (store *Cache) RetrieveUpdatedOrganizations(time time.Time) ([]common.Store
 }
 
 // AddUsersToACL adds users to an ACL
-func (store *Cache) AddUsersToACL(aclType string, orgID string, key string, usernames []string) common.SyncServiceError {
-	return store.Store.AddUsersToACL(aclType, orgID, key, usernames)
+func (store *Cache) AddUsersToACL(aclType string, orgID string, key string, users []common.ACLentry) common.SyncServiceError {
+	return store.Store.AddUsersToACL(aclType, orgID, key, users)
 }
 
 // RemoveUsersFromACL removes users from an ACL
-func (store *Cache) RemoveUsersFromACL(aclType string, orgID string, key string, usernames []string) common.SyncServiceError {
-	return store.Store.RemoveUsersFromACL(aclType, orgID, key, usernames)
+func (store *Cache) RemoveUsersFromACL(aclType string, orgID string, key string, users []common.ACLentry) common.SyncServiceError {
+	return store.Store.RemoveUsersFromACL(aclType, orgID, key, users)
 }
 
 // RetrieveACL retrieves the list of usernames on an ACL
-func (store *Cache) RetrieveACL(aclType string, orgID string, key string) ([]string, common.SyncServiceError) {
-	return store.Store.RetrieveACL(aclType, orgID, key)
+func (store *Cache) RetrieveACL(aclType string, orgID string, key string, aclUserType string) ([]common.ACLentry, common.SyncServiceError) {
+	return store.Store.RetrieveACL(aclType, orgID, key, aclUserType)
 }
 
 // RetrieveACLsInOrg retrieves the list of ACLs in an organization

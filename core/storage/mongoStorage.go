@@ -97,7 +97,7 @@ type webhookObject struct {
 
 type aclObject struct {
 	ID         string              `bson:"_id"`
-	Usernames  []string            `bson:"usernames"`
+	Users      []common.ACLentry   `bson:"users"`
 	OrgID      string              `bson:"org-id"`
 	ACLType    string              `bson:"acl-type"`
 	LastUpdate bson.MongoTimestamp `bson:"last-update"`
@@ -1950,18 +1950,18 @@ func (store *MongoStorage) RetrieveUpdatedOrganizations(time time.Time) ([]commo
 }
 
 // AddUsersToACL adds users to an ACL
-func (store *MongoStorage) AddUsersToACL(aclType string, orgID string, key string, usernames []string) common.SyncServiceError {
-	return store.addUsersToACLHelper(acls, aclType, orgID, key, usernames)
+func (store *MongoStorage) AddUsersToACL(aclType string, orgID string, key string, users []common.ACLentry) common.SyncServiceError {
+	return store.addUsersToACLHelper(acls, aclType, orgID, key, users)
 }
 
 // RemoveUsersFromACL removes users from an ACL
-func (store *MongoStorage) RemoveUsersFromACL(aclType string, orgID string, key string, usernames []string) common.SyncServiceError {
-	return store.removeUsersFromACLHelper(acls, aclType, orgID, key, usernames)
+func (store *MongoStorage) RemoveUsersFromACL(aclType string, orgID string, key string, users []common.ACLentry) common.SyncServiceError {
+	return store.removeUsersFromACLHelper(acls, aclType, orgID, key, users)
 }
 
 // RetrieveACL retrieves the list of usernames on an ACL
-func (store *MongoStorage) RetrieveACL(aclType string, orgID string, key string) ([]string, common.SyncServiceError) {
-	return store.retrieveACLHelper(acls, aclType, orgID, key)
+func (store *MongoStorage) RetrieveACL(aclType string, orgID string, key string, aclUserType string) ([]common.ACLentry, common.SyncServiceError) {
+	return store.retrieveACLHelper(acls, aclType, orgID, key, aclUserType)
 }
 
 // RetrieveACLsInOrg retrieves the list of ACLs in an organization
