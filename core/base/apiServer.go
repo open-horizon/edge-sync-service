@@ -68,15 +68,15 @@ type organization struct {
 	Address string `json:"address"`
 }
 
-// bulkACLUpdate is the payload used when performing a bulk update on an ACL (either adding usernames to an
-// ACL or removing usernames from an ACL.
+// bulkACLUpdate is the payload used when performing a bulk update on an ACL (either adding uses to an
+// ACL or removing users from an ACL.
 // swagger:model
 type bulkACLUpdate struct {
-	// Action is an action, which can be either add (to add usernames) or remove (to remove usernames)
+	// Action is an action, which can be either add (to add users) or remove (to remove users)
 	Action string `json:"action"`
 
-	// Usernames is an array of usernames to be added or removed from the ACL as appropriate
-	Usernames []string `json:"usernames"`
+	// aclUsers is an array of ACL entries to be added or removed from the ACL as appropriate. Don's specify ACLRole if action is "remove"
+	Users []common.ACLentry `json:"users"`
 }
 
 func setupAPIServer() {
@@ -595,7 +595,8 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleObjects. Get %s %s\n", objectType, objectID)
 		}
-		if code, _ := canUserAccessObject(request, orgID, objectType, objectID, false); code == security.AuthFailed {
+		canAccessAllObjects, code, userID := canUserAccessObject(request, orgID, objectType, objectID, false)
+		if code == security.AuthFailed {
 			writer.WriteHeader(http.StatusForbidden)
 			writer.Write(unauthorizedBytes)
 			return
@@ -604,17 +605,35 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 			communications.SendErrorResponse(writer, err, "", 0)
 		} else {
 			if metaData == nil {
-				writer.WriteHeader(http.StatusNotFound)
-			} else {
-				if data, err := json.MarshalIndent(metaData, "", "  "); err != nil {
-					communications.SendErrorResponse(writer, err, "Failed to marshal metadata. Error: ", 0)
+				if canAccessAllObjects {
+					writer.WriteHeader(http.StatusNotFound)
 				} else {
-					writer.Header().Add(contentType, applicationJSON)
-					writer.WriteHeader(http.StatusOK)
-					if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
-						log.Error("Failed to write response body, error: " + err.Error())
-					}
+					writer.WriteHeader(http.StatusForbidden)
+					writer.Write(unauthorizedBytes)
 				}
+
+			} else {
+				if metaData.Public || canAccessAllObjects {
+					if trace.IsLogging(logger.DEBUG) {
+						trace.Debug("In handleObjects. Object is public %t, given user can access all object for object type(%s) %t\n", metaData.Public, objectType, canAccessAllObjects)
+					}
+					if data, err := json.MarshalIndent(metaData, "", "  "); err != nil {
+						communications.SendErrorResponse(writer, err, "Failed to marshal metadata. Error: ", 0)
+					} else {
+						writer.Header().Add(contentType, applicationJSON)
+						writer.WriteHeader(http.StatusOK)
+						if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+							log.Error("Failed to write response body, error: " + err.Error())
+						}
+					}
+				} else {
+					if trace.IsLogging(logger.DEBUG) {
+						trace.Debug("In handleObjects. Given user %s doesn't have access to object %s %s in org %s\n", userID, objectType, objectID, orgID)
+					}
+					writer.WriteHeader(http.StatusForbidden)
+					writer.Write(unauthorizedBytes)
+				}
+
 			}
 		}
 
@@ -702,11 +721,32 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleObjects. Delete %s %s\n", objectType, objectID)
 		}
-		if code, _ := canUserAccessObject(request, orgID, objectType, objectID, false); code == security.AuthFailed {
+		if _, code, _ := canUserAccessObject(request, orgID, objectType, objectID, false); code == security.AuthFailed {
 			writer.WriteHeader(http.StatusForbidden)
 			writer.Write(unauthorizedBytes)
 			return
+		} else if (code == security.AuthUser || code == security.AuthNodeUser) && common.Configuration.NodeType == common.CSS {
+			// Retrieve metadata, check object type and destination types againest acls
+			if metaData, err := GetObject(orgID, objectType, objectID); err != nil {
+				communications.SendErrorResponse(writer, err, "", 0)
+				return
+			} else {
+				if metaData == nil {
+					writer.WriteHeader(http.StatusNotFound)
+					return
+				}
+				validateUser, userOrgID, userID := security.CanUserCreateObject(request, orgID, metaData)
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Debug("In handleObjects. Delete %s %s. ValidateUser %t %s %s\n", objectType, objectID, validateUser, userOrgID, userID)
+				}
+				if !validateUser {
+					writer.WriteHeader(http.StatusForbidden)
+					writer.Write(unauthorizedBytes)
+					return
+				}
+			}
 		}
+
 		if err := DeleteObject(orgID, objectType, objectID); err != nil {
 			communications.SendErrorResponse(writer, err, "Failed to delete the object. Error: ", 0)
 		} else {
@@ -820,8 +860,10 @@ func handleListObjectsWithFilters(orgID string, writer http.ResponseWriter, requ
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In handleListObjectsWithFilters")
 	}
-	code, userOrgID, _ := security.Authenticate(request)
-	if code != security.AuthSyncAdmin && (code != security.AuthAdmin || userOrgID != orgID) {
+
+	// only allow AuthSyncAdmin, AuthAdmin, AuthUser and AuthNodeUser to access, it is okay if orgID != userOrgID to display "public" object
+	code, userOrgID, userID := security.Authenticate(request)
+	if code == security.AuthFailed || (code != security.AuthSyncAdmin && code != security.AuthAdmin && code != security.AuthUser && code != security.AuthNodeUser) {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
 		return
@@ -923,28 +965,48 @@ func handleListObjectsWithFilters(orgID string, writer http.ResponseWriter, requ
 		if len(objects) == 0 {
 			writer.WriteHeader(http.StatusNotFound)
 		} else {
-			if data, err := json.MarshalIndent(objects, "", "  "); err != nil {
-				communications.SendErrorResponse(writer, err, "Failed to marshal the list of objects with a Metadata. Error: ", 0)
+			if accessibleObjects, err := GetAccessibleObjects(code, orgID, userOrgID, userID, objects); err != nil {
+				communications.SendErrorResponse(writer, err, "Failed to get accessible object. Error: ", 0)
 			} else {
-				writer.Header().Add(contentType, applicationJSON)
-				writer.WriteHeader(http.StatusOK)
-				if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
-					log.Error("Failed to write response body, error: " + err.Error())
+				if data, err := json.MarshalIndent(accessibleObjects, "", "  "); err != nil {
+					communications.SendErrorResponse(writer, err, "Failed to marshal the list of objects with a Metadata. Error: ", 0)
+				} else {
+					writer.Header().Add(contentType, applicationJSON)
+					writer.WriteHeader(http.StatusOK)
+					if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+						log.Error("Failed to write response body, error: " + err.Error())
+					}
 				}
 			}
 		}
-
 	}
-
 }
 
 func handleObjectOperation(operation string, orgID string, objectType string, objectID string, writer http.ResponseWriter, request *http.Request) {
+	var canAccessAllObjects bool
+	var code int
+	var userID string
+
 	if operation != "deleted" {
-		if code, _ := canUserAccessObject(request, orgID, objectType, objectID, false); code == security.AuthFailed {
+		canAccessAllObjects, code, userID = canUserAccessObject(request, orgID, objectType, objectID, false)
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In handleObjectOperation, given user %s with authcode %d canAccessAllObjects: %t\n", userID, code, canAccessAllObjects)
+		}
+		if code == security.AuthFailed {
 			writer.WriteHeader(http.StatusForbidden)
 			writer.Write(unauthorizedBytes)
 			return
 		}
+
+		if operation == "consumed" || operation == "policyreceived" || operation == "received" || operation == "activate" {
+			// all "mark" status API will forbidden user that only have access to "public" object
+			if !canAccessAllObjects {
+				writer.WriteHeader(http.StatusForbidden)
+				writer.Write(unauthorizedBytes)
+				return
+			}
+		}
+
 	}
 
 	switch operation {
@@ -959,13 +1021,13 @@ func handleObjectOperation(operation string, orgID string, objectType string, ob
 	case "activate":
 		handleActivateObject(orgID, objectType, objectID, writer, request)
 	case "status":
-		handleObjectStatus(orgID, objectType, objectID, writer, request)
+		handleObjectStatus(orgID, objectType, objectID, canAccessAllObjects, writer, request)
 	case "destinations":
-		handleObjectDestinations(orgID, objectType, objectID, writer, request)
+		handleObjectDestinations(orgID, objectType, objectID, canAccessAllObjects, writer, request)
 	case "data":
 		switch request.Method {
 		case http.MethodGet:
-			handleObjectGetData(orgID, objectType, objectID, writer)
+			handleObjectGetData(orgID, objectType, objectID, canAccessAllObjects, writer)
 
 		case http.MethodPut:
 			handleObjectPutData(orgID, objectType, objectID, writer, request)
@@ -1116,7 +1178,7 @@ func handleObjectConsumed(orgID string, objectType string, objectID string, writ
 //     schema:
 //       type: string
 func handleObjectDeleted(orgID string, objectType string, objectID string, writer http.ResponseWriter, request *http.Request) {
-	code, serviceID := canUserAccessObject(request, orgID, objectType, objectID, true)
+	canAccessAllObjects, code, serviceID := canUserAccessObject(request, orgID, objectType, objectID, true)
 	if code == security.AuthFailed {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
@@ -1126,6 +1188,13 @@ func handleObjectDeleted(orgID string, objectType string, objectID string, write
 	if request.Method == http.MethodPut {
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleObjects. Deleted %s %s\n", objectType, objectID)
+		}
+		// all "mark" status API will forbidden user that only have access to "public" object
+		if !canAccessAllObjects {
+			writer.WriteHeader(http.StatusForbidden)
+			writer.Write(unauthorizedBytes)
+			return
+
 		}
 		if err := ObjectDeleted(serviceID, orgID, objectType, objectID); err != nil {
 			communications.SendErrorResponse(writer, err, "Failed to confirm object's deletion. Error: ", 0)
@@ -1139,7 +1208,7 @@ func handleObjectDeleted(orgID string, objectType string, objectID string, write
 
 // swagger:operation PUT /api/v1/objects/{orgID}/{objectType}/{objectID}/policyreceived handlePolicyReceived
 //
-// Mark an object's destination policy as having been received.
+// Mark an object's destination policy as having been received. This is a CSS only API
 //
 // Mark the object of the specified object type and object ID as having its destination policy received
 // After the object is marked as such it will not be delivered to the application listing objects with
@@ -1159,46 +1228,6 @@ func handleObjectDeleted(orgID string, objectType string, objectID string, write
 //   description: The orgID of the object to mark as having its destination policy received.
 //   required: true
 //   type: string
-// - name: objectType
-//   in: path
-//   description: The object type of the object to mark as having its destination policy received
-//   required: true
-//   type: string
-// - name: objectID
-//   in: path
-//   description: The object ID of the object to mark as having its destination policy received
-//   required: true
-//   type: string
-//
-// responses:
-//   '204':
-//     description: Object marked as having its destination policy received
-//     schema:
-//       type: string
-//   '500':
-//     description: Failed to mark the object as having its destination policy received
-//     schema:
-//       type: string
-
-// ======================================================================================
-
-// swagger:operation PUT /api/v1/objects/{objectType}/{objectID}/policyreceived handlePolicyReceived
-//
-// Mark an object's destination policy as having been received.
-//
-// Mark the object of the specified object type and object ID as having its destination policy received
-// After the object is marked as such it will not be delivered to the application listing objects with
-// a destination policy, unless it adds "received=true" to the query parameters.
-//
-// ---
-//
-// tags:
-// - ESS
-//
-// produces:
-// - text/plain
-//
-// parameters:
 // - name: objectType
 //   in: path
 //   description: The object type of the object to mark as having its destination policy received
@@ -1526,11 +1555,23 @@ func handleActivateObject(orgID string, objectType string, objectID string, writ
 //     description: Failed to retrieve the object's status
 //     schema:
 //       type: string
-func handleObjectStatus(orgID string, objectType string, objectID string, writer http.ResponseWriter, request *http.Request) {
+func handleObjectStatus(orgID string, objectType string, objectID string, canAccessAllObjects bool, writer http.ResponseWriter, request *http.Request) {
 	if request.Method == http.MethodGet {
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleObjects. Get status of %s %s\n", objectType, objectID)
 		}
+		// if given user only have access to public object, and the retrieved object is private object, return 403
+		if !canAccessAllObjects {
+			if metaData, err := GetObject(orgID, objectType, objectID); err != nil {
+				communications.SendErrorResponse(writer, err, "", 0)
+				return
+			} else if metaData == nil || !metaData.Public {
+				writer.WriteHeader(http.StatusForbidden)
+				writer.Write(unauthorizedBytes)
+				return
+			}
+		}
+
 		if status, err := GetObjectStatus(orgID, objectType, objectID); err != nil {
 			communications.SendErrorResponse(writer, err, "", 0)
 		} else {
@@ -1549,7 +1590,7 @@ func handleObjectStatus(orgID string, objectType string, objectID string, writer
 	}
 }
 
-func handleObjectDestinations(orgID string, objectType string, objectID string, writer http.ResponseWriter, request *http.Request) {
+func handleObjectDestinations(orgID string, objectType string, objectID string, canAccessAllObjects bool, writer http.ResponseWriter, request *http.Request) {
 	if request.Method == http.MethodGet {
 		// swagger:operation GET /api/v1/objects/{orgID}/{objectType}/{objectID}/destinations handleObjectDestinations
 		//
@@ -1598,6 +1639,18 @@ func handleObjectDestinations(orgID string, objectType string, objectID string, 
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleObjects. Get destinations of %s %s\n", objectType, objectID)
 		}
+		// if given user only have access to public object, and the retrieved object is private object, return 403
+		if !canAccessAllObjects {
+			if metaData, err := GetObject(orgID, objectType, objectID); err != nil {
+				communications.SendErrorResponse(writer, err, "", 0)
+				return
+			} else if metaData == nil || !metaData.Public {
+				writer.WriteHeader(http.StatusForbidden)
+				writer.Write(unauthorizedBytes)
+				return
+			}
+		}
+
 		if dests, err := GetObjectDestinationsStatus(orgID, objectType, objectID); err != nil {
 			communications.SendErrorResponse(writer, err, "", 0)
 		} else {
@@ -1671,20 +1724,39 @@ func handleObjectDestinations(orgID string, objectType string, objectID string, 
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleObjects. Set destinations of %s %s\n", objectType, objectID)
 		}
-		var destinationsList []string
-		err := json.NewDecoder(request.Body).Decode(&destinationsList)
-		inputValidated, validateErr := common.ValidateDestinationListInput(destinationsList)
-		if inputValidated && err == nil {
-			if err := UpdateObjectDestinations(orgID, objectType, objectID, destinationsList); err == nil {
-				writer.WriteHeader(http.StatusNoContent)
-			} else {
-				communications.SendErrorResponse(writer, err, "", 0)
-			}
-		} else if !inputValidated {
-			communications.SendErrorResponse(writer, validateErr, "Unsupported char in destinationsList. Error: ", http.StatusBadRequest)
+		if metaData, err := GetObject(orgID, objectType, objectID); err != nil {
+			communications.SendErrorResponse(writer, err, "", 0)
 		} else {
-			communications.SendErrorResponse(writer, err, "Invalid JSON for update. Error: ", http.StatusBadRequest)
+			if metaData == nil {
+				writer.WriteHeader(http.StatusNotFound)
+				return
+			}
+
+			validateUser, userOrgID, userID := security.CanUserCreateObject(request, orgID, metaData)
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("In handleObjectDestinations. validateUser %t %s %s\n", validateUser, userOrgID, userID)
+			}
+			if !validateUser {
+				writer.WriteHeader(http.StatusForbidden)
+				writer.Write(unauthorizedBytes)
+				return
+			}
+			var destinationsList []string
+			err := json.NewDecoder(request.Body).Decode(&destinationsList)
+			inputValidated, validateErr := common.ValidateDestinationListInput(destinationsList)
+			if inputValidated && err == nil {
+				if err := UpdateObjectDestinations(orgID, objectType, objectID, destinationsList); err == nil {
+					writer.WriteHeader(http.StatusNoContent)
+				} else {
+					communications.SendErrorResponse(writer, err, "", 0)
+				}
+			} else if !inputValidated {
+				communications.SendErrorResponse(writer, validateErr, "Unsupported char in destinationsList. Error: ", http.StatusBadRequest)
+			} else {
+				communications.SendErrorResponse(writer, err, "Invalid JSON for update. Error: ", http.StatusBadRequest)
+			}
 		}
+
 	} else {
 		writer.WriteHeader(http.StatusMethodNotAllowed)
 	}
@@ -1774,10 +1846,23 @@ func handleObjectDestinations(orgID string, objectType string, objectID string, 
 //     description: Failed to retrieve the object's data
 //     schema:
 //       type: string
-func handleObjectGetData(orgID string, objectType string, objectID string, writer http.ResponseWriter) {
+func handleObjectGetData(orgID string, objectType string, objectID string, canAccessAllObjects bool, writer http.ResponseWriter) {
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("In handleObjects. Get data %s %s\n", objectType, objectID)
+		trace.Debug("In handleObjects. Get data %s %s, canAccessAllObjects %t\n", objectType, objectID, canAccessAllObjects)
 	}
+
+	// if given user only have access to public object, and the retrieved object is private object, return 403
+	if !canAccessAllObjects {
+		if metaData, err := GetObject(orgID, objectType, objectID); err != nil {
+			communications.SendErrorResponse(writer, err, "", 0)
+			return
+		} else if metaData == nil || !metaData.Public {
+			writer.WriteHeader(http.StatusForbidden)
+			writer.Write(unauthorizedBytes)
+			return
+		}
+	}
+
 	if dataReader, err := GetObjectData(orgID, objectType, objectID); err != nil {
 		communications.SendErrorResponse(writer, err, "", 0)
 	} else {
@@ -1908,15 +1993,36 @@ func handleObjectPutData(orgID string, objectType string, objectID string, write
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In handleObjects. Update data %s %s\n", objectType, objectID)
 	}
-	if found, err := PutObjectData(orgID, objectType, objectID, request.Body); err == nil {
-		if !found {
-			writer.WriteHeader(http.StatusNotFound)
-		} else {
-			writer.WriteHeader(http.StatusNoContent)
-		}
-	} else {
+
+	// Retrieve metadata
+	if metaData, err := GetObject(orgID, objectType, objectID); err != nil {
 		communications.SendErrorResponse(writer, err, "", 0)
+	} else {
+		if metaData == nil {
+			writer.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		validateUser, userOrgID, userID := security.CanUserCreateObject(request, orgID, metaData)
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In handleObjectPutData. validateUser %t %s %s\n", validateUser, userOrgID, userID)
+		}
+		if !validateUser {
+			writer.WriteHeader(http.StatusForbidden)
+			writer.Write(unauthorizedBytes)
+			return
+		}
+		if found, err := PutObjectData(orgID, objectType, objectID, request.Body); err == nil {
+			if !found {
+				writer.WriteHeader(http.StatusNotFound)
+			} else {
+				writer.WriteHeader(http.StatusNoContent)
+			}
+		} else {
+			communications.SendErrorResponse(writer, err, "", 0)
+		}
 	}
+
 }
 
 // swagger:operation GET /api/v1/objects/{orgID}/{objectType} handleListObjects
@@ -2017,10 +2123,10 @@ func handleObjectPutData(orgID string, objectType string, objectID string, write
 func handleListUpdatedObjects(orgID string, objectType string, received bool, writer http.ResponseWriter,
 	request *http.Request) {
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("In handleObjects. List %s, Method %s, orgID %s, objectType %s. Include received %t\n",
+		trace.Debug("In handleListUpdatedObjects. List %s, Method %s, orgID %s, objectType %s. Include received %t\n",
 			objectType, request.Method, orgID, objectType, received)
 	}
-	code, userID := canUserAccessObject(request, orgID, objectType, "", true) //objectID == "", so checkLastDestinationPolicyServices will not be used
+	canAccessAllObjects, code, userID := canUserAccessObject(request, orgID, objectType, "", true) //objectID == "", so checkLastDestinationPolicyServices will not be used
 	if code == security.AuthFailed {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
@@ -2030,9 +2136,24 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 		communications.SendErrorResponse(writer, err, "Failed to fetch the list of updates. Error: ", 0)
 	} else {
 		var result []common.MetaData
+		// CSS or ESS (expect for AuthService)
 		if common.Configuration.NodeType == common.CSS || code != security.AuthService {
-			result = metaData
+			if canAccessAllObjects {
+				result = metaData
+			} else {
+				// only show public
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Debug("In handleListUpdatedObjects. Given user %s %d can only access public objects for objectType %s in org %s\n",
+						userID, code, objectType, orgID)
+				}
+				for _, objMeta := range metaData {
+					if objMeta.Public {
+						result = append(result, objMeta)
+					}
+				}
+			}
 		} else {
+			// ESS && AuthService
 			result = make([]common.MetaData, 0)
 			for _, object := range metaData {
 				//removedDestinationPolicyServices := []common.ServiceID{}
@@ -2123,7 +2244,7 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 
 // ======================================================================================
 
-// swagger:operation GET /api/v1/objects/{orgID}/{objectType}?all_objects=true handleListAllObjects
+// swagger:operation GET /api/v1/objects/{objectType}?all_objects=true handleListAllObjects
 //
 // Get objects with a destination policy of the specified type.
 //
@@ -2167,22 +2288,45 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 //       type: string
 func handleListAllObjects(orgID string, objectType string, writer http.ResponseWriter, request *http.Request) {
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("In handleObjects. List %s, Method %s, orgID %s, objectType %s\n",
+		trace.Debug("In handleListAllObjects. List %s, Method %s, orgID %s, objectType %s\n",
 			objectType, request.Method, orgID, objectType)
 	}
-	code, userID := canUserAccessObject(request, orgID, objectType, "", false)
+
+	canAccessAllObjects, code, userID := canUserAccessObject(request, orgID, objectType, "", false)
 	if code == security.AuthFailed {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
 		return
 	}
+
 	if objects, err := ListAllObjects(orgID, objectType); err != nil {
 		communications.SendErrorResponse(writer, err, "Failed to fetch the list of objects. Error: ", 0)
 	} else {
 		var result []common.ObjectDestinationPolicy
+		// CSS or ESS (expect for AuthService)
 		if common.Configuration.NodeType == common.CSS || code != security.AuthService {
-			result = objects
+			if canAccessAllObjects {
+				result = objects
+			} else {
+				// only show public
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Debug("In handleListAllObjects. Given user %s %d can only access public objects for objectType %s in org %s\n",
+						userID, code, objectType, orgID)
+				}
+				var metaData *common.MetaData
+				for _, objDestPolicy := range objects {
+					if metaData, err = GetObject(objDestPolicy.OrgID, objDestPolicy.ObjectType, objDestPolicy.ObjectID); err != nil {
+						communications.SendErrorResponse(writer, err, "Failed to get entire object from object with destination policy", 0)
+						return
+					}
+					if metaData != nil && metaData.Public {
+						result = append(result, objDestPolicy)
+					}
+				}
+			}
+
 		} else {
+			// ESS && AuthService
 			result = make([]common.ObjectDestinationPolicy, 0)
 			oldPolicyServices := make([]common.ServiceID, 0)
 			for _, object := range objects {
@@ -2328,8 +2472,13 @@ func handleListAllObjects(orgID string, objectType string, writer http.ResponseW
 //       type: string
 func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWriter,
 	request *http.Request) {
-	code, userOrgID, _ := security.Authenticate(request)
-	if code != security.AuthSyncAdmin && (code != security.AuthAdmin || userOrgID != orgID) {
+	code, userOrgID, userID := security.Authenticate(request)
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In handleListObjectsWithDestinationPolicy. code: %d, userOrgID: %s, userID: %s\n", code, userOrgID, userID)
+	}
+
+	// only allow AuthSyncAdmin, AuthAdmin, AuthUser and AuthNodeUser to access, it is okay if orgID != userOrgID to display "public" object
+	if code == security.AuthFailed || (code != security.AuthSyncAdmin && code != security.AuthAdmin && code != security.AuthUser && code != security.AuthNodeUser) {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
 		return
@@ -2399,13 +2548,17 @@ func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWr
 		if len(objects) == 0 {
 			writer.WriteHeader(http.StatusNotFound)
 		} else {
-			if data, err := json.MarshalIndent(objects, "", "  "); err != nil {
-				communications.SendErrorResponse(writer, err, "Failed to marshal the list of objects with a DestinationPolicy. Error: ", 0)
+			if accessibleObjects, err := GetAccessibleObjectsDestinationPolicy(code, orgID, userOrgID, userID, objects); err != nil {
+				communications.SendErrorResponse(writer, err, "Failed to get accessible object. Error: ", 0)
 			} else {
-				writer.Header().Add(contentType, applicationJSON)
-				writer.WriteHeader(http.StatusOK)
-				if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
-					log.Error("Failed to write response body, error: " + err.Error())
+				if data, err := json.MarshalIndent(accessibleObjects, "", "  "); err != nil {
+					communications.SendErrorResponse(writer, err, "Failed to marshal the list of objects with a DestinationPolicy. Error: ", 0)
+				} else {
+					writer.Header().Add(contentType, applicationJSON)
+					writer.WriteHeader(http.StatusOK)
+					if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+						log.Error("Failed to write response body, error: " + err.Error())
+					}
 				}
 			}
 		}
@@ -2505,11 +2658,18 @@ func handleWebhook(orgID string, objectType string, writer http.ResponseWriter, 
 		writer.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	code, _ := canUserAccessObject(request, orgID, objectType, "", false)
+	_, code, userID := canUserAccessObject(request, orgID, objectType, "", false)
 	if code == security.AuthFailed || code == security.AuthService {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
 		return
+	} else if (code == security.AuthUser || code == security.AuthNodeUser) && common.Configuration.NodeType == common.CSS {
+		aclUserType := security.GetACLUserType(code)
+		if validateUser := security.CheckObjectCanBeModifiedByUser(userID, orgID, objectType, aclUserType); !validateUser {
+			writer.WriteHeader(http.StatusForbidden)
+			writer.Write(unauthorizedBytes)
+			return
+		}
 	}
 
 	var hookErr error
@@ -2880,13 +3040,16 @@ func handleSecurity(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	parts := strings.Split(request.URL.Path, "/")
-	if len(parts) < 2 || len(parts) > 4 {
+	if len(parts) < 2 || len(parts) > 5 {
 		writer.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	aclType := parts[0]
 	orgID := parts[1]
 	parts = parts[2:]
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In handleSecurity(), aclType: %s, orgID: %s, len(parts) %d\n", aclType, orgID, len(parts))
+	}
 
 	if code != security.AuthSyncAdmin && userOrg != orgID {
 		writer.WriteHeader(http.StatusForbidden)
@@ -2901,7 +3064,7 @@ func handleSecurity(writer http.ResponseWriter, request *http.Request) {
 
 	switch request.Method {
 	case http.MethodDelete:
-		if len(parts) != 2 {
+		if len(parts) != 3 {
 			writer.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -2912,13 +3075,32 @@ func handleSecurity(writer http.ResponseWriter, request *http.Request) {
 			writer.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		handleACLGet(aclType, orgID, parts, writer)
+		allKeysString := request.URL.Query().Get("all_keys")
+		allKeys := false
+		if allKeysString != "" {
+			var err error
+			allKeys, err = strconv.ParseBool(allKeysString)
+			if err != nil {
+				writer.WriteHeader(http.StatusBadRequest)
+				return
+			}
+		}
 
-	case http.MethodPut:
-		if len(parts) == 0 {
-			writer.WriteHeader(http.StatusBadRequest)
+		objOrDestType := ""
+		objOrDestType = request.URL.Query().Get("key")
+
+		//acl user type
+		aclUserType := ""
+		aclUserType = request.URL.Query().Get("acl_usertype")
+
+		if aclUserType != "" && aclUserType != security.ACLUser && aclUserType != security.ACLNode {
+			communications.SendErrorResponse(writer, nil, fmt.Sprintf("Invalid acl user type %s in URL. If specified, the value should be \"user\" or \"node\"", aclUserType), http.StatusBadRequest)
 			return
 		}
+
+		handleACLGet(aclType, orgID, objOrDestType, aclUserType, writer, allKeys)
+
+	case http.MethodPut:
 		handleACLUpdate(request, aclType, orgID, parts, writer)
 
 	default:
@@ -2926,11 +3108,11 @@ func handleSecurity(writer http.ResponseWriter, request *http.Request) {
 	}
 }
 
-// swagger:operation DELETE /api/v1/security/{type}/{orgID}/{key}/{username} handleACLDelete
+// swagger:operation DELETE /api/v1/security/{type}/{orgID}/{key}/{aclUserType}/{username} handleACLDelete
 //
-// Remove a username from an ACL for a destination type or an object type.
+// Remove a user from an ACL for a destination type or an object type.
 //
-// Remove a username from an ACL for a destination type or an object type. If the last username is removed,
+// Remove a user from an ACL for a destination type or an object type. If the last username is removed,
 // the ACL is deleted as well.
 //
 // ---
@@ -2958,6 +3140,12 @@ func handleSecurity(writer http.ResponseWriter, request *http.Request) {
 //   description: The destination type or object type that is being protected by the ACL.
 //   required: true
 //   type: string
+// - name: acl_usertype
+//   in: path
+//   description: The acl user type of given username to be deleted
+//   required: true
+//   type: string
+//   enum: [user, node]
 // - name: username
 //   in: path
 //   description: The username to remove from the specified ACL.
@@ -2974,195 +3162,131 @@ func handleSecurity(writer http.ResponseWriter, request *http.Request) {
 //     schema:
 //       type: string
 func handleACLDelete(aclType string, orgID string, parts []string, writer http.ResponseWriter) {
-	usernames := append(make([]string, 0), parts[1])
-	if err := RemoveUsersFromACL(aclType, orgID, parts[0], usernames); err == nil {
+	users := make([]common.ACLentry, 0)
+	user := common.ACLentry{
+		Username:    parts[2],
+		ACLUserType: parts[1],
+		ACLRole:     security.ACLReader, // can be any value, this value will not be used when remove acl from database
+	}
+	users = append(users, user)
+	if err := RemoveUsersFromACL(aclType, orgID, parts[0], users); err == nil {
 		writer.WriteHeader(http.StatusNoContent)
 	} else {
 		communications.SendErrorResponse(writer, err, "", 0)
 	}
 }
 
-func handleACLGet(aclType string, orgID string, parts []string, writer http.ResponseWriter) {
-	var results []string
-	var err error
-	var requestType string
+func handleACLGet(aclType string, orgID string, key string, aclUserType string, writer http.ResponseWriter, allKeysParam bool) {
+	// Get all ACLs
 
-	if len(parts) == 1 {
-		// Get a single ACL
+	// swagger:operation GET /api/v1/security/{type}/{orgID} handleACLGetAll
+	//
+	// Retrieve the list of destination type or object type of ACLs for an organization.
+	//
+	// ---
+	//
+	// tags:
+	// - CSS
+	//
+	// produces:
+	// - text/plain
+	//
+	// parameters:
+	// - name: type
+	//   in: path
+	//   description: The type of the ACL whose username list should be retrieved.
+	//   required: true
+	//   type: string
+	//   enum: [destinations, objects]
+	// - name: orgID
+	//   in: path
+	//   description: The orgID in which the ACL for the destination type or object type exists.
+	//   required: true
+	//   type: string
+	// - name: all_keys
+	//   in: query
+	//   description: If true, display object/destination types that has ACL list associated with
+	//   required: false
+	//   type: boolean
+	// - name: key
+	//   in: query
+	//   description: The destination type or object type that is being protected by the ACL.
+	//   required: false
+	//   type: string
+	// - name: acl_usertype
+	//   in: query
+	//   description: The acl user type (user or node) to retrieve.
+	//   required: false
+	//   type: string
 
-		// swagger:operation GET /api/v1/security/{type}/{orgID}/{key} handleACLGet
-		//
-		// Retrieve the list of usernames from an ACL for a destination type or an object type.
-		//
-		// ---
-		//
-		// tags:
-		// - CSS
-		//
-		// produces:
-		// - text/plain
-		//
-		// parameters:
-		// - name: type
-		//   in: path
-		//   description: The type of the ACL whose username list should be retrieved.
-		//   required: true
-		//   type: string
-		//   enum: [destinations, objects]
-		// - name: orgID
-		//   in: path
-		//   description: The orgID in which the ACL for the destination type or object type exists.
-		//   required: true
-		//   type: string
-		// - name: key
-		//   in: path
-		//   description: The destination type or object type that is being protected by the ACL.
-		//   required: true
-		//   type: string
-		//
-		// responses:
-		//   '200':
-		//     description: The list of usernames was retrieved from the specified ACL.
-		//     schema:
-		//       type: array
-		//       items:
-		//         type: string
-		//   '404':
-		//     description: ACL not found
-		//     schema:
-		//       type: string
-		//   '500':
-		//     description: Failed to retrieve the usernames from the specified ACL.
-		//     schema:
-		//       type: string
+	//
+	// responses:
+	//   '200':
+	//     description: The list of ACLs retrieved of the specified type.
+	//     schema:
+	//       type: array
+	//       items:
+	//         type: string
+	//   '404':
+	//     description: No ACLs found
+	//     schema:
+	//       type: string
+	//   '500':
+	//     description: Failed to retrieve the list of ACLs retrieved of the specified type.
+	//     schema:
+	//       type: string
 
-		results, err = RetrieveACL(aclType, orgID, parts[0])
-		requestType = "usernames"
-	} else {
-		// Get all ACLs
+	requestType := "ACLs"
+	if allKeysParam {
+		keys, err := RetrieveACLsInOrg(aclType, orgID)
+		if err != nil {
+			communications.SendErrorResponse(writer, err, "", 0)
+			return
+		}
 
-		// swagger:operation GET /api/v1/security/{type}/{orgID} handleACLGetAll
-		//
-		// Retrieve the list of destination or object ACLs for an organization.
-		//
-		// ---
-		//
-		// tags:
-		// - CSS
-		//
-		// produces:
-		// - text/plain
-		//
-		// parameters:
-		// - name: type
-		//   in: path
-		//   description: The type of the ACL whose username list should be retrieved.
-		//   required: true
-		//   type: string
-		//   enum: [destinations, objects]
-		// - name: orgID
-		//   in: path
-		//   description: The orgID in which the ACL for the destination type or object type exists.
-		//   required: true
-		//   type: string
-		//
-		// responses:
-		//   '200':
-		//     description: The list of ACLs retrieved of the specified type.
-		//     schema:
-		//       type: array
-		//       items:
-		//         type: string
-		//   '404':
-		//     description: No ACLs found
-		//     schema:
-		//       type: string
-		//   '500':
-		//     description: Failed to retrieve the list of ACLs retrieved of the specified type.
-		//     schema:
-		//       type: string
-
-		requestType = "ACLs"
-		results, err = RetrieveACLsInOrg(aclType, orgID)
-	}
-
-	if err != nil {
-		communications.SendErrorResponse(writer, err, "", 0)
-		return
-	}
-
-	if len(results) == 0 {
-		writer.WriteHeader(http.StatusNotFound)
-	} else {
-		if data, err := json.MarshalIndent(results, "", "  "); err != nil {
-			message := fmt.Sprintf("Failed to marshal the list of %s. Error: ", requestType)
-			communications.SendErrorResponse(writer, err, message, 0)
+		if len(keys) == 0 {
+			writer.WriteHeader(http.StatusNotFound)
 		} else {
-			writer.Header().Add(contentType, applicationJSON)
-			writer.WriteHeader(http.StatusOK)
-			if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
-				log.Error("Failed to write response body, error: " + err.Error())
+			if data, err := json.MarshalIndent(keys, "", "  "); err != nil {
+				message := fmt.Sprintf("Failed to marshal the list of %s. Error: ", requestType)
+				communications.SendErrorResponse(writer, err, message, 0)
+			} else {
+				writer.Header().Add(contentType, applicationJSON)
+				writer.WriteHeader(http.StatusOK)
+				if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+					log.Error("Failed to write response body, error: " + err.Error())
+				}
 			}
 		}
+
+	} else {
+		users, err := RetrieveACL(aclType, orgID, key, aclUserType)
+		if err != nil {
+			communications.SendErrorResponse(writer, err, "", 0)
+			return
+		}
+
+		if len(users) == 0 {
+			writer.WriteHeader(http.StatusNotFound)
+		} else {
+			if data, err := json.MarshalIndent(users, "", "  "); err != nil {
+				message := fmt.Sprintf("Failed to marshal the list of %s. Error: ", requestType)
+				communications.SendErrorResponse(writer, err, message, 0)
+			} else {
+				writer.Header().Add(contentType, applicationJSON)
+				writer.WriteHeader(http.StatusOK)
+				if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+					log.Error("Failed to write response body, error: " + err.Error())
+				}
+			}
+		}
+
 	}
+
 }
 
 func handleACLUpdate(request *http.Request, aclType string, orgID string, parts []string, writer http.ResponseWriter) {
-	if len(parts) == 2 {
-		// swagger:operation PUT /api/v1/security/{type}/{orgID}/{key}/{username} handleACLUpdate
-		//
-		// Add a username to an ACL for a destination type or an object type.
-		//
-		// Add a username to an ACL for a destination type or an object type. If the first username is being added,
-		// the ACL is created.
-		//
-		// ---
-		//
-		// tags:
-		// - CSS
-		//
-		// produces:
-		// - text/plain
-		//
-		// parameters:
-		// - name: type
-		//   in: path
-		//   description: The type of the ACL to which the specified username will be added.
-		//   required: true
-		//   type: string
-		//   enum: [destinations, objects]
-		// - name: orgID
-		//   in: path
-		//   description: The orgID in which the ACL for the destination type or object type exists.
-		//   required: true
-		//   type: string
-		// - name: key
-		//   in: path
-		//   description: The destination type or object type that is being protected by the ACL.
-		//   required: true
-		//   type: string
-		// - name: username
-		//   in: path
-		//   description: The username to add to the specified ACL.
-		//   required: true
-		//   type: string
-		//
-		// responses:
-		//   '204':
-		//     description: The username was added to the specified ACL.
-		//     schema:
-		//       type: string
-		//   '500':
-		//     description: Failed to add the username to the specified ACL.
-		//     schema:
-		//       type: string
-		usernames := append(make([]string, 0), parts[1])
-		if err := AddUsersToACL(aclType, orgID, parts[0], usernames); err == nil {
-			writer.WriteHeader(http.StatusNoContent)
-		} else {
-			communications.SendErrorResponse(writer, err, "", 0)
-		}
-	} else {
+	if len(parts) == 1 {
 		// Bulk add or bulk delete
 
 		// swagger:operation PUT /api/v1/security/{type}/{orgID}/{key} handleBulkACLUpdate
@@ -3170,6 +3294,98 @@ func handleACLUpdate(request *http.Request, aclType string, orgID string, parts 
 		// Bulk add/remove of username(s) to/from an ACL for a destination type or an object type.
 		//
 		// Bulk add/remove of username(s) to/from an ACL for a destination type or an object type. If the
+		// first username is being added, the ACL is created. If the last username is removed, the ACL
+		// is deleted.
+		//
+		// ---
+		//
+		// tags:
+		// - CSS
+		//
+		// produces:
+		// - text/plain
+		//
+		// parameters:
+		// - name: type
+		//   in: path
+		//   description: The type of the ACL to which the specified user(s) will be added/removed.
+		//   required: true
+		//   type: string
+		//   enum: [destinations, objects]
+		// - name: orgID
+		//   in: path
+		//   description: The orgID in which the ACL for the destination type or object type exists.
+		//   required: true
+		//   type: string
+		// - name: key
+		//   in: path
+		//   description: The destination type or object type that is being protected by the ACL.
+		//   required: true
+		//   type: string
+		// - name: payload
+		//   in: body
+		//   required: true
+		//   schema:
+		//     "$ref": "#/definitions/bulkACLUpdate"
+		//
+		// responses:
+		//   '204':
+		//     description: The user(s) were added/removed to/from the specified ACL.
+		//     schema:
+		//       type: string
+		//   '500':
+		//     description: Failed to add/remove the user(s)to/from the specified ACL.
+		//     schema:
+		//       type: string
+		var payload bulkACLUpdate
+		err := json.NewDecoder(request.Body).Decode(&payload)
+		if err == nil {
+
+			var updateErr error
+			var updatedPayload *[]common.ACLentry
+			if strings.EqualFold(payload.Action, "remove") {
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Debug("In handleSecurity. Bulk remove usernames %s\n", parts[0])
+				}
+				if err = security.CheckRemoveACLInputFormat(payload.Users); err != nil {
+					communications.SendErrorResponse(writer, err, "Invalid ACL entry for update. Error: ", http.StatusBadRequest)
+					return
+				} else {
+					updateErr = RemoveUsersFromACL(aclType, orgID, parts[0], payload.Users)
+				}
+			} else if strings.EqualFold(payload.Action, "add") {
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Debug("In handleSecurity. Bulk add usernames %s\n", parts[0])
+				}
+				if updatedPayload, err = security.CheckAddACLInputFormat(aclType, payload.Users); err != nil {
+					communications.SendErrorResponse(writer, err, "Invalid ACL entry for update. Error: ", http.StatusBadRequest)
+					return
+				} else if updatedPayload != nil {
+					updateErr = AddUsersToACL(aclType, orgID, parts[0], *updatedPayload)
+				} else {
+					updateErr = AddUsersToACL(aclType, orgID, parts[0], payload.Users)
+				}
+
+			} else {
+				communications.SendErrorResponse(writer, nil, fmt.Sprintf("Invalid action (%s) in payload.", payload.Action), http.StatusBadRequest)
+				return
+			}
+			if updateErr == nil {
+				writer.WriteHeader(http.StatusNoContent)
+			} else {
+				communications.SendErrorResponse(writer, updateErr, "", 0)
+			}
+		} else {
+			communications.SendErrorResponse(writer, err, "Invalid JSON for update. Error: ", http.StatusBadRequest)
+		}
+	} else if len(parts) == 0 {
+		// Bulk add or bulk delete ACL username/nodename for all object or destination types
+
+		// swagger:operation PUT /api/v1/security/{type}/{orgID} handleBulkACLUpdateForAllTypes
+		//
+		// Bulk add/remove of user(s) to/from an ACL for all destination types or all object types.
+		//
+		// Bulk add/remove of user(s) to/from an ACL for all destination types or all object types. If the
 		// first username is being added, the ACL is created. If the last username is removed, the ACL
 		// is deleted.
 		//
@@ -3193,11 +3409,6 @@ func handleACLUpdate(request *http.Request, aclType string, orgID string, parts 
 		//   description: The orgID in which the ACL for the destination type or object type exists.
 		//   required: true
 		//   type: string
-		// - name: key
-		//   in: path
-		//   description: The destination type or object type that is being protected by the ACL.
-		//   required: true
-		//   type: string
 		// - name: payload
 		//   in: body
 		//   required: true
@@ -3216,20 +3427,38 @@ func handleACLUpdate(request *http.Request, aclType string, orgID string, parts 
 		var payload bulkACLUpdate
 		err := json.NewDecoder(request.Body).Decode(&payload)
 		if err == nil {
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("In handleSecurity. Bulk add/remove usernames for all %s types\n", aclType)
+			}
 
 			var updateErr error
+			var updatedPayload *[]common.ACLentry
 			if strings.EqualFold(payload.Action, "remove") {
 				if trace.IsLogging(logger.DEBUG) {
-					trace.Debug("In handleSecurity. Bulk remove usernames %s\n", parts[0])
+					trace.Debug("In handleSecurity. Bulk remove usernames for all %s types\n", aclType)
 				}
-				updateErr = RemoveUsersFromACL(aclType, orgID, parts[0], payload.Usernames)
+				if err = security.CheckRemoveACLInputFormat(payload.Users); err != nil {
+					communications.SendErrorResponse(writer, err, "Invalid ACL entry for update. Error: ", http.StatusBadRequest)
+					return
+				} else {
+					updateErr = RemoveUsersFromACL(aclType, orgID, "", payload.Users)
+				}
 			} else if strings.EqualFold(payload.Action, "add") {
 				if trace.IsLogging(logger.DEBUG) {
-					trace.Debug("In handleSecurity. Bulk add usernames %s\n", parts[0])
+					trace.Debug("In handleSecurity. Bulk add usernames for all %s types\n", aclType)
 				}
-				updateErr = AddUsersToACL(aclType, orgID, parts[0], payload.Usernames)
+				// check payload.Usernames in correct format: user:{username}:{aclrole} or node:{nodename}:{aclrole}
+				if updatedPayload, err = security.CheckAddACLInputFormat(aclType, payload.Users); err != nil {
+					communications.SendErrorResponse(writer, err, "Invalid ACL entry for update. Error: ", http.StatusBadRequest)
+					return
+				} else if updatedPayload != nil {
+					updateErr = AddUsersToACL(aclType, orgID, "", *updatedPayload)
+				} else {
+					updateErr = AddUsersToACL(aclType, orgID, "", payload.Users)
+				}
 			} else {
 				communications.SendErrorResponse(writer, nil, fmt.Sprintf("Invalid action (%s) in payload.", payload.Action), http.StatusBadRequest)
+				return
 			}
 			if updateErr == nil {
 				writer.WriteHeader(http.StatusNoContent)
@@ -3242,21 +3471,33 @@ func handleACLUpdate(request *http.Request, aclType string, orgID string, parts 
 	}
 }
 
-func canUserAccessObject(request *http.Request, orgID, objectType, objectID string, checkLastDestinationPolicyServices bool) (int, string) {
-	code, userID := security.CanUserAccessObject(request, orgID, objectType)
+func canUserAccessObject(request *http.Request, orgID, objectType, objectID string, checkLastDestinationPolicyServices bool) (bool, int, string) {
+	accessToALlObject, code, userID := security.CanUserAccessAllObjects(request, orgID, objectType)
 	if code != security.AuthService || common.Configuration.NodeType == common.CSS || objectID == "" {
-		return code, userID
+		return accessToALlObject, code, userID
 	}
 
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In canUserAccessObject. This is ESS and authcode is %d\n", code)
+	}
+
+	// ESS & authCode is AuthService
 	lockIndex := common.HashStrings(orgID, objectType, objectID)
 	apiObjectLocks.RLock(lockIndex)
 	defer apiObjectLocks.RUnlock(lockIndex)
 
 	metadata, removedDestinationPolicyServices, err := store.RetrieveObjectAndRemovedDestinationPolicyServices(orgID, objectType, objectID)
-	if err == nil && metadata != nil && canServiceAccessObject(userID, metadata.DestinationPolicy, removedDestinationPolicyServices, checkLastDestinationPolicyServices) {
-		return code, userID
+	if err == nil && metadata != nil {
+		if canServiceAccessObject(userID, metadata.DestinationPolicy, removedDestinationPolicyServices, checkLastDestinationPolicyServices) {
+			return true, code, userID
+		}
+
+		// else service do not have access to the object, first returned value should be false
+		if metadata.Public {
+			return false, code, userID
+		}
 	}
-	return security.AuthFailed, ""
+	return false, security.AuthFailed, ""
 }
 
 func canServiceAccessObject(serviceID string, policy *common.Policy, oldPolicyServices []common.ServiceID, checkLastDestinationPolicyServices bool) bool {
@@ -3314,6 +3555,145 @@ func serviceContainedInLastDestinationPolicyServices(serviceID string, oldPolicy
 		}
 	}
 	return false
+}
+
+func GetAccessibleObjects(code int, orgID string, userOrgID string, userID string, objects []common.MetaData) ([]common.MetaData, error) {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In getAccessibleObjects\n")
+	}
+
+	accessibleObjects := make([]common.MetaData, 0)
+
+	if code == security.AuthSyncAdmin || (code == security.AuthAdmin && orgID == userOrgID) {
+		// AuthSyncAdmin: show all objects
+		// AuthAdmin in this org: show all objects
+		accessibleObjects = append(accessibleObjects, objects...)
+	} else if orgID != userOrgID {
+		// different org: only show public objects
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In GetAccessibleObjects, userOrg %s is not same as orgID %s in API path, will return public objects\n", userID, orgID)
+		}
+		for _, objMeta := range objects {
+			if objMeta.Public {
+				//add object to accessableObjects
+				accessibleObjects = append(accessibleObjects, objMeta)
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Debug("In handleListObjectsWithFilters, add public object %s %s %s to result\n", objMeta.DestOrgID, objMeta.ObjectType, objMeta.ObjectID)
+				}
+			}
+		}
+
+	} else if code == security.AuthUser || code == security.AuthNodeUser {
+		// same org, only can see result by AuthUser or AuthNodeUser, need to check ACL. Return the accessable objects, and public objects
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("Get objects in same org. Check if object type is accessable by given user (%d, %s, %s)\n", code, userID, userOrgID)
+		}
+		aclUserType := security.GetACLUserType(code)
+
+		if accessToALlTypes, accessibleObjectTypes, err := security.CheckObjectTypesCanBeAccessByGivenUser(orgID, aclUserType, userID); err != nil {
+			return make([]common.MetaData, 0), err
+		} else if accessToALlTypes {
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("Given user (%d, %s, %s) have access to all object types\n", code, userID, userOrgID)
+			}
+			accessibleObjects = append(accessibleObjects, objects...)
+		} else {
+			for _, objmeta := range objects {
+				if objmeta.Public || common.StringListContains(accessibleObjectTypes, objmeta.ObjectType) {
+					if trace.IsLogging(logger.DEBUG) {
+						trace.Debug("Object type %s is accessble by user %s:%s in orgID %s\n", objmeta.ObjectType, aclUserType, userID, orgID)
+					}
+					//add object to accessableObjects
+					accessibleObjects = append(accessibleObjects, objmeta)
+				}
+			}
+		}
+	}
+
+	return accessibleObjects, nil
+}
+
+func GetAccessibleObjectsDestinationPolicy(code int, orgID string, userOrgID string, userID string, objects []common.ObjectDestinationPolicy) ([]common.ObjectDestinationPolicy, error) {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In GetAccessibleObjectsDestinationPolicy\n")
+	}
+
+	accessibleObjects := make([]common.ObjectDestinationPolicy, 0)
+
+	if code == security.AuthSyncAdmin || (code == security.AuthAdmin && orgID == userOrgID) {
+		// AuthSyncAdmin: show all objects
+		// AuthAdmin in this org: show all objects
+		accessibleObjects = append(accessibleObjects, objects...)
+	} else if orgID != userOrgID {
+		// different org: only show public objects
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("UserOrg %s is not same as orgID %s in API path, will return public objects\n", userID, orgID)
+		}
+		for _, objDestPolicy := range objects {
+			if metaData, err := GetObject(objDestPolicy.OrgID, objDestPolicy.ObjectType, objDestPolicy.ObjectID); err != nil {
+				// communications.SendErrorResponse(writer, err, "Failed to get entire object from object with destination policy", 0)
+				// return
+				return make([]common.ObjectDestinationPolicy, 0), err
+			} else {
+				if metaData.Public {
+					//add object to accessableObjects
+					accessibleObjects = append(accessibleObjects, objDestPolicy)
+					if trace.IsLogging(logger.DEBUG) {
+						trace.Debug("Add public object %s %s %s to result\n", objDestPolicy.OrgID, objDestPolicy.ObjectType, objDestPolicy.ObjectID)
+					}
+				}
+			}
+		}
+
+	} else if code == security.AuthUser || code == security.AuthNodeUser {
+		// same org, only can see result by AuthUser or AuthNodeUser, need to check ACL. Return the accessable objects, and public objects
+		aclUserType := security.GetACLUserType(code)
+
+		if accessToALlTypes, accessibleObjectTypes, err := security.CheckObjectTypesCanBeAccessByGivenUser(orgID, aclUserType, userID); err != nil {
+			// communications.SendErrorResponse(writer, err, "Get accessable objects for user. Error: ", 0)
+			// return
+			return make([]common.ObjectDestinationPolicy, 0), err
+		} else if accessToALlTypes {
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("Given user (%d, %s, %s) have access to all object types\n", code, userID, userOrgID)
+			}
+			accessibleObjects = append(accessibleObjects, objects...)
+		} else {
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("AccessableObjectTypes len is: %d\n", len(accessibleObjectTypes))
+			}
+			for _, objDestPolicy := range objects {
+				if common.StringListContains(accessibleObjectTypes, objDestPolicy.ObjectType) {
+					if trace.IsLogging(logger.DEBUG) {
+						trace.Debug("Object type %s is accessble by user %s:%s in orgID %s\n", objDestPolicy.ObjectType, aclUserType, userID, orgID)
+					}
+
+					//add object to accessableObjects
+					accessibleObjects = append(accessibleObjects, objDestPolicy)
+				} else {
+					// check if object is public
+					if metaData, err := GetObject(objDestPolicy.OrgID, objDestPolicy.ObjectType, objDestPolicy.ObjectID); err != nil {
+						return make([]common.ObjectDestinationPolicy, 0), err
+					} else {
+						if metaData.Public {
+							//add object to accessableObjects
+							accessibleObjects = append(accessibleObjects, objDestPolicy)
+							if trace.IsLogging(logger.DEBUG) {
+								trace.Debug("Add public object %s %s %s to result\n", objDestPolicy.OrgID, objDestPolicy.ObjectType, objDestPolicy.ObjectID)
+							}
+						}
+					}
+				}
+			}
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("AccessableObjects len is: %d\n", len(accessibleObjects))
+			}
+
+		}
+
+	}
+	// else, accessibleObjects is empty
+	return accessibleObjects, nil
 }
 
 // swagger:model

@@ -271,16 +271,19 @@ type Storage interface {
 	RetrieveUpdatedOrganizations(time time.Time) ([]common.StoredOrganization, common.SyncServiceError)
 
 	// AddUsersToACL adds users to an ACL
-	AddUsersToACL(aclType string, orgID string, key string, username []string) common.SyncServiceError
+	AddUsersToACL(aclType string, orgID string, key string, users []common.ACLentry) common.SyncServiceError
 
 	// RemoveUsersFromACL removes users from an ACL
-	RemoveUsersFromACL(aclType string, orgID string, key string, username []string) common.SyncServiceError
+	RemoveUsersFromACL(aclType string, orgID string, key string, users []common.ACLentry) common.SyncServiceError
 
 	// RetrieveACL retrieves the list of usernames on an ACL
-	RetrieveACL(aclType string, orgID string, key string) ([]string, common.SyncServiceError)
+	RetrieveACL(aclType string, orgID string, key string, aclUserType string) ([]common.ACLentry, common.SyncServiceError)
 
 	// RetrieveACLsInOrg retrieves the list of ACLs in an organization
 	RetrieveACLsInOrg(aclType string, orgID string) ([]string, common.SyncServiceError)
+
+	// RetrieveObjOrDestTypeForGivenACLUser retrieves object types that given acl user has access to
+	RetrieveObjOrDestTypeForGivenACLUser(aclType string, orgID string, aclUserType string, aclUsername string, aclRole string) ([]string, common.SyncServiceError)
 
 	// IsConnected returns false if the storage cannont be reached, and true otherwise
 	IsConnected() bool

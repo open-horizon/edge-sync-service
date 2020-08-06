@@ -44,8 +44,10 @@ func (auth *TestAuthenticate) Authenticate(request *http.Request) (int, string, 
 	user := parts[0]
 	orgID := parts[1]
 	var code int
-	if user == "testerUser" {
+	if user == "testerUser" || user == "testerUser1" || user == "testerUser2" || user == "testerUserCanAccessAllTypes" {
 		code = AuthUser
+	} else if user == "testerNode" || user == "testerNode1" || user == "testerNode2" || user == "testerNodeCanAccessAllTypes" {
+		code = AuthNodeUser
 	} else if user == "testerAdmin" {
 		code = AuthAdmin
 	} else if user == "testerSyncAdmin" {
