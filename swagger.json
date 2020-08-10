@@ -10,8 +10,8 @@
   ],
   "swagger": "2.0",
   "info": {
-    "description": "This is the main package of the edge synchronization service",
-    "title": "Edge Syncronization Service",
+    "description": "The Model Management System (MMS) delivers AI models and other files needed by edge services to the edge nodes where those services are running. MMS has two components, and therefore two APIs: Cloud Sync Service (CSS) is the MMS component that runs on the management hub that users or devops processes use to load models/files into MMS. The Edge Sync Service (ESS) runs on each edge node and is the API that edge services interact with to get the models/files and find out about updates.",
+    "title": "Model Management System",
     "version": "0.0.1"
   },
   "host": "localhost",
@@ -2290,20 +2290,6 @@
     }
   },
   "definitions": {
-    "ConsumedObject": {
-      "description": "ConsumedObject contains consumed object's meta data and its timestamp",
-      "type": "object",
-      "properties": {
-        "MetaData": {
-          "$ref": "#/definitions/MetaData"
-        },
-        "Timestamp": {
-          "type": "string",
-          "format": "date-time"
-        }
-      },
-      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
-    },
     "DBHealthStatusInfo": {
       "description": "DBHealthStatusInfo describes the health status of the database of the sync-service node",
       "type": "object",
@@ -2442,31 +2428,6 @@
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
     },
-    "IOError": {
-      "description": "IOError is the error for requests failed because of the IO",
-      "type": "object",
-      "properties": {
-        "Message": {
-          "type": "string"
-        }
-      },
-      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
-    },
-    "InternalError": {
-      "description": "InternalError is a general error",
-      "type": "object",
-      "properties": {
-        "Message": {
-          "type": "string"
-        }
-      },
-      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
-    },
-    "Locks": {
-      "description": "Locks is a set of object locks",
-      "type": "object",
-      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
-    },
     "MQTTHealthStatusInfo": {
       "description": "MQTTHealthStatusInfo describes the health status of the MQTT connection of the sync-service node",
       "type": "object",
@@ -2503,19 +2464,6 @@
           "type": "integer",
           "format": "uint64",
           "x-go-name": "TimeSinceLastSubscribeError"
-        }
-      },
-      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
-    },
-    "MessagingGroup": {
-      "description": "MessagingGroup maps organization to its messaging group",
-      "type": "object",
-      "properties": {
-        "GroupName": {
-          "type": "string"
-        },
-        "OrgID": {
-          "type": "string"
         }
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
@@ -2673,38 +2621,6 @@
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
     },
-    "NotFound": {
-      "description": "NotFound is the error returned if an object wasn't found",
-      "type": "object",
-      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
-    },
-    "NotificationInfo": {
-      "description": "NotificationInfo contains information about a message to send to the other side",
-      "type": "object",
-      "properties": {
-        "DataID": {
-          "type": "integer",
-          "format": "int64"
-        },
-        "DestID": {
-          "type": "string"
-        },
-        "DestType": {
-          "type": "string"
-        },
-        "InstanceID": {
-          "type": "integer",
-          "format": "int64"
-        },
-        "MetaData": {
-          "$ref": "#/definitions/MetaData"
-        },
-        "NotificationTopic": {
-          "type": "string"
-        }
-      },
-      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
-    },
     "ObjectDestinationPolicy": {
       "type": "object",
       "title": "ObjectDestinationPolicy contains information about an object that has a Destination Policy.",
@@ -2809,16 +2725,6 @@
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
     },
-    "PathError": {
-      "description": "PathError is the error for path issues",
-      "type": "object",
-      "properties": {
-        "Message": {
-          "type": "string"
-        }
-      },
-      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
-    },
     "Policy": {
       "description": "Policy describes a policy made up of a set of properties and constraints",
       "type": "object",
@@ -2882,16 +2788,6 @@
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
     },
-    "SecurityError": {
-      "description": "SecurityError is the error for requests failed because of security",
-      "type": "object",
-      "properties": {
-        "Message": {
-          "type": "string"
-        }
-      },
-      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
-    },
     "ServiceID": {
       "description": "ServiceID contains the ID of a service to which an object may have affinity for",
       "type": "object",
@@ -2915,35 +2811,6 @@
           "description": "Version is the version of the service",
           "type": "string",
           "x-go-name": "Version"
-        }
-      },
-      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
-    },
-    "StoredOrganization": {
-      "description": "StoredOrganization contains organization and its update timestamp",
-      "type": "object",
-      "properties": {
-        "Org": {
-          "$ref": "#/definitions/Organization"
-        },
-        "Timestamp": {
-          "type": "string",
-          "format": "date-time"
-        }
-      },
-      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
-    },
-    "SyncServiceVersion": {
-      "description": "SyncServiceVersion is the current version of the Sync-Service",
-      "type": "object",
-      "properties": {
-        "Major": {
-          "type": "integer",
-          "format": "uint32"
-        },
-        "Minor": {
-          "type": "integer",
-          "format": "uint32"
         }
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
