@@ -233,6 +233,16 @@ func RemoveServiceFromServiceList(serviceID string, serviceList []ServiceID) ([]
 	return serviceList, false
 }
 
+// StringListContains returns true if string list contains given string
+func StringListContains(stringList []string, str string) bool {
+	for _, s := range stringList {
+		if s == str {
+			return true
+		}
+	}
+	return false
+}
+
 // MetaData is the metadata that identifies and defines the sync service object.
 // Every object includes metadata (mandatory) and data (optional). The metadata and data can be updated independently.
 // Each sync service node (ESS) has an address that is composed of the node's ID, Type, and Organization.
@@ -360,6 +370,10 @@ type MetaData struct {
 	// ChunkSize is an internal field indicating the maximal message payload size.
 	// This field should not be set by users.
 	ChunkSize int `json:"chunkSize" bson:"chunk-size"`
+
+	// Public is a flag indicate this object is visiable to all users in all orgs
+	// Optional field, default is false (not visiable to all users)
+	Public bool `json:"public" bson:"public"`
 
 	// OwnerID is an internal field indicating who creates the object
 	// This field should not be set by users
@@ -517,6 +531,13 @@ type NotificationInfo struct {
 	InstanceID        int64
 	DataID            int64
 	MetaData          *MetaData
+}
+
+// ACLentry contains ACL information about each user
+type ACLentry struct {
+	Username    string
+	ACLUserType string
+	ACLRole     string
 }
 
 // Object status

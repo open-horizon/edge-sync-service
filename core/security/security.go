@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -32,7 +33,7 @@ type authenticationCacheElement struct {
 }
 
 type destinationACLCacheElement struct {
-	users      []string
+	users      []common.ACLentry
 	expiration time.Time
 }
 
@@ -177,52 +178,103 @@ func CanUserCreateObject(request *http.Request, orgID string, metaData *common.M
 		return true, userOrgID, userID
 	}
 
-	if metaData.DestType == "" && 0 == len(metaData.DestinationsList) {
-		// Only Admins can send out broadcasts
+	aclUserType := GetACLUserType(code)
+
+	// check if given user has aclWriter access
+	if !CheckObjectCanBeModifiedByUser(userID, orgID, metaData.ObjectType, aclUserType) {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("checkObjectCanBeModifiedByUser is false")
+		}
 		return false, userOrgID, userID
 	}
-
-	if !checkObjectAccessByUser(userID, orgID, metaData.ObjectType) {
-		return false, userOrgID, userID
-	}
-
-	if common.Configuration.NodeType == common.ESS {
-		return true, userOrgID, userID
+	// else this given user (authUser or AuthNodeUser) have write access, can broadcast object. (destinationType/list empty && Destination policy empty)
+	// Only user have access to all destinations that can broadcast
+	if metaData.DestType == "" && len(metaData.DestinationsList) == 0 && metaData.DestinationPolicy == nil {
+		if !checkUserHaveAccessToALLDestinations(userID, orgID, aclUserType) {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("Must set \"DestinationType\" or \"DestinationList\" or \"DestinationPolicy\". Given userID %s (orgID: %s, aclUserType: %s) cannot broadcast object because user doesn't have access to all destination types", userID, orgID, aclUserType)
+			}
+			return false, userOrgID, userID
+		}
 	}
 
 	destinationTypes := getDestinationTypes(metaData)
+	if trace.IsLogging(logger.INFO) {
+		trace.Info("Starting to check if the given user has access to the destination(s) defined in metadata")
+	}
 	for _, destinationType := range destinationTypes {
-		if !checkDestinationAccessByUser(userID, orgID, destinationType) {
+		if !checkDestinationAccessByUser(userID, orgID, destinationType, aclUserType) {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("Given userID %s (orgID: %s, aclUserType: %s) doesn't have access to destination type: %s", userID, orgID, aclUserType, destinationType)
+			}
 			return false, userOrgID, userID
 		}
 	}
 	return true, userOrgID, userID
 }
 
-// CanUserAccessObject checks if the user identified by the credentials in the supplied request,
-// can read/modify the specified object type.
-func CanUserAccessObject(request *http.Request, orgID, objectType string) (int, string) {
+// CanUserAccessAllObjects checks if the user identified by the credentials in the supplied request,
+// can read the specified object type.
+// return values:
+// 1) true indicates the given user can access all objects of given objectType in given orgID;
+// false indicates can access "public" objects of given objectType in given orgID only
+// 2) authCode 3) userID
+func CanUserAccessAllObjects(request *http.Request, orgID, objectType string) (bool, int, string) {
 	code, userOrgID, userID := Authenticate(request)
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In security.CanUserAccessAllObjects: authcode is %d, userOrgID is %s, userID is %s", code, userOrgID, userID)
+	}
+	// CSS + ESS
 	if code == AuthSyncAdmin {
-		return code, userID
+		return true, code, userID
 	}
 
-	if code == AuthFailed || code == AuthEdgeNode || userOrgID != orgID {
-		return AuthFailed, ""
+	if code == AuthFailed || code == AuthEdgeNode {
+		return false, AuthFailed, ""
 	}
 
+	// ESS
 	if common.Configuration.NodeType == common.ESS {
-		return code, userID
+		if userOrgID != orgID {
+			// user should not have access to edge node from different edge node
+			return false, AuthFailed, ""
+		} else {
+			return true, code, userID
+		}
+
 	}
 
+	// CSS
 	if code == AuthAdmin {
-		return code, userID
+		if userOrgID != orgID {
+			code = AuthUser
+			// continue on code == authUser section
+		} else {
+			return true, code, userID
+		}
+
 	}
 
-	if checkObjectAccessByUser(userID, orgID, objectType) {
-		return code, userID
+	if code == AuthUser || code == AuthNodeUser {
+		if userOrgID != orgID {
+			// only display public object
+			return false, code, userID
+		}
+
+		aclUserType := GetACLUserType(code)
+		// same org, check ACL
+		// If user is in ACL, then display all objects
+		if checkObjectAccessByUser(userID, orgID, objectType, aclUserType) {
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("In security.CanUserAccessObject: checkObjectAccessByUser returns true for authcode %d for user %s", code, userID)
+			}
+			return true, code, userID
+		}
+		// If user is not in the ACL, only display public object
+		return false, code, userID
 	}
-	return AuthFailed, ""
+
+	return false, AuthFailed, ""
 }
 
 // KeyandSecretForURL returns an app key and an app secret pair to be
@@ -233,6 +285,7 @@ func KeyandSecretForURL(url string) (string, string) {
 
 // AddIdentityToSPIRequest Adds identity related stuff to SPI requests made by an ESS
 func AddIdentityToSPIRequest(request *http.Request, requestURL string) {
+	// dummyAuthenticate: username: "{orgId}/{destinationType}/{destinationId}", password: ""
 	username, password := authenticator.KeyandSecretForURL(requestURL)
 	request.SetBasicAuth(username, password)
 
@@ -243,6 +296,9 @@ func AddIdentityToSPIRequest(request *http.Request, requestURL string) {
 // Returns true if the identity is ok for a SPI request, along with the orgID, destType, and
 // destID sent in the request.
 func ValidateSPIRequestIdentity(request *http.Request) (bool, string, string, string) {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In security.ValidateSPIRequestIdentity")
+	}
 	var orgID string
 	var destType string
 	var destID string
@@ -253,8 +309,12 @@ func ValidateSPIRequestIdentity(request *http.Request) (bool, string, string, st
 	}
 
 	code, orgID, user := Authenticate(request)
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In security.ValidateSPIRequestIdentity, code is %d, orgID is %s, user is %s", code, orgID, user)
+	}
 	switch code {
 	case AuthEdgeNode:
+		// user edge/node2
 		parts := strings.Split(user, "/")
 		if len(parts) != 2 {
 			return false, "", "", ""
@@ -273,7 +333,7 @@ func ValidateSPIRequestIdentity(request *http.Request) (bool, string, string, st
 		destID = identityParts[2]
 
 	case AuthUser:
-		if checkDestinationAccessByUser(user, orgID, identityParts[1]) {
+		if checkDestinationAccessByUser(user, orgID, identityParts[1], "") {
 			destType = identityParts[1]
 			destID = identityParts[2]
 		} else {
@@ -303,8 +363,13 @@ func saltSecret(appSecret string, salt []byte) ([]byte, []byte, error) {
 	return secretHash.Sum(nil), salt, nil
 }
 
-func checkObjectAccessByUser(userID, orgID, objectType string) bool {
-	usernames, err := Store.RetrieveACL(common.ObjectsACLType, orgID, objectType)
+// CheckObjectCanBeModifiedByUser returns true if give user has ACLWriter access to given object type
+func CheckObjectCanBeModifiedByUser(userID, orgID, objectType string, aclUserType string) bool {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In security.CheckObjectCanBeModifiedByUser: userID is %s, orgID is %s, objectType is %s, aclUserType is %s", userID, orgID, objectType, aclUserType)
+	}
+
+	users, err := Store.RetrieveACL(common.ObjectsACLType, orgID, objectType, aclUserType)
 	if err != nil {
 		if log.IsLogging(logger.ERROR) {
 			log.Error("Failed to fetch ACL for %s %s. Error: %s", orgID, objectType, err)
@@ -312,17 +377,97 @@ func checkObjectAccessByUser(userID, orgID, objectType string) bool {
 		return false
 	}
 
-	for _, username := range usernames {
-		if username == "*" || username == userID {
-			return true
+	for _, user := range users {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("ACL entry for objectType(%s): %s:%s:%s", objectType, user.ACLUserType, user.Username, user.ACLRole)
 		}
+
+		if user.Username == "*" || user.Username == userID {
+			if user.ACLRole == ACLWriter {
+				return true
+			} else if user.ACLRole == ACLReader {
+				return false
+			}
+		}
+
+	}
+	// Doesn't find username in acl list for given object type
+	// then check if user is in acl list for all object type. (db entry with ID: {org}:objects)
+	users, err = Store.RetrieveACL(common.ObjectsACLType, orgID, "", aclUserType)
+	if err != nil {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("Failed to fetch ACL for %s %s. Error: %s", orgID, objectType, err)
+		}
+		return false
+	}
+
+	for _, user := range users {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("ACL entry: %s:%s:%s", user.ACLUserType, user.Username, user.ACLRole)
+		}
+
+		if user.Username == "*" || user.Username == userID {
+			if user.ACLRole == ACLWriter {
+				return true
+			} else if user.ACLRole == ACLReader {
+				return false
+			}
+		}
+
 	}
 	return false
 }
 
-func checkDestinationAccessByUser(userID, orgID, destType string) bool {
+func checkObjectAccessByUser(userID, orgID, objectType string, aclUserType string) bool {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In security.checkObjectAccessByUser: userID is %s, orgID is %s, objectType is %s, aclUserType is %s", userID, orgID, objectType, aclUserType)
+	}
+	users, err := Store.RetrieveACL(common.ObjectsACLType, orgID, objectType, aclUserType)
+	if err != nil {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("Failed to fetch ACL for %s %s. Error: %s", orgID, objectType, err)
+		}
+		return false
+	}
+
+	for _, user := range users {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("ACL entry for objectType(%s): %s:%s:%s", objectType, user.ACLUserType, user.Username, user.ACLRole)
+		}
+
+		if user.Username == "*" || user.Username == userID {
+			return true
+		}
+
+	}
+
+	// check if user is in acl list for all object type. (db entry with ID: {org}:objects:*)
+	users, err = Store.RetrieveACL(common.ObjectsACLType, orgID, "", aclUserType)
+	if err != nil {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("Failed to fetch ACL for %s %s. Error: %s", orgID, objectType, err)
+		}
+		return false
+	}
+	for _, user := range users {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("ACL entry: %s:%s:%s", user.ACLUserType, user.Username, user.ACLRole)
+		}
+
+		if user.Username == "*" || user.Username == userID {
+			return true
+		}
+
+	}
+	return false
+}
+
+func checkDestinationAccessByUser(userID, orgID, destType string, aclUserType string) bool {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In security.checkDestinationAccessByUser: userID is %s, orgID is %s, destinationType is %s, aclUserType is %s", userID, orgID, destType, aclUserType)
+	}
 	cacheKey := orgID + ":" + destType
-	var usernames []string
+	var users []common.ACLentry
 
 	destinationACLCacheLock.RLock()
 	entry, ok := destinationACLCache[cacheKey]
@@ -331,9 +476,9 @@ func checkDestinationAccessByUser(userID, orgID, destType string) bool {
 	now := time.Now()
 	var err error
 	if ok && now.Before(entry.expiration) {
-		usernames = entry.users
+		users = entry.users
 	} else {
-		usernames, err = Store.RetrieveACL(common.DestinationsACLType, orgID, destType)
+		users, err = Store.RetrieveACL(common.DestinationsACLType, orgID, destType, aclUserType)
 		if err != nil {
 			if log.IsLogging(logger.ERROR) {
 				log.Error("Failed to fetch ACL for %s %s. Error: %s", orgID, destType, err)
@@ -341,18 +486,185 @@ func checkDestinationAccessByUser(userID, orgID, destType string) bool {
 			return false
 		}
 
-		entry := destinationACLCacheElement{usernames, now.Add(cacheDuration)}
+		entry := destinationACLCacheElement{users, now.Add(cacheDuration)}
 		destinationACLCacheLock.Lock()
 		destinationACLCache[cacheKey] = entry
 		destinationACLCacheLock.Unlock()
 	}
 
-	for _, username := range usernames {
-		if username == "*" || username == userID {
+	for _, user := range users {
+		if user.Username == "*" || user.Username == userID {
 			return true
 		}
+
+	}
+
+	users, err = Store.RetrieveACL(common.DestinationsACLType, orgID, "", aclUserType)
+	if err != nil {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("Failed to fetch ACL for %s %s. Error: %s", orgID, destType, err)
+		}
+		return false
+	}
+	for _, user := range users {
+		if user.Username == "*" || user.Username == userID {
+			return true
+		}
+
+	}
+
+	return false
+}
+
+func checkUserHaveAccessToALLDestinations(userID, orgID, aclUserType string) bool {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In security.checkUserHaveAccessToALLDestinations: userID is %s, orgID is %s, aclUserType is %s", userID, orgID, aclUserType)
+	}
+	users, err := Store.RetrieveACL(common.DestinationsACLType, orgID, "", aclUserType)
+	if err != nil {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("Failed to fetch ACL for %s %s. Error: %s", orgID, aclUserType, err)
+		}
+		return false
+	}
+	for _, user := range users {
+		if user.Username == "*" || user.Username == userID {
+			return true
+		}
+
 	}
 	return false
+}
+
+// CheckAddACLInputFormat checks ACL entry format.
+func CheckAddACLInputFormat(aclType string, aclInputList []common.ACLentry) (*[]common.ACLentry, error) {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In security.ChecAddkACLInputFormat")
+	}
+
+	if len(aclInputList) == 0 {
+		return nil, nil
+	}
+
+	var message string
+	var updatedACLList []common.ACLentry
+	if aclType == "destinations" {
+		updatedACLList = make([]common.ACLentry, 0)
+	}
+	for _, aclInput := range aclInputList {
+
+		aclUserType := aclInput.ACLUserType
+		name := aclInput.Username
+
+		if aclUserType != ACLUser && aclUserType != ACLNode {
+			message = fmt.Sprintf("aclUserType \"%s\" is invalid for ACL entry %s, it should be \"%s\", or \"%s\"", aclUserType, aclInput, ACLUser, ACLNode)
+			if log.IsLogging(logger.ERROR) {
+				log.Error(message)
+			}
+			return nil, errors.New(message)
+		}
+
+		//trimName := strings.TrimSpace(name)
+		if strings.TrimSpace(name) == "" {
+			message = fmt.Sprintf("username/nodename cannot be empty for ACL entry %s.", aclInput)
+			if log.IsLogging(logger.ERROR) {
+				log.Error(message)
+			}
+			return nil, errors.New(message)
+		}
+
+		if aclType == "objects" {
+			role := aclInput.ACLRole
+			if role != ACLWriter && role != ACLReader {
+				message = fmt.Sprintf("aclRole \"%s\" is invalid for ACL entry %s, it should be \"%s\", or \"%s\"", role, aclInput, ACLWriter, ACLReader)
+				if log.IsLogging(logger.ERROR) {
+					log.Error(message)
+				}
+				return nil, errors.New(message)
+			}
+		} else {
+			// aclType == "destinations", there is not role for destinations acl entry, set role to "N/A"
+			aclInput.ACLRole = ACLNA
+			updatedACLList = append(updatedACLList, aclInput)
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("updated aclUserInput: %s:%s:%s", aclInput.ACLUserType, aclInput.Username, aclInput.ACLRole)
+			}
+		}
+
+	}
+
+	if aclType == "objects" {
+		return nil, nil
+	}
+	// aclType == "destinations", return the updated aclInputList
+	return &updatedACLList, nil
+}
+
+// CheckRemoveACLInputFormat checks ACL entry format.
+func CheckRemoveACLInputFormat(aclInputList []common.ACLentry) error {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In security.CheckRemoveACLInputFormat")
+	}
+
+	if len(aclInputList) == 0 {
+		return nil
+	}
+
+	var message string
+	for _, aclInput := range aclInputList {
+		aclUserType := aclInput.ACLUserType
+		name := aclInput.Username
+
+		if aclUserType != ACLUser && aclUserType != ACLNode {
+			message = fmt.Sprintf("aclUserType \"%s\" is invalid for ACL entry %s, it should be \"%s\", or \"%s\"", aclUserType, aclInput, ACLUser, ACLNode)
+			if log.IsLogging(logger.ERROR) {
+				log.Error(message)
+			}
+			return errors.New(message)
+		}
+
+		if strings.TrimSpace(name) == "" {
+			message = fmt.Sprintf("\"Username\" cannot be empty for ACL entry %s.", aclInput)
+			if log.IsLogging(logger.ERROR) {
+				log.Error(message)
+			}
+			return errors.New(message)
+		}
+
+	}
+	return nil
+}
+
+// CheckObjectTypesCanBeAccessByGivenUser returns a list of objectTypes that given user has access to. If first returned value is true, then the given user can access all object types
+func CheckObjectTypesCanBeAccessByGivenUser(orgID string, aclUserType string, aclUsername string) (bool, []string, error) {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In security.checkObjectTypesCanBeAccessByGivenUser, check object types can be accessed by %s:%s", aclUserType, aclUsername)
+	}
+
+	var message string
+	aclType := "objects"
+	objectTypes, err := Store.RetrieveObjOrDestTypeForGivenACLUser(aclType, orgID, aclUserType, aclUsername, "")
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("len(objectTypes): %d", len(objectTypes))
+	}
+
+	if err != nil {
+		message = fmt.Sprintf("Failed to fetch ACL object Types for user %s %s in org %s. Error: %s", aclUserType, aclUsername, orgID, err)
+		if log.IsLogging(logger.ERROR) {
+			log.Error(message)
+		}
+		return false, nil, errors.New(message)
+	}
+
+	for _, objectType := range objectTypes {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("object type %s is accessable for user %s:%s", objectType, aclUserType, aclUsername)
+		}
+		if objectType == "*" {
+			return true, objectTypes, nil
+		}
+	}
+	return false, objectTypes, nil
 }
 
 func getDestinationTypes(metaData *common.MetaData) []string {
@@ -405,4 +717,15 @@ func flushDestinationACLCache() {
 			delete(destinationACLCache, cacheKey)
 		}
 	}
+}
+
+// GetACLUserType get ACLUserType by authCode
+func GetACLUserType(authCode int) string {
+	aclUserType := ""
+	if authCode == AuthUser {
+		aclUserType = ACLUser
+	} else if authCode == AuthNodeUser {
+		aclUserType = ACLNode
+	}
+	return aclUserType
 }

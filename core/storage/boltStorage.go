@@ -51,10 +51,10 @@ type boltMessagingGroup struct {
 }
 
 type boltACL struct {
-	Usernames []string `json:"usernames"`
-	OrgID     string   `json:"org-id"`
-	ACLType   string   `json:"acl-type"`
-	Key       string   `json:"key"`
+	Users   []common.ACLentry `json:"users"`
+	OrgID   string            `json:"org-id"`
+	ACLType string            `json:"acl-type"`
+	Key     string            `json:"key"`
 }
 
 var (
@@ -198,17 +198,34 @@ func (store *BoltStorage) PerformMaintenance() {
 
 // Cleanup erase the on disk Bolt database only for ESS and test
 func (store *BoltStorage) Cleanup(isTest bool) common.SyncServiceError {
-	var dbPath string
+	var essDbPath string
 	if isTest {
-		dbPath = common.Configuration.PersistenceRootPath + "/sync/db/sync.db"
+		cssDbPath := common.Configuration.PersistenceRootPath + "/sync/db/css-sync.db"
+		essDbPath = common.Configuration.PersistenceRootPath + "/sync/db/ess-sync.db"
+
+		if err := os.Remove(cssDbPath); err != nil {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("Failed to remove css Bolt testing database")
+			}
+			return err
+		}
+		if log.IsLogging(logger.DEBUG) {
+			log.Debug("CSS bolt db at %s is removed\n", cssDbPath)
+		}
+
 	} else {
-		dbPath = common.Configuration.PersistenceRootPath + "/sync/db/ess-sync.db"
+		essDbPath = common.Configuration.PersistenceRootPath + "/sync/db/ess-sync.db"
+
 	}
-	if err := os.Remove(dbPath); err != nil {
+
+	if err := os.Remove(essDbPath); err != nil {
 		if log.IsLogging(logger.ERROR) {
-			log.Error("Failed to remove Bolt database")
+			log.Error("Failed to remove ess Bolt database")
 		}
 		return err
+	}
+	if log.IsLogging(logger.DEBUG) {
+		log.Debug("ESS bolt db at %s is removed\n", essDbPath)
 	}
 	return nil
 }
@@ -1793,24 +1810,28 @@ func (store *BoltStorage) RetrieveUpdatedOrganizations(time time.Time) ([]common
 }
 
 // AddUsersToACL adds users to an ACL
-func (store *BoltStorage) AddUsersToACL(aclType string, orgID string, key string, usernames []string) common.SyncServiceError {
+func (store *BoltStorage) AddUsersToACL(aclType string, orgID string, key string, users []common.ACLentry) common.SyncServiceError {
 	if common.Configuration.NodeType == common.ESS {
 		return nil
 	}
 
+	if key == "" {
+		key = "*"
+	}
+
 	function := func(acl boltACL) (*boltACL, bool) {
 		added := false
-		for _, username := range usernames {
+		for _, user := range users {
 			notFound := true
-			// Don't add the username if it already is in the list
-			for _, existing := range acl.Usernames {
-				if username == existing {
+			// Don't add the user if it already is in the list
+			for _, existing := range acl.Users {
+				if user.ACLUserType == existing.ACLUserType && user.Username == existing.Username {
 					notFound = false
 					break
 				}
 			}
 			if notFound {
-				acl.Usernames = append(acl.Usernames, username)
+				acl.Users = append(acl.Users, user)
 				added = true
 			}
 		}
@@ -1824,23 +1845,27 @@ func (store *BoltStorage) AddUsersToACL(aclType string, orgID string, key string
 }
 
 // RemoveUsersFromACL removes users from an ACL
-func (store *BoltStorage) RemoveUsersFromACL(aclType string, orgID string, key string, usernames []string) common.SyncServiceError {
+func (store *BoltStorage) RemoveUsersFromACL(aclType string, orgID string, key string, users []common.ACLentry) common.SyncServiceError {
 	if common.Configuration.NodeType == common.ESS {
 		return nil
 	}
 
+	if key == "" {
+		key = "*"
+	}
+
 	function := func(acl boltACL) (*boltACL, bool) {
 		deleted := false
-		for _, username := range usernames {
-			for i, entry := range acl.Usernames {
-				if strings.EqualFold(entry, username) {
-					if len(acl.Usernames) == 1 {
-						// Deleting the last username, delete the ACL
+		for _, user := range users {
+			for i, entry := range acl.Users {
+				if user.ACLUserType == entry.ACLUserType && user.Username == entry.Username {
+					if len(acl.Users) == 1 {
+						// Deleting the last user, delete the ACL
 						return nil, true
 					}
 
-					acl.Usernames[i] = acl.Usernames[len(acl.Usernames)-1]
-					acl.Usernames = acl.Usernames[:len(acl.Usernames)-1]
+					acl.Users[i] = acl.Users[len(acl.Users)-1]
+					acl.Users = acl.Users[:len(acl.Users)-1]
 					deleted = true
 					break
 				}
@@ -1856,26 +1881,29 @@ func (store *BoltStorage) RemoveUsersFromACL(aclType string, orgID string, key s
 }
 
 // RetrieveACL retrieves the list of usernames on an ACL
-func (store *BoltStorage) RetrieveACL(aclType string, orgID string, key string) ([]string, common.SyncServiceError) {
+func (store *BoltStorage) RetrieveACL(aclType string, orgID string, key string, aclUserType string) ([]common.ACLentry, common.SyncServiceError) {
 	if common.Configuration.NodeType == common.ESS {
 		return nil, nil
 	}
 
 	var encoded []byte
+	if key == "" {
+		key = "*"
+	}
 	store.db.View(func(tx *bolt.Tx) error {
 		encoded = tx.Bucket(aclBucket).Get([]byte(orgID + ":" + aclType + ":" + key))
 		return nil
 	})
 
 	if encoded == nil {
-		return make([]string, 0), nil
+		return make([]common.ACLentry, 0), nil
 	}
 
 	var acl boltACL
 	if err := json.Unmarshal(encoded, &acl); err != nil {
 		return nil, err
 	}
-	return acl.Usernames, nil
+	return acl.Users, nil
 }
 
 // RetrieveACLsInOrg retrieves the list of ACLs in an organization
@@ -1888,6 +1916,33 @@ func (store *BoltStorage) RetrieveACLsInOrg(aclType string, orgID string) ([]str
 	function := func(acl boltACL) {
 		if acl.ACLType == aclType && acl.OrgID == orgID {
 			result = append(result, acl.Key)
+		}
+	}
+	if err := store.retrieveACLHelper(function); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// RetrieveObjOrDestTypeForGivenACLUser retrieves object types that given acl user has access to
+func (store *BoltStorage) RetrieveObjOrDestTypeForGivenACLUser(aclType string, orgID string, aclUserType string, aclUsername string, aclRole string) ([]string, common.SyncServiceError) {
+	if common.Configuration.NodeType == common.ESS {
+		return nil, nil
+	}
+	result := make([]string, 0)
+	function := func(acl boltACL) {
+		if acl.ACLType == aclType && acl.OrgID == orgID {
+			for _, user := range acl.Users {
+				if aclRole == "" || aclRole == "*" {
+					if aclUserType == user.ACLUserType && aclUsername == user.Username {
+						result = append(result, acl.Key)
+					}
+				} else {
+					if aclUserType == user.ACLUserType && aclUsername == user.Username && aclRole == user.ACLRole {
+						result = append(result, acl.Key)
+					}
+				}
+			}
 		}
 	}
 	if err := store.retrieveACLHelper(function); err != nil {

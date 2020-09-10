@@ -590,8 +590,14 @@ func (store *MongoStorage) deleteFileHandle(id string) {
 	store.mapLock <- 1
 }
 
-func (store *MongoStorage) addUsersToACLHelper(collection string, aclType string, orgID string, key string, usernames []string) common.SyncServiceError {
-	id := orgID + ":" + aclType + ":" + key
+func (store *MongoStorage) addUsersToACLHelper(collection string, aclType string, orgID string, key string, users []common.ACLentry) common.SyncServiceError {
+	var id string
+	if key == "" {
+		id = orgID + ":" + aclType + ":*"
+	} else {
+		id = orgID + ":" + aclType + ":" + key
+	}
+
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Adding a %s ACL for %s\n", aclType, id)
 	}
@@ -599,8 +605,8 @@ func (store *MongoStorage) addUsersToACLHelper(collection string, aclType string
 	for i := 0; i < maxUpdateTries; i++ {
 		if err := store.fetchOne(collection, bson.M{"_id": id}, nil, &result); err != nil {
 			if err == mgo.ErrNotFound {
-				result.Usernames = make([]string, 0)
-				result.Usernames = append(result.Usernames, usernames...)
+				result.Users = make([]common.ACLentry, 0)
+				result.Users = append(result.Users, users...)
 				result.ID = id
 				result.OrgID = orgID
 				result.ACLType = aclType
@@ -615,40 +621,54 @@ func (store *MongoStorage) addUsersToACLHelper(collection string, aclType string
 			return &Error{fmt.Sprintf("Failed to add a %s ACL. Error: %s.", aclType, err)}
 		}
 
-		added := false
-		for _, username := range usernames {
-			notFound := true
-			// Don't add the username if it already is in the list
-			for _, entry := range result.Usernames {
-				if username == entry {
-					notFound = false
+		integratedUsernames := make([]common.ACLentry, 0)
+		integratedUsernames = append(integratedUsernames, users...)
+
+		// If the entry in database is not in the input list, add it to input list
+		for _, entry := range result.Users {
+			add := true
+			entryUserTypeInDB := entry.ACLUserType
+			entryUsernameInDB := entry.Username
+
+			for _, user := range users {
+				// username from input, only compare the {aclType} and {username} to determin if the entry already exists
+				userTypeFromRequest := user.ACLUserType
+				userNameFromRequest := user.Username
+				if entryUserTypeInDB == userTypeFromRequest && entryUsernameInDB == userNameFromRequest {
+					add = false
 					break
 				}
 			}
-			if notFound {
-				result.Usernames = append(result.Usernames, username)
-				added = true
+
+			if add {
+				integratedUsernames = append(integratedUsernames, entry)
 			}
 		}
-		if added {
-			if err := store.update(collection, bson.M{"_id": id, "last-update": result.LastUpdate},
-				bson.M{
-					"$set":         bson.M{"usernames": result.Usernames},
-					"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
-				}); err != nil {
-				if err == mgo.ErrNotFound {
-					continue
-				}
-				return &Error{fmt.Sprintf("Failed to add a %s ACL. Error: %s.", aclType, err)}
+
+		if err := store.update(collection, bson.M{"_id": id, "last-update": result.LastUpdate},
+			bson.M{
+				"$set":         bson.M{"users": integratedUsernames},
+				"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+			}); err != nil {
+			if err == mgo.ErrNotFound {
+				continue
 			}
+			return &Error{fmt.Sprintf("Failed to add a %s ACL. Error: %s.", aclType, err)}
 		}
+
 		return nil
 	}
 	return &Error{fmt.Sprintf("Failed to add a %s ACL.", aclType)}
 }
 
-func (store *MongoStorage) removeUsersFromACLHelper(collection string, aclType string, orgID string, key string, usernames []string) common.SyncServiceError {
-	id := orgID + ":" + aclType + ":" + key
+func (store *MongoStorage) removeUsersFromACLHelper(collection string, aclType string, orgID string, key string, users []common.ACLentry) common.SyncServiceError {
+	var id string
+	if key == "" {
+		id = orgID + ":" + aclType + ":*"
+	} else {
+		id = orgID + ":" + aclType + ":" + key
+	}
+
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Deleting a %s ACL for %s\n", aclType, id)
 	}
@@ -658,10 +678,14 @@ func (store *MongoStorage) removeUsersFromACLHelper(collection string, aclType s
 			return &Error{fmt.Sprintf("Failed to delete a %s ACL. Error: %s.", aclType, err)}
 		}
 		deleted := false
-		for _, username := range usernames {
-			for i, entry := range result.Usernames {
-				if strings.EqualFold(entry, username) {
-					if len(result.Usernames) == 1 {
+		for _, user := range users {
+			userTypeFromRequest := user.ACLUserType
+			userNameFromRequest := user.Username
+			for i, entry := range result.Users {
+				entryUserTypeInDB := entry.ACLUserType
+				entryUsernameInDB := entry.Username
+				if entryUserTypeInDB == userTypeFromRequest && entryUsernameInDB == userNameFromRequest {
+					if len(result.Users) == 1 {
 						// Deleting the last username, delete the ACL
 						if err := store.removeAll(collection, bson.M{"_id": id}); err != nil {
 							if err == mgo.ErrNotFound {
@@ -672,17 +696,18 @@ func (store *MongoStorage) removeUsersFromACLHelper(collection string, aclType s
 						return nil
 					}
 
-					result.Usernames[i] = result.Usernames[len(result.Usernames)-1]
-					result.Usernames = result.Usernames[:len(result.Usernames)-1]
+					result.Users[i] = result.Users[len(result.Users)-1]
+					result.Users = result.Users[:len(result.Users)-1]
 					deleted = true
 					break
 				}
+
 			}
 		}
 		if deleted {
 			if err := store.update(collection, bson.M{"_id": id, "last-update": result.LastUpdate},
 				bson.M{
-					"$set":         bson.M{"usernames": result.Usernames},
+					"$set":         bson.M{"users": result.Users},
 					"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
 				}); err != nil {
 				if err == mgo.ErrNotFound {
@@ -696,24 +721,42 @@ func (store *MongoStorage) removeUsersFromACLHelper(collection string, aclType s
 	return &Error{fmt.Sprintf("Failed to delete a %s ACL.", aclType)}
 }
 
-func (store *MongoStorage) retrieveACLHelper(collection string, aclType string, orgID string, key string) ([]string, common.SyncServiceError) {
-	id := orgID + ":" + aclType + ":" + key
+func (store *MongoStorage) retrieveACLHelper(collection string, aclType string, orgID string, key string, aclUserType string) ([]common.ACLentry, common.SyncServiceError) {
+	var id string
+	if key == "" {
+		id = orgID + ":" + aclType + ":*"
+	} else {
+		id = orgID + ":" + aclType + ":" + key
+	}
+
 	if trace.IsLogging(logger.TRACE) {
-		trace.Trace("Retrieving a %s ACL for %s\n", aclType, id)
+		trace.Trace("Retrieving a %s ACL for %s, aclUserType %s\n", aclType, id, aclUserType)
 	}
 	result := &aclObject{}
 	if err := store.fetchOne(collection, bson.M{"_id": id}, nil, &result); err != nil {
 		if err == mgo.ErrNotFound {
-			return make([]string, 0), nil
+			return make([]common.ACLentry, 0), nil
 		}
 		return nil, err
 	}
-	return result.Usernames, nil
+
+	users := make([]common.ACLentry, 0)
+	if aclUserType != "" {
+		for _, entry := range result.Users {
+			if entry.ACLUserType == aclUserType {
+				users = append(users, entry)
+			}
+		}
+		return users, nil
+
+	}
+
+	return result.Users, nil
 }
 
 func (store *MongoStorage) retrieveACLsInOrgHelper(collection string, aclType string, orgID string) ([]string, common.SyncServiceError) {
 	if trace.IsLogging(logger.TRACE) {
-		trace.Trace("Retrieving the %s ACL for %s\n", aclType, orgID)
+		trace.Trace("Retrieving the %s ACL types for %s\n", aclType, orgID)
 	}
 
 	var docs []aclObject
@@ -725,10 +768,59 @@ func (store *MongoStorage) retrieveACLsInOrgHelper(collection string, aclType st
 
 	result := make([]string, 0)
 	for _, doc := range docs {
-		parts := strings.Split(doc.ID, ":")
-		result = append(result, parts[2])
+		if parts := strings.Split(doc.ID, ":"); len(parts) == 3 {
+			result = append(result, parts[2])
+		}
+
 	}
 	return result, nil
+}
+
+func (store *MongoStorage) retrieveObjOrDestTypeForGivenACLUserHelper(collection string, aclType string, orgID string, aclUserType string, aclUsername string, aclRole string) ([]string, common.SyncServiceError) {
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("Retrieving %s types for ACL user %s:%s\n", aclType, aclUserType, aclUsername)
+	}
+
+	docs := []aclObject{}
+	var subquery bson.M
+	if aclRole == "" || aclRole == "*" {
+		subquery = bson.M{
+			"$elemMatch": bson.M{
+				"aclusertype": aclUserType,
+				"username":    aclUsername,
+			},
+		}
+	} else {
+		subquery = bson.M{
+			"$elemMatch": bson.M{
+				"aclusertype": aclUserType,
+				"username":    aclUsername,
+				"aclrole":     aclRole,
+			},
+		}
+
+	}
+
+	query := bson.M{
+		"org-id":   orgID,
+		"acl-type": aclType,
+		"users":    subquery,
+	}
+
+	selector := bson.M{"_id": bson.ElementString}
+	if err := store.fetchAll(collection, query, selector, &docs); err != nil {
+		return nil, err
+	}
+
+	result := make([]string, 0)
+	for _, doc := range docs {
+		if parts := strings.Split(doc.ID, ":"); len(parts) == 3 {
+			result = append(result, parts[2])
+		}
+
+	}
+	return result, nil
+
 }
 
 func (store *MongoStorage) getInstanceID() int64 {

@@ -422,7 +422,7 @@ func (store *BoltStorage) updateACLHelper(aclType string, orgID string, key stri
 				return err
 			}
 		} else {
-			acl = boltACL{make([]string, 0), orgID, aclType, key}
+			acl = boltACL{make([]common.ACLentry, 0), orgID, aclType, key}
 		}
 
 		updatedACL, delete := update(acl)

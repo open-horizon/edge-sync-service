@@ -10,8 +10,8 @@
   ],
   "swagger": "2.0",
   "info": {
-    "description": "This is the main package of the edge synchronization service",
-    "title": "Edge Syncronization Service",
+    "description": "The Model Management System (MMS) delivers AI models and other files needed by edge services to the edge nodes where those services are running. MMS has two components, and therefore two APIs: Cloud Sync Service (CSS) is the MMS component that runs on the management hub that users or devops processes use to load models/files into MMS. The Edge Sync Service (ESS) runs on each edge node and is the API that edge services interact with to get the models/files and find out about updates.",
+    "title": "Model Management System",
     "version": "0.0.1"
   },
   "host": "localhost",
@@ -592,49 +592,6 @@
         }
       }
     },
-    "/api/v1/objects/{objectType}/{objectID}/policyreceived": {
-      "put": {
-        "description": "Mark the object of the specified object type and object ID as having its destination policy received\nAfter the object is marked as such it will not be delivered to the application listing objects with\na destination policy, unless it adds \"received=true\" to the query parameters.",
-        "produces": [
-          "text/plain"
-        ],
-        "tags": [
-          "ESS"
-        ],
-        "summary": "Mark an object's destination policy as having been received.",
-        "operationId": "handlePolicyReceived",
-        "parameters": [
-          {
-            "type": "string",
-            "description": "The object type of the object to mark as having its destination policy received",
-            "name": "objectType",
-            "in": "path",
-            "required": true
-          },
-          {
-            "type": "string",
-            "description": "The object ID of the object to mark as having its destination policy received",
-            "name": "objectID",
-            "in": "path",
-            "required": true
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Object marked as having its destination policy received",
-            "schema": {
-              "type": "string"
-            }
-          },
-          "500": {
-            "description": "Failed to mark the object as having its destination policy received",
-            "schema": {
-              "type": "string"
-            }
-          }
-        }
-      }
-    },
     "/api/v1/objects/{objectType}/{objectID}/received": {
       "put": {
         "description": "Mark the object of the specified object type and object ID as having been received by the application.\nAfter the object is marked as received it will only be delivered to the application again if specified in the objects request.",
@@ -722,6 +679,59 @@
           },
           "500": {
             "description": "Failed to retrieve the object's status",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/objects/{objectType}?all_objects=true": {
+      "get": {
+        "description": "Get all objects of the specified object type that have a destination policy.",
+        "produces": [
+          "application/json",
+          "text/plain"
+        ],
+        "tags": [
+          "ESS"
+        ],
+        "summary": "Get objects with a destination policy of the specified type.",
+        "operationId": "handleListAllObjects",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The object type of the objects to return",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "boolean",
+            "description": "Whether or not to include all objects. If false only updated objects will be returned.",
+            "name": "all_objects",
+            "in": "query",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Objects with a destination policy response",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ObjectDestinationPolicy"
+              }
+            }
+          },
+          "404": {
+            "description": "No objects with a destination policy found",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve the updated objects",
             "schema": {
               "type": "string"
             }
@@ -1397,7 +1407,7 @@
         "tags": [
           "CSS"
         ],
-        "summary": "Mark an object's destination policy as having been received.",
+        "summary": "Mark an object's destination policy as having been received. This is a CSS only API",
         "operationId": "handlePolicyReceived",
         "parameters": [
           {
@@ -1554,11 +1564,18 @@
           "text/plain"
         ],
         "tags": [
-          "ESS"
+          "CSS"
         ],
         "summary": "Get objects with a destination policy of the specified type.",
         "operationId": "handleListAllObjects",
         "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the objects to return",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
           {
             "type": "string",
             "description": "The object type of the objects to return",
@@ -1999,7 +2016,7 @@
         "tags": [
           "CSS"
         ],
-        "summary": "Retrieve the list of destination or object ACLs for an organization.",
+        "summary": "Retrieve the list of destination type or object type of ACLs for an organization.",
         "operationId": "handleACLGetAll",
         "parameters": [
           {
@@ -2019,43 +2036,37 @@
             "name": "orgID",
             "in": "path",
             "required": true
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The list of ACLs retrieved of the specified type.",
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
           },
-          "404": {
-            "description": "No ACLs found",
-            "schema": {
-              "type": "string"
-            }
+          {
+            "type": "boolean",
+            "description": "If true, display object/destination types that has ACL list associated with",
+            "name": "all_keys",
+            "in": "query"
           },
-          "500": {
-            "description": "Failed to retrieve the list of ACLs retrieved of the specified type.",
-            "schema": {
-              "type": "string"
-            }
+          {
+            "type": "string",
+            "description": "The destination type or object type that is being protected by the ACL.",
+            "name": "key",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "The acl user type (user or node) to retrieve.",
+            "name": "acl_usertype",
+            "in": "query"
           }
-        }
-      }
-    },
-    "/api/v1/security/{type}/{orgID}/{key}": {
-      "get": {
+        ]
+      },
+      "put": {
+        "description": "Bulk add/remove of user(s) to/from an ACL for all destination types or all object types. If the\nfirst username is being added, the ACL is created. If the last username is removed, the ACL\nis deleted.",
         "produces": [
           "text/plain"
         ],
         "tags": [
           "CSS"
         ],
-        "summary": "Retrieve the list of usernames from an ACL for a destination type or an object type.",
-        "operationId": "handleACLGet",
+        "summary": "Bulk add/remove of user(s) to/from an ACL for all destination types or all object types.",
+        "operationId": "handleBulkACLUpdateForAllTypes",
         "parameters": [
           {
             "enum": [
@@ -2063,7 +2074,7 @@
               "objects"
             ],
             "type": "string",
-            "description": "The type of the ACL whose username list should be retrieved.",
+            "description": "The type of the ACL to which the specified username(s) will be added/removed.",
             "name": "type",
             "in": "path",
             "required": true
@@ -2076,37 +2087,31 @@
             "required": true
           },
           {
-            "type": "string",
-            "description": "The destination type or object type that is being protected by the ACL.",
-            "name": "key",
-            "in": "path",
-            "required": true
+            "name": "payload",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/bulkACLUpdate"
+            }
           }
         ],
         "responses": {
-          "200": {
-            "description": "The list of usernames was retrieved from the specified ACL.",
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "404": {
-            "description": "ACL not found",
+          "204": {
+            "description": "The username(s) were added/removed to/from the specified ACL.",
             "schema": {
               "type": "string"
             }
           },
           "500": {
-            "description": "Failed to retrieve the usernames from the specified ACL.",
+            "description": "Failed to add/remove the username(s) to/from the specified ACL.",
             "schema": {
               "type": "string"
             }
           }
         }
-      },
+      }
+    },
+    "/api/v1/security/{type}/{orgID}/{key}": {
       "put": {
         "description": "Bulk add/remove of username(s) to/from an ACL for a destination type or an object type. If the\nfirst username is being added, the ACL is created. If the last username is removed, the ACL\nis deleted.",
         "produces": [
@@ -2124,7 +2129,7 @@
               "objects"
             ],
             "type": "string",
-            "description": "The type of the ACL to which the specified username(s) will be added/removed.",
+            "description": "The type of the ACL to which the specified user(s) will be added/removed.",
             "name": "type",
             "in": "path",
             "required": true
@@ -2154,13 +2159,13 @@
         ],
         "responses": {
           "204": {
-            "description": "The username(s) were added/removed to/from the specified ACL.",
+            "description": "The user(s) were added/removed to/from the specified ACL.",
             "schema": {
               "type": "string"
             }
           },
           "500": {
-            "description": "Failed to add/remove the username(s) to/from the specified ACL.",
+            "description": "Failed to add/remove the user(s)to/from the specified ACL.",
             "schema": {
               "type": "string"
             }
@@ -2168,75 +2173,16 @@
         }
       }
     },
-    "/api/v1/security/{type}/{orgID}/{key}/{username}": {
-      "put": {
-        "description": "Add a username to an ACL for a destination type or an object type. If the first username is being added,\nthe ACL is created.",
-        "produces": [
-          "text/plain"
-        ],
-        "tags": [
-          "CSS"
-        ],
-        "summary": "Add a username to an ACL for a destination type or an object type.",
-        "operationId": "handleACLUpdate",
-        "parameters": [
-          {
-            "enum": [
-              "destinations",
-              "objects"
-            ],
-            "type": "string",
-            "description": "The type of the ACL to which the specified username will be added.",
-            "name": "type",
-            "in": "path",
-            "required": true
-          },
-          {
-            "type": "string",
-            "description": "The orgID in which the ACL for the destination type or object type exists.",
-            "name": "orgID",
-            "in": "path",
-            "required": true
-          },
-          {
-            "type": "string",
-            "description": "The destination type or object type that is being protected by the ACL.",
-            "name": "key",
-            "in": "path",
-            "required": true
-          },
-          {
-            "type": "string",
-            "description": "The username to add to the specified ACL.",
-            "name": "username",
-            "in": "path",
-            "required": true
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "The username was added to the specified ACL.",
-            "schema": {
-              "type": "string"
-            }
-          },
-          "500": {
-            "description": "Failed to add the username to the specified ACL.",
-            "schema": {
-              "type": "string"
-            }
-          }
-        }
-      },
+    "/api/v1/security/{type}/{orgID}/{key}/{aclUserType}/{username}": {
       "delete": {
-        "description": "Remove a username from an ACL for a destination type or an object type. If the last username is removed,\nthe ACL is deleted as well.",
+        "description": "Remove a user from an ACL for a destination type or an object type. If the last username is removed,\nthe ACL is deleted as well.",
         "produces": [
           "text/plain"
         ],
         "tags": [
           "CSS"
         ],
-        "summary": "Remove a username from an ACL for a destination type or an object type.",
+        "summary": "Remove a user from an ACL for a destination type or an object type.",
         "operationId": "handleACLDelete",
         "parameters": [
           {
@@ -2261,6 +2207,17 @@
             "type": "string",
             "description": "The destination type or object type that is being protected by the ACL.",
             "name": "key",
+            "in": "path",
+            "required": true
+          },
+          {
+            "enum": [
+              "user",
+              "node"
+            ],
+            "type": "string",
+            "description": "The acl user type of given username to be deleted",
+            "name": "acl_usertype",
             "in": "path",
             "required": true
           },
@@ -2290,16 +2247,18 @@
     }
   },
   "definitions": {
-    "ConsumedObject": {
-      "description": "ConsumedObject contains consumed object's meta data and its timestamp",
+    "ACLentry": {
+      "description": "ACLentry contains ACL information about each user",
       "type": "object",
       "properties": {
-        "MetaData": {
-          "$ref": "#/definitions/MetaData"
+        "ACLRole": {
+          "type": "string"
         },
-        "Timestamp": {
-          "type": "string",
-          "format": "date-time"
+        "ACLUserType": {
+          "type": "string"
+        },
+        "Username": {
+          "type": "string"
         }
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
@@ -2442,31 +2401,6 @@
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
     },
-    "IOError": {
-      "description": "IOError is the error for requests failed because of the IO",
-      "type": "object",
-      "properties": {
-        "Message": {
-          "type": "string"
-        }
-      },
-      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
-    },
-    "InternalError": {
-      "description": "InternalError is a general error",
-      "type": "object",
-      "properties": {
-        "Message": {
-          "type": "string"
-        }
-      },
-      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
-    },
-    "Locks": {
-      "description": "Locks is a set of object locks",
-      "type": "object",
-      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
-    },
     "MQTTHealthStatusInfo": {
       "description": "MQTTHealthStatusInfo describes the health status of the MQTT connection of the sync-service node",
       "type": "object",
@@ -2503,19 +2437,6 @@
           "type": "integer",
           "format": "uint64",
           "x-go-name": "TimeSinceLastSubscribeError"
-        }
-      },
-      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
-    },
-    "MessagingGroup": {
-      "description": "MessagingGroup maps organization to its messaging group",
-      "type": "object",
-      "properties": {
-        "GroupName": {
-          "type": "string"
-        },
-        "OrgID": {
-          "type": "string"
         }
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
@@ -2660,6 +2581,11 @@
           "type": "string",
           "x-go-name": "OwnerID"
         },
+        "public": {
+          "description": "Public is a flag indicate this object is visiable to all users in all orgs\nOptional field, default is false (not visiable to all users)",
+          "type": "boolean",
+          "x-go-name": "Public"
+        },
         "sourceDataUri": {
           "description": "SourceDataURI is a URI indicating where the sender of the object should read the data from.\nCurrently only file URIs are supported.\nThis field is available only when working with the ESS.\nOptional field, if omitted the object's data should be provided by the user.",
           "type": "string",
@@ -2669,38 +2595,6 @@
           "description": "Version is the object's version (as used by the application).\nOptional field, empty by default.",
           "type": "string",
           "x-go-name": "Version"
-        }
-      },
-      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
-    },
-    "NotFound": {
-      "description": "NotFound is the error returned if an object wasn't found",
-      "type": "object",
-      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
-    },
-    "NotificationInfo": {
-      "description": "NotificationInfo contains information about a message to send to the other side",
-      "type": "object",
-      "properties": {
-        "DataID": {
-          "type": "integer",
-          "format": "int64"
-        },
-        "DestID": {
-          "type": "string"
-        },
-        "DestType": {
-          "type": "string"
-        },
-        "InstanceID": {
-          "type": "integer",
-          "format": "int64"
-        },
-        "MetaData": {
-          "$ref": "#/definitions/MetaData"
-        },
-        "NotificationTopic": {
-          "type": "string"
         }
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
@@ -2809,16 +2703,6 @@
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
     },
-    "PathError": {
-      "description": "PathError is the error for path issues",
-      "type": "object",
-      "properties": {
-        "Message": {
-          "type": "string"
-        }
-      },
-      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
-    },
     "Policy": {
       "description": "Policy describes a policy made up of a set of properties and constraints",
       "type": "object",
@@ -2882,16 +2766,6 @@
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
     },
-    "SecurityError": {
-      "description": "SecurityError is the error for requests failed because of security",
-      "type": "object",
-      "properties": {
-        "Message": {
-          "type": "string"
-        }
-      },
-      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
-    },
     "ServiceID": {
       "description": "ServiceID contains the ID of a service to which an object may have affinity for",
       "type": "object",
@@ -2919,35 +2793,6 @@
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
     },
-    "StoredOrganization": {
-      "description": "StoredOrganization contains organization and its update timestamp",
-      "type": "object",
-      "properties": {
-        "Org": {
-          "$ref": "#/definitions/Organization"
-        },
-        "Timestamp": {
-          "type": "string",
-          "format": "date-time"
-        }
-      },
-      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
-    },
-    "SyncServiceVersion": {
-      "description": "SyncServiceVersion is the current version of the Sync-Service",
-      "type": "object",
-      "properties": {
-        "Major": {
-          "type": "integer",
-          "format": "uint32"
-        },
-        "Minor": {
-          "type": "integer",
-          "format": "uint32"
-        }
-      },
-      "x-go-package": "github.com/open-horizon/edge-sync-service/common"
-    },
     "UsageInfo": {
       "description": "UsageInfo describes the usage of the sync-service node",
       "type": "object",
@@ -2971,21 +2816,21 @@
       "x-go-package": "github.com/open-horizon/edge-sync-service/common"
     },
     "bulkACLUpdate": {
-      "description": "bulkACLUpdate is the payload used when performing a bulk update on an ACL (either adding usernames to an\nACL or removing usernames from an ACL.",
+      "description": "bulkACLUpdate is the payload used when performing a bulk update on an ACL (either adding uses to an\nACL or removing users from an ACL.",
       "type": "object",
       "properties": {
         "action": {
-          "description": "Action is an action, which can be either add (to add usernames) or remove (to remove usernames)",
+          "description": "Action is an action, which can be either add (to add users) or remove (to remove users)",
           "type": "string",
           "x-go-name": "Action"
         },
-        "usernames": {
-          "description": "Usernames is an array of usernames to be added or removed from the ACL as appropriate",
+        "users": {
+          "description": "aclUsers is an array of ACL entries to be added or removed from the ACL as appropriate. Don's specify ACLRole if action is \"remove\"",
           "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/definitions/ACLentry"
           },
-          "x-go-name": "Usernames"
+          "x-go-name": "Users"
         }
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/core/base"
