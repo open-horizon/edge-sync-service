@@ -847,7 +847,7 @@ func BlockUntilNoRunningGoRoutines() {
 }
 
 // IsValidName checks if the string only contains letters, digits, and !@#%^*-_.~
-var IsValidName = regexp.MustCompile(`^[a-zA-Z0-9|!|@|#|$|^|*|\-|_|.|~]+$`).MatchString
+var IsValidName = regexp.MustCompile(`^[a-zA-Z0-9|!|@|#|$|^|*|\-|_|.|~|\pL|\pN]+$`).MatchString
 
 // ValidateDestinationListInput checks if destinationsList contains < or >, to avoid injecting html like tags from user
 func ValidateDestinationListInput(destinationsList []string) (bool, SyncServiceError) {
