@@ -278,6 +278,31 @@ type Config struct {
 	// MongoSessionCacheSize specifies the number of MongoDB session copies to use
 	MongoSessionCacheSize int `env:"MONGO_SESSION_CACHE_SIZE"`
 
+	// CouchAddress specifies address of the couch database
+	CouchAddress string `env:"COUCH_ADDRESS"`
+
+	// CouchDbName specifies the name of the database to use
+	CouchDbName string `env:"COUCH_DB_NAME"`
+
+	// CouchUsername specifies the username of the couch database
+	CouchUsername string `env:"COUCH_USERNAME"`
+
+	// CouchPassword specifies the username of the couch database
+	CouchPassword string `env:"COUCH_PASSWORD"`
+
+	// CouchUseSSL specifies whether or not to use SSL connection with couch
+	CouchUseSSL bool `env:"COUCH_USE_SSL"`
+
+	// CouchCACertificate specifies the CA certificate that was used to sign the server certificate
+	// used by the CouchDB server. This value can either be the CA certificate itself or the path of a
+	// file containing the CA certificate. If it is a path of a file, then it is relative to the
+	// PersistenceRootPath configuration property if it doesn't start with a slash (/).
+	CouchCACertificate string `env:"COUCH_CA_CERTIFICATE"`
+
+	// CouchAllowInvalidCertificates specifies that the couch driver will not attempt to validate the server certificates.
+	// Please only set this for development purposes! It makes using TLS pointless and is never the right answer.
+	CouchAllowInvalidCertificates bool `env:"COUCH_ALLOW_INVALID_CERTIFICATES"`
+
 	// DatabaseConnectTimeout specifies that the timeout in seconds of database connection attempts on startup
 	// The default value is 300
 	DatabaseConnectTimeout int `env:"DATABASE_CONNECT_TIMEOUT"`
@@ -290,7 +315,7 @@ type Config struct {
 	ObjectActivationInterval int16 `env:"OBJECT_ACTIVATION_INTERVAL"`
 
 	// StorageProvider specifies the type of the storage to be used by this node.
-	// For the CSS the options are 'mongo' (the default), and 'bolt'
+	// For the CSS the options are 'mongo' (the default), 'couch' and 'bolt'
 	// For the ESS the options are 'inmemory' (the default), and 'bolt'
 	StorageProvider string `env:"STORAGE_PROVIDER"`
 
@@ -626,8 +651,8 @@ func ValidateConfig() error {
 	if Configuration.NodeType == CSS {
 		if Configuration.StorageProvider == "" {
 			Configuration.StorageProvider = Mongo
-		} else if Configuration.StorageProvider != Mongo && Configuration.StorageProvider != Bolt {
-			return &configError{"Invalid StorageProvider, for CSS please specify any off: 'mongo', 'bolt', or leave as empty string"}
+		} else if Configuration.StorageProvider != Mongo && Configuration.StorageProvider != Bolt && Configuration.StorageProvider != Couch {
+			return &configError{"Invalid StorageProvider, for CSS please specify any off: 'mongo', 'bolt', 'couch' or leave as empty string"}
 		}
 	} else {
 		if Configuration.StorageProvider == "" {

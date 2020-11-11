@@ -1984,6 +1984,10 @@ func setUpStorage(storageType string) (Storage, error) {
 	case common.Mongo:
 		common.Configuration.MongoDbName = "d_test_db"
 		store = &Cache{Store: &MongoStorage{}}
+	case common.Couch:
+		common.Configuration.CouchDbName = "d_test_db"
+		common.Configuration.CouchAddress = "127.0.0.1:5984"
+		store = &Cache{Store: &CouchStorage{}}
 	}
 	if err := store.Init(); err != nil {
 		return nil, &Error{fmt.Sprintf("Failed to initialize storage driver. Error: %s\n", err.Error())}

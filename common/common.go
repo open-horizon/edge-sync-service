@@ -662,6 +662,7 @@ const (
 	Bolt     = "bolt"
 	InMemory = "inmemory"
 	Mongo    = "mongo"
+	Couch    = "couch"
 )
 
 // HashStrings uses FNV-1a (Fowler/Noll/Vo) fast and well dispersed hash functions
