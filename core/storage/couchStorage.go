@@ -110,6 +110,11 @@ func (store *CouchStorage) Init() common.SyncServiceError {
 		return &Error{message}
 	}
 
+	exists, err := client.DBExists(context.TODO(), store.loginInfo["dbName"])
+	if !exists {
+		client.CreateDB(context.TODO(), store.loginInfo["dbName"])
+	}
+
 	store.connected = true
 	store.client = client
 
