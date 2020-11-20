@@ -1987,6 +1987,8 @@ func setUpStorage(storageType string) (Storage, error) {
 	case common.Couch:
 		common.Configuration.CouchDbName = "d_test_db"
 		common.Configuration.CouchAddress = "127.0.0.1:5984"
+		common.Configuration.CouchUsername = os.Getenv("COUCH_USERNAME")
+		common.Configuration.CouchPassword = os.Getenv("COUCH_PASSWORD")
 		store = &Cache{Store: &CouchStorage{}}
 	}
 	if err := store.Init(); err != nil {

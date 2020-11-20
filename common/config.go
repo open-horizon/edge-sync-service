@@ -259,7 +259,7 @@ type Config struct {
 	// MongoUsername specifies the username of the mongo database
 	MongoUsername string `env:"MONGO_USERNAME"`
 
-	// MongoPassword specifies the username of the mongo database
+	// MongoPassword specifies the password of the mongo database
 	MongoPassword string `env:"MONGO_PASSWORD"`
 
 	// MongoUseSSL specifies whether or not to use SSL connection with mongo
@@ -287,7 +287,7 @@ type Config struct {
 	// CouchUsername specifies the username of the couch database
 	CouchUsername string `env:"COUCH_USERNAME"`
 
-	// CouchPassword specifies the username of the couch database
+	// CouchPassword specifies the password of the couch database
 	CouchPassword string `env:"COUCH_PASSWORD"`
 
 	// CouchUseSSL specifies whether or not to use SSL connection with couch
@@ -637,7 +637,7 @@ func ValidateConfig() error {
 	case ParallelMQTTLarge:
 	case "":
 	default:
-		return &configError{"Invalid MQTTParallelMode, please specify any off: 'none', 'small', 'medium', 'large', or leave as empty string"}
+		return &configError{"Invalid MQTTParallelMode, please specify any of: 'none', 'small', 'medium', 'large', or leave as empty string"}
 	}
 
 	if Configuration.MaxInflightChunks < 1 {
@@ -652,13 +652,13 @@ func ValidateConfig() error {
 		if Configuration.StorageProvider == "" {
 			Configuration.StorageProvider = Mongo
 		} else if Configuration.StorageProvider != Mongo && Configuration.StorageProvider != Bolt && Configuration.StorageProvider != Couch {
-			return &configError{"Invalid StorageProvider, for CSS please specify any off: 'mongo', 'bolt', 'couch' or leave as empty string"}
+			return &configError{"Invalid StorageProvider, for CSS please specify any of: 'mongo', 'bolt', 'couch' or leave as empty string"}
 		}
 	} else {
 		if Configuration.StorageProvider == "" {
 			Configuration.StorageProvider = InMemory
 		} else if Configuration.StorageProvider != InMemory && Configuration.StorageProvider != Bolt {
-			return &configError{"Invalid StorageProvider, for ESS please specify any off: 'inmemory', 'bolt', or leave as empty string"}
+			return &configError{"Invalid StorageProvider, for ESS please specify any of: 'inmemory', 'bolt', or leave as empty string"}
 		}
 	}
 	if len(Configuration.ObjectsDataPath) > 0 {

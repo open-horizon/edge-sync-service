@@ -6,16 +6,7 @@ import (
 	"time"
 )
 
-func TestCouchStorageConnection(t *testing.T) {
-	store, err := setUpStorage(common.Couch)
-	if err != nil {
-		t.Errorf(err.Error())
-		return
-	}
-	defer store.Stop()
-}
-
-func TestStorageObjects(t *testing.T) {
+func TestCouchStorageObjects(t *testing.T) {
 	store, err := setUpStorage(common.Couch)
 	if err != nil {
 		t.Errorf(err.Error())
@@ -40,17 +31,15 @@ func TestStorageObjects(t *testing.T) {
 		{common.MetaData{ObjectID: "4", ObjectType: "type1", DestOrgID: "myorg000", DestID: "dev1", DestType: "device", NoData: true, MetaOnly: true},
 			common.NotReadyToSend, nil},
 
-		{common.MetaData{ObjectID: "4", ObjectType: "type1", DestOrgID: "myorg000", DestID: "dev1", DestType: "device", NoData: true},
-			common.NotReadyToSend, nil},
-
 		{common.MetaData{ObjectID: "5", ObjectType: "type1", DestOrgID: "myorg000", DestID: "dev1", DestType: "device"},
 			common.NotReadyToSend, []byte("Attachment 5")},
-
-		{common.MetaData{ObjectID: "5", ObjectType: "type1", DestOrgID: "myorg000", DestID: "dev1", DestType: "device", NoData: true},
-			common.NotReadyToSend, nil},
 	}
 
 	for _, test := range tests {
+		//Delete
+		if err := store.DeleteStoredObject(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID); err != nil {
+			t.Errorf("Failed to delete object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+		}
 		// Insert
 		if deletedDests, err := store.StoreObject(test.metaData, test.data, test.status); err != nil {
 			t.Errorf("Failed to store object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
@@ -58,6 +47,18 @@ func TestStorageObjects(t *testing.T) {
 			if len(deletedDests) != 0 {
 				t.Errorf("StoreObject for new object returned deleted destinations (objectID = %s)\n", test.metaData.ObjectID)
 			}
+		}
+
+		_, err := store.RetrieveObject(test.metaData.DestOrgID,
+			test.metaData.ObjectType, test.metaData.ObjectID)
+		if err != nil {
+			t.Errorf("Failed to retrieve object(objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+		}
+
+		_, err = store.RetrieveObjectStatus(test.metaData.DestOrgID,
+			test.metaData.ObjectType, test.metaData.ObjectID)
+		if err != nil {
+			t.Errorf("Failed to retrieve object's status (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
 		}
 
 		storedMetaData, _, err := store.RetrieveObjectAndStatus(test.metaData.DestOrgID,
@@ -91,5 +92,18 @@ func TestStorageObjects(t *testing.T) {
 				storedMetaData.InstanceID, instanceID)
 		}
 
+		// Consumers
+		remainingConsumers, err := store.RetrieveObjectRemainingConsumers(test.metaData.DestOrgID,
+			test.metaData.ObjectType, test.metaData.ObjectID)
+		if err != nil {
+			t.Errorf("Failed to retrieve remainingConsumers (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+		} else if remainingConsumers != test.metaData.ExpectedConsumers {
+			t.Errorf("Incorrect object's remainig consumers (objectID = %s): %d instead of %d\n", storedMetaData.ObjectID,
+				remainingConsumers, test.metaData.ExpectedConsumers)
+		}
 	}
+}
+
+func TestCouchObjectActivation(t *testing.T) {
+	testStorageObjectActivation(common.Couch, t)
 }

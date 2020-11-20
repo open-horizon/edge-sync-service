@@ -5,7 +5,7 @@ go 1.14
 require (
 	github.com/eclipse/paho.mqtt.golang v1.1.1
 	github.com/globalsign/mgo v0.0.0-20180615134936-113d3961e731
-	github.com/go-kivik/couchdb v2.0.0+incompatible
+	github.com/go-kivik/couchdb v2.0.0+incompatible // indirect
 	github.com/go-kivik/couchdb/v3 v3.2.1
 	github.com/go-kivik/kivik v2.0.0+incompatible // indirect
 	github.com/go-kivik/kivik/v3 v3.2.0
