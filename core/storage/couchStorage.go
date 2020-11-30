@@ -39,6 +39,13 @@ type couchObject struct {
 	LastUpdate         time.Time                       `json:"last-update"`
 }
 
+type couchDestinationObject struct {
+	ID           string             `json:"_id"`
+	Rev          string             `json:"_rev,omitempty"`
+	Destination  common.Destination `json:"destination"`
+	LastPingTime time.Time          `json:"last-ping-time"`
+}
+
 // Init initializes the CouchStorage store
 func (store *CouchStorage) Init() common.SyncServiceError {
 
@@ -225,13 +232,10 @@ func (store *CouchStorage) StoreObject(metaData common.MetaData, data []byte, st
 		RemainingReceivers: metaData.ExpectedConsumers, Destinations: dests}
 
 	if existingObject != nil {
-		if err := store.updateObject(newObject); err != nil {
-			return nil, &Error{fmt.Sprintf("Failed to store an object. Error: %s.", err)}
-		}
-	} else {
-		if err := store.addObject(newObject); err != nil {
-			return nil, &Error{fmt.Sprintf("Failed to store an object. Error: %s.", err)}
-		}
+		newObject.Rev = existingObject.Rev
+	}
+	if err := store.upsertObject(id, newObject); err != nil {
+		return nil, &Error{fmt.Sprintf("Failed to store an object. Error: %s.", err)}
 	}
 
 	if !metaData.NoData && data != nil {
@@ -273,7 +277,7 @@ func (store *CouchStorage) DeleteStoredObject(orgID string, objectType string, o
 
 // GetObjectDestinations gets destinations that the object has to be sent to
 func (store *CouchStorage) GetObjectDestinations(metaData common.MetaData) ([]common.Destination, common.SyncServiceError) {
-	result := couchObject{}
+	result := &couchObject{}
 	id := getObjectCollectionID(metaData)
 	if err := store.getOne(id, &result); err != nil {
 		switch err {
@@ -293,7 +297,7 @@ func (store *CouchStorage) GetObjectDestinations(metaData common.MetaData) ([]co
 // GetObjectDestinationsList gets destinations that the object has to be sent to and their status
 func (store *CouchStorage) GetObjectDestinationsList(orgID string, objectType string,
 	objectID string) ([]common.StoreDestinationStatus, common.SyncServiceError) {
-	result := couchObject{}
+	result := &couchObject{}
 	id := createObjectCollectionID(orgID, objectType, objectID)
 	if err := store.getOne(id, &result); err != nil {
 		switch err {
@@ -352,6 +356,324 @@ func (store *CouchStorage) RetrieveObjectRemainingConsumers(orgID string, object
 	return result.RemainingConsumers, nil
 }
 
+// DecrementAndReturnRemainingConsumers decrements the number of remaining consumers of the object
+func (store *CouchStorage) DecrementAndReturnRemainingConsumers(orgID string, objectType string, objectID string) (int,
+	common.SyncServiceError) {
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	result := couchObject{}
+	if err := store.getOne(id, &result); err != nil {
+		return 0, &Error{fmt.Sprintf("Failed to retrieve object's remaining consumers. Error: %s.", err)}
+	}
+	result.RemainingConsumers = result.RemainingConsumers - 1
+	result.LastUpdate = time.Now()
+	if err := store.upsertObject(id, result); err != nil {
+		return 0, &Error{fmt.Sprintf("Failed to decrement object's remaining consumers. Error: %s.", err)}
+	}
+	return result.RemainingConsumers, nil
+}
+
+// ResetObjectRemainingConsumers sets the remaining consumers count to the original ExpectedConsumers value
+func (store *CouchStorage) ResetObjectRemainingConsumers(orgID string, objectType string, objectID string) common.SyncServiceError {
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	result := couchObject{}
+	if err := store.getOne(id, &result); err != nil {
+		return &Error{fmt.Sprintf("Failed to retrieve object. Error: %s.", err)}
+	}
+	result.RemainingConsumers = result.MetaData.ExpectedConsumers
+	result.LastUpdate = time.Now()
+
+	if err := store.upsertObject(id, result); err != nil {
+		return &Error{fmt.Sprintf("Failed to reset object's remaining comsumers. Error: %s.", err)}
+	}
+	return nil
+}
+
+// MarkObjectDeleted marks the object as deleted
+func (store *CouchStorage) MarkObjectDeleted(orgID string, objectType string, objectID string) common.SyncServiceError {
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	result := couchObject{}
+	if err := store.getOne(id, &result); err != nil {
+		return &Error{fmt.Sprintf("Failed to retrieve object. Error: %s.", err)}
+	}
+	result.Status = common.ObjDeleted
+	result.MetaData.Deleted = true
+	result.LastUpdate = time.Now()
+
+	if err := store.upsertObject(id, result); err != nil {
+		return &Error{fmt.Sprintf("Failed to mark object as deleted. Error: %s.", err)}
+	}
+	return nil
+}
+
+// ActivateObject marks object as active
+func (store *CouchStorage) ActivateObject(orgID string, objectType string, objectID string) common.SyncServiceError {
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	result := couchObject{}
+	if err := store.getOne(id, &result); err != nil {
+		return &Error{fmt.Sprintf("Failed to retrieve object. Error: %s.", err)}
+	}
+	result.MetaData.Inactive = false
+	result.LastUpdate = time.Now()
+
+	if err := store.upsertObject(id, result); err != nil {
+		return &Error{fmt.Sprintf("Failed to mark object as active. Error: %s.", err)}
+	}
+	return nil
+}
+
+// UpdateObjectStatus updates object's status
+func (store *CouchStorage) UpdateObjectStatus(orgID string, objectType string, objectID string, status string) common.SyncServiceError {
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	result := couchObject{}
+	if err := store.getOne(id, &result); err != nil {
+		return &Error{fmt.Sprintf("Failed to retrieve object. Error: %s.", err)}
+	}
+	result.Status = status
+	result.LastUpdate = time.Now()
+
+	if err := store.upsertObject(id, result); err != nil {
+		return &Error{fmt.Sprintf("Failed to update object's status. Error: %s.", err)}
+	}
+	return nil
+}
+
+// RetrieveUpdatedObjects returns the list of all the edge updated objects that are not marked as consumed or received
+// If received is true, return objects marked as received
+func (store *CouchStorage) RetrieveUpdatedObjects(orgID string, objectType string, received bool) ([]common.MetaData, common.SyncServiceError) {
+	result := []couchObject{}
+	var query interface{}
+	if received {
+		query = map[string]interface{}{
+			"selector": map[string]interface{}{
+				"$or": []map[string]interface{}{
+					map[string]interface{}{"status": common.CompletelyReceived},
+					map[string]interface{}{"status": common.ObjReceived},
+					map[string]interface{}{"status": common.ObjDeleted}},
+				"metadata.destinationOrgID": orgID, "metadata.objectType": objectType}}
+	} else {
+		query = map[string]interface{}{
+			"selector": map[string]interface{}{
+				"$or": []map[string]interface{}{
+					map[string]interface{}{"status": common.CompletelyReceived},
+					map[string]interface{}{"status": common.ObjDeleted}},
+				"metadata.destinationOrgID": orgID, "metadata.objectType": objectType}}
+	}
+
+	if err := store.findAll(query, &result); err != nil {
+		return nil, &Error{fmt.Sprintf("Failed to fetch the objects. Error: %s.", err)}
+	}
+
+	metaDatas := make([]common.MetaData, len(result))
+	for i, r := range result {
+		metaDatas[i] = r.MetaData
+	}
+	return metaDatas, nil
+}
+
+// RetrieveObjects returns the list of all the objects that need to be sent to the destination.
+// Adds the new destination to the destinations lists of the relevant objects.
+func (store *CouchStorage) RetrieveObjects(orgID string, destType string, destID string, resend int) ([]common.MetaData, common.SyncServiceError) {
+	result := []couchObject{}
+	query := map[string]interface{}{
+		"selector": map[string]interface{}{"metadata.destinationOrgID": orgID,
+			"$or": []map[string]interface{}{
+				map[string]interface{}{"status": common.ReadyToSend},
+				map[string]interface{}{"status": common.NotReadyToSend},
+			}}}
+
+	if err := store.findAll(query, &result); err != nil {
+		return nil, &Error{fmt.Sprintf("Failed to fetch the objects. Error: %s.", err)}
+	}
+
+	metaDatas := make([]common.MetaData, 0)
+	for _, r := range result {
+		if r.MetaData.DestinationPolicy != nil {
+			continue
+		}
+		if (r.MetaData.DestType == "" || r.MetaData.DestType == destType) &&
+			(r.MetaData.DestID == "" || r.MetaData.DestID == destID) {
+			status := common.Pending
+			if r.Status == common.ReadyToSend && !r.MetaData.Inactive {
+				status = common.Delivering
+			}
+			needToUpdate := false
+			// Add destination if it doesn't exist
+			dest, err := store.RetrieveDestination(orgID, destType, destID)
+			if err != nil {
+				return nil, &Error{fmt.Sprintf("Failed to update object's destinations.")}
+			}
+			existingDestIndex := -1
+			for i, d := range r.Destinations {
+				if d.Destination == *dest {
+					existingDestIndex = i
+					break
+				}
+			}
+			if existingDestIndex != -1 {
+				d := r.Destinations[existingDestIndex]
+				if status == common.Delivering &&
+					(resend == common.ResendAll || (resend == common.ResendDelivered && d.Status != common.Consumed) ||
+						(resend == common.ResendUndelivered && d.Status != common.Consumed && d.Status != common.Delivered)) {
+					metaDatas = append(metaDatas, r.MetaData)
+					r.Destinations[existingDestIndex].Status = common.Delivering
+					needToUpdate = true
+				}
+			} else {
+				if status == common.Delivering {
+					metaDatas = append(metaDatas, r.MetaData)
+				}
+				needToUpdate = true
+				r.Destinations = append(r.Destinations, common.StoreDestinationStatus{Destination: *dest, Status: status})
+			}
+			if needToUpdate {
+				r.LastUpdate = time.Now()
+				if err := store.upsertObject(r.ID, r); err != nil {
+					return nil, &Error{fmt.Sprintf("Failed to update object's destinations. Error: %s.", err)}
+				}
+			}
+		}
+	}
+	return metaDatas, nil
+}
+
+// UpdateObjectDeliveryStatus changes the object's delivery status and message for the destination
+// Returns true if the status is Deleted and all the destinations are in status Deleted
+func (store *CouchStorage) UpdateObjectDeliveryStatus(status string, message string, orgID string, objectType string, objectID string,
+	destType string, destID string) (bool, common.SyncServiceError) {
+	if status == "" && message == "" {
+		return false, nil
+	}
+	result := couchObject{}
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	allDeleted := true
+
+	if err := store.getOne(id, &result); err != nil {
+		return false, &Error{fmt.Sprintf("Failed to retrieve object. Error: %s.", err)}
+	}
+	found := false
+	allConsumed := true
+	allDeleted = true
+	for i, d := range result.Destinations {
+		if !found && d.Destination.DestType == destType && d.Destination.DestID == destID {
+			if message != "" || d.Status == common.Error {
+				d.Message = message
+			}
+			if status != "" {
+				d.Status = status
+			}
+			found = true
+			result.Destinations[i] = d
+		} else {
+			if d.Status != common.Consumed {
+				allConsumed = false
+			}
+			if d.Status != common.Deleted {
+				allDeleted = false
+			}
+		}
+	}
+	if !found {
+		return false, &Error{"Failed to find destination."}
+	}
+
+	result.LastUpdate = time.Now()
+	if result.MetaData.AutoDelete && status == common.Consumed && allConsumed && result.MetaData.Expiration == "" {
+		// Delete the object by setting its expiration time to one hour
+		expirationTime := time.Now().Add(time.Hour * time.Duration(1)).UTC().Format(time.RFC3339)
+		result.MetaData.Expiration = expirationTime
+	}
+	if err := store.upsertObject(id, result); err != nil {
+		return false, &Error{fmt.Sprintf("Failed to update object's destinations. Error: %s.", err)}
+	}
+	return (allDeleted && status == common.Deleted), nil
+}
+
+// UpdateObjectDelivering marks the object as being delivered to all its destinations
+func (store *CouchStorage) UpdateObjectDelivering(orgID string, objectType string, objectID string) common.SyncServiceError {
+	result := couchObject{}
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	if err := store.getOne(id, &result); err != nil {
+		return &Error{fmt.Sprintf("Failed to retrieve object. Error: %s.", err)}
+	}
+	for i, d := range result.Destinations {
+		d.Status = common.Delivering
+		result.Destinations[i] = d
+	}
+	result.LastUpdate = time.Now()
+	if err := store.upsertObject(id, result); err != nil {
+		return &Error{fmt.Sprintf("Failed to update object's destinations. Error: %s.", err)}
+	}
+	return nil
+}
+
+// StoreDestination stores the destination
+func (store *CouchStorage) StoreDestination(destination common.Destination) common.SyncServiceError {
+	id := getDestinationCollectionID(destination)
+	existingObject := &couchDestinationObject{}
+	newObject := couchDestinationObject{ID: id, Destination: destination}
+	if err := store.getOne(id, existingObject); err != nil {
+		if err != notFound {
+			return &Error{fmt.Sprintf("Failed to store a destination. Error: %s.", err)}
+		}
+		existingObject = nil
+	}
+	if existingObject != nil {
+		newObject.Rev = existingObject.Rev
+	}
+	err := store.upsertObject(id, newObject)
+	if err != nil {
+		return &Error{fmt.Sprintf("Failed to store a destination. Error: %s.", err)}
+	}
+	return nil
+}
+
+// RetrieveDestination retrieves a destination
+func (store *CouchStorage) RetrieveDestination(orgID string, destType string, destID string) (*common.Destination, common.SyncServiceError) {
+	result := couchDestinationObject{}
+	id := createDestinationCollectionID(orgID, destType, destID)
+	if err := store.getOne(id, &result); err != nil {
+		if err != notFound {
+			return nil, &Error{fmt.Sprintf("Failed to fetch the destination. Error: %s.", err)}
+		}
+		return nil, &NotFound{fmt.Sprintf(" The destination %s:%s does not exist", destType, destID)}
+	}
+	return &result.Destination, nil
+}
+
+// RetrieveDestinations returns all the destinations with the provided orgID and destType
+func (store *CouchStorage) RetrieveDestinations(orgID string, destType string) ([]common.Destination, common.SyncServiceError) {
+	result := []couchDestinationObject{}
+	var err error
+
+	if orgID == "" {
+		if destType == "" {
+			//check what needs to be done here
+			err = store.findAll(map[string]interface{}{"selector": map[string]interface{}{"last-ping-time": map[string]interface{}{"$ne": ""}}}, &result)
+		} else {
+			err = store.findAll(map[string]interface{}{"selector": map[string]interface{}{"destination.destinationType": destType}}, &result)
+		}
+	} else {
+		if destType == "" {
+			err = store.findAll(map[string]interface{}{"selector": map[string]interface{}{"destination.destinationOrgID": orgID}}, &result)
+		} else {
+			query := map[string]interface{}{
+				"selector": map[string]interface{}{
+					"destination.destinationOrgID": orgID,
+					"destination.destinationType":  destType}}
+			err = store.findAll(query, &result)
+		}
+	}
+	if err != nil {
+		return nil, &Error{fmt.Sprintf("Failed to fetch the destinations. Error: %s.", err)}
+	}
+
+	dests := make([]common.Destination, len(result))
+	for i, r := range result {
+		dests[i] = r.Destination
+	}
+	return dests, nil
+}
+
 //GetNumberOfStoredObjects returns the number of objects received from the application that are
 //currently stored in this node's storage
 func (store *CouchStorage) GetNumberOfStoredObjects() (uint32, common.SyncServiceError) {
@@ -366,44 +688,11 @@ func (store *CouchStorage) UpdateObjectDestinations(orgID string, objectType str
 	return nil, "", nil, nil, nil
 }
 
-// UpdateObjectDeliveryStatus changes the object's delivery status and message for the destination
-// Returns true if the status is Deleted and all the destinations are in status Deleted
-func (store *CouchStorage) UpdateObjectDeliveryStatus(status string, message string, orgID string, objectType string, objectID string,
-	destType string, destID string) (bool, common.SyncServiceError) {
-
-	return false, nil
-}
-
-// UpdateObjectDelivering marks the object as being delivered to all its destinations
-func (store *CouchStorage) UpdateObjectDelivering(orgID string, objectType string, objectID string) common.SyncServiceError {
-	return nil
-}
-
-// DecrementAndReturnRemainingConsumers decrements the number of remaining consumers of the object
-func (store *CouchStorage) DecrementAndReturnRemainingConsumers(orgID string, objectType string, objectID string) (int,
-	common.SyncServiceError) {
-
-	return 0, nil
-}
-
 // DecrementAndReturnRemainingReceivers decrements the number of remaining receivers of the object
 func (store *CouchStorage) DecrementAndReturnRemainingReceivers(orgID string, objectType string, objectID string) (int,
 	common.SyncServiceError) {
 
 	return 0, nil
-}
-
-// ResetObjectRemainingConsumers sets the remaining consumers count to the original ExpectedConsumers value
-func (store *CouchStorage) ResetObjectRemainingConsumers(orgID string, objectType string, objectID string) common.SyncServiceError {
-
-	return nil
-}
-
-// RetrieveUpdatedObjects returns the list of all the edge updated objects that are not marked as consumed or received
-// If received is true, return objects marked as received
-func (store *CouchStorage) RetrieveUpdatedObjects(orgID string, objectType string, received bool) ([]common.MetaData, common.SyncServiceError) {
-
-	return nil, nil
 }
 
 // RetrieveObjectsWithDestinationPolicy returns the list of all the objects that have a Destination Policy
@@ -427,12 +716,6 @@ func (store *CouchStorage) RetrieveObjectsWithDestinationPolicyUpdatedSince(orgI
 
 // RetrieveObjectsWithFilters returns the list of all the objects that meet the given conditions
 func (store *CouchStorage) RetrieveObjectsWithFilters(orgID string, destinationPolicy *bool, dpServiceOrgID string, dpServiceName string, dpPropertyName string, since int64, objectType string, objectID string, destinationType string, destinationID string, noData *bool, expirationTimeBefore string) ([]common.MetaData, common.SyncServiceError) {
-	return nil, nil
-}
-
-// RetrieveObjects returns the list of all the objects that need to be sent to the destination.
-// Adds the new destination to the destinations lists of the relevant objects.
-func (store *CouchStorage) RetrieveObjects(orgID string, destType string, destID string, resend int) ([]common.MetaData, common.SyncServiceError) {
 	return nil, nil
 }
 
@@ -473,31 +756,13 @@ func (store *CouchStorage) AppendObjectData(orgID string, objectType string, obj
 	return nil
 }
 
-// UpdateObjectStatus updates object's status
-func (store *CouchStorage) UpdateObjectStatus(orgID string, objectType string, objectID string, status string) common.SyncServiceError {
-
-	return nil
-}
-
 // UpdateObjectSourceDataURI updates object's source data URI
 func (store *CouchStorage) UpdateObjectSourceDataURI(orgID string, objectType string, objectID string, sourceDataURI string) common.SyncServiceError {
 	return nil
 }
 
-// MarkObjectDeleted marks the object as deleted
-func (store *CouchStorage) MarkObjectDeleted(orgID string, objectType string, objectID string) common.SyncServiceError {
-
-	return nil
-}
-
 // MarkDestinationPolicyReceived marks an object's destination policy as having been received
 func (store *CouchStorage) MarkDestinationPolicyReceived(orgID string, objectType string, objectID string) common.SyncServiceError {
-
-	return nil
-}
-
-// ActivateObject marks object as active
-func (store *CouchStorage) ActivateObject(orgID string, objectType string, objectID string) common.SyncServiceError {
 
 	return nil
 }
@@ -530,21 +795,10 @@ func (store *CouchStorage) RetrieveWebhooks(orgID string, objectType string) ([]
 	return nil, nil
 }
 
-// RetrieveDestinations returns all the destinations with the provided orgID and destType
-func (store *CouchStorage) RetrieveDestinations(orgID string, destType string) ([]common.Destination, common.SyncServiceError) {
-	return nil, nil
-}
-
 // DestinationExists returns true if the destination exists, and false otherwise
 func (store *CouchStorage) DestinationExists(orgID string, destType string, destID string) (bool, common.SyncServiceError) {
 
 	return true, nil
-}
-
-// StoreDestination stores the destination
-func (store *CouchStorage) StoreDestination(destination common.Destination) common.SyncServiceError {
-
-	return nil
 }
 
 // DeleteDestination deletes the destination
@@ -576,11 +830,6 @@ func (store *CouchStorage) RetrieveDestinationProtocol(orgID string, destType st
 
 // RetrieveAllObjects retrieves All Objects
 func (store *CouchStorage) RetrieveAllObjects(orgID string, objectType string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
-	return nil, nil
-}
-
-// RetrieveDestination retrieves a destination
-func (store *CouchStorage) RetrieveDestination(orgID string, destType string, destID string) (*common.Destination, common.SyncServiceError) {
 	return nil, nil
 }
 

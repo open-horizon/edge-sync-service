@@ -8,6 +8,7 @@ import (
 	"github.com/open-horizon/edge-sync-service/common"
 	"io/ioutil"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 )
@@ -58,26 +59,11 @@ func (store *CouchStorage) removeAttachment(id string) common.SyncServiceError {
 	return nil
 }
 
-func (store *CouchStorage) updateObject(object couchObject) common.SyncServiceError {
+func (store *CouchStorage) upsertObject(id string, object interface{}) common.SyncServiceError {
 
 	db := store.client.DB(context.TODO(), store.loginInfo["dbName"])
 
-	row := db.Get(context.TODO(), object.ID)
-	if kivik.StatusCode(row.Err) == http.StatusNotFound {
-		return notFound
-	}
-	object.Rev = row.Rev
-	if _, err := db.Put(context.TODO(), object.ID, object); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (store *CouchStorage) addObject(object couchObject) common.SyncServiceError {
-
-	db := store.client.DB(context.TODO(), store.loginInfo["dbName"])
-
-	if _, err := db.Put(context.TODO(), object.ID, object); err != nil {
+	if _, err := db.Put(context.TODO(), id, object); err != nil {
 		return err
 	}
 	return nil
@@ -87,28 +73,49 @@ func (store *CouchStorage) getInstanceID() int64 {
 	return time.Now().UnixNano() / (int64(time.Millisecond) / int64(time.Nanosecond))
 }
 
-func (store *CouchStorage) findAll(query interface{}, result *[]couchObject) common.SyncServiceError {
+func (store *CouchStorage) findAll(query interface{}, result interface{}) common.SyncServiceError {
 
 	db := store.client.DB(context.TODO(), store.loginInfo["dbName"])
-	obj := couchObject{}
 
 	rows, err := db.Find(context.TODO(), query)
 	if err != nil {
 		return err
 	}
 
+	resultv := reflect.ValueOf(result)
+	if resultv.Kind() != reflect.Ptr {
+		return &Error{"result argument must be a slice address"}
+	}
+
+	slicev := resultv.Elem()
+
+	if slicev.Kind() == reflect.Interface {
+		slicev = slicev.Elem()
+	}
+	if slicev.Kind() != reflect.Slice {
+		return &Error{"result argument must be a slice address"}
+	}
+
+	slicev = slicev.Slice(0, slicev.Cap())
+	elemt := slicev.Type().Elem()
+	i := 0
 	for rows.Next() {
-		err := rows.ScanDoc(&obj)
+		elemp := reflect.New(elemt)
+		err := rows.ScanDoc(elemp.Interface())
 		if err != nil {
 			return err
 		}
-		*result = append(*result, obj)
+
+		slicev = reflect.Append(slicev, elemp.Elem())
+		slicev = slicev.Slice(0, slicev.Cap())
+		i++
 	}
+	resultv.Elem().Set(slicev.Slice(0, i))
 
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	return nil
+	return rows.Close()
 }
 
 func (store *CouchStorage) deleteObject(id string) common.SyncServiceError {
@@ -137,31 +144,3 @@ func createDSN(ipAddress, username, password string) string {
 	strBuilder.WriteByte('/')
 	return strBuilder.String()
 }
-
-// func (store *CouchStorage) findOne(query interface{}, result interface{}) common.SyncServiceError {
-
-// 	db := store.client.DB(context.TODO(), store.loginInfo["dbName"])
-// 	var rows *kivik.Rows
-
-// 	rows, err := db.Find(context.TODO(), query)
-// 	if err != nil {
-// 		switch kivik.StatusCode(err) {
-// 		case http.StatusNotFound:
-// 			return &common.NotFound{}
-// 		default:
-// 			return err
-// 		}
-// 	}
-
-// 	for rows.Next() {
-// 		err := rows.ScanDoc(&result)
-// 		if err != nil {
-// 			return err
-// 		}
-// 	}
-
-// 	if err := rows.Err(); err != nil {
-// 		panic(err)
-// 	}
-// 	return nil
-// }
