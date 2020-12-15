@@ -162,3 +162,33 @@ func TestCouchStorageDestinations(t *testing.T) {
 func TestCouchStorageObjectData(t *testing.T) {
 	testStorageObjectData(common.Couch, t)
 }
+
+// func TestCouchCount(t *testing.T) {
+// 	store, err := setUpStorage(common.Couch)
+// 	if err != nil {
+// 		t.Errorf(err.Error())
+// 		return
+// 	}
+// 	defer store.Stop()
+
+// 	tests := []struct {
+// 		dest common.Destination
+// 	}{
+// 		{common.Destination{DestOrgID: "myorg123", DestID: "1", DestType: "device", Communication: common.MQTTProtocol}},
+// 		{common.Destination{DestOrgID: "myorg123", DestID: "1", DestType: "device2", Communication: common.MQTTProtocol}},
+// 		{common.Destination{DestOrgID: "myorg123", DestID: "2", DestType: "device2", Communication: common.MQTTProtocol}},
+// 		{common.Destination{DestOrgID: "myorg2", DestID: "1", DestType: "device", Communication: common.HTTPProtocol}},
+// 	}
+
+// 	for _, test := range tests {
+// 		if err := store.StoreDestination(test.dest); err != nil {
+// 			t.Errorf("StoreDestination failed. Error: %s\n", err.Error())
+// 		}
+// 	}
+
+// 	if count, err := store.GetNumberOfDestinations(); err != nil {
+// 		t.Errorf("count failed. Error: %s\n", err.Error())
+// 	} else if count != uint32(len(tests)) {
+// 		t.Errorf("returned incorrect count %d \n", count)
+// 	}
+// }

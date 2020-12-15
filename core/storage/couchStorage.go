@@ -34,7 +34,7 @@ type couchObject struct {
 	ID                 string                          `json:"_id"`
 	Rev                string                          `json:"_rev,omitempty"`
 	MetaData           common.MetaData                 `json:"metadata"`
-	Attachment         *kivik.Attachment               `json:"_attachments,omitempty"`
+	Attachments        *kivik.Attachments              `json:"_attachments,omitempty"`
 	Status             string                          `json:"status"`
 	PolicyReceived     bool                            `json:"policy-received"`
 	RemainingConsumers int                             `json:"remaining-consumers"`
@@ -273,20 +273,32 @@ func (store *CouchStorage) StoreObject(metaData common.MetaData, data []byte, st
 
 	if existingObject != nil {
 		newObject.Rev = existingObject.Rev
+		if metaData.MetaOnly && data == nil {
+			attachment, err := store.getAttachment(id)
+			if err != nil {
+				if err != notFound {
+					return nil, err
+				}
+			} else {
+				attachments := &kivik.Attachments{id: attachment}
+				newObject.Attachments = attachments
+			}
+		}
 	}
+
+	if !metaData.NoData && data != nil {
+		content := ioutil.NopCloser(bytes.NewReader(data))
+		defer content.Close()
+
+		attachment := &kivik.Attachment{ContentType: "application/octet-stream", Content: content}
+		attachments := &kivik.Attachments{id: attachment}
+		newObject.Attachments = attachments
+	}
+
 	if err := store.upsertObject(id, newObject); err != nil {
 		return nil, &Error{fmt.Sprintf("Failed to store an object. Error: %s.", err)}
 	}
 
-	if !metaData.NoData && data != nil {
-		if err := store.addAttachment(id, data); err != nil {
-			return nil, err
-		}
-	} else if !metaData.MetaOnly {
-		if err := store.removeAttachment(id); err != nil {
-			return nil, err
-		}
-	}
 	return deletedDests, nil
 }
 
@@ -924,21 +936,17 @@ func (store *CouchStorage) RetrieveObjectData(orgID string, objectType string, o
 	}
 
 	data, err := ioutil.ReadAll(attachment.Content)
+	defer attachment.Content.Close()
 	if err != nil {
 		return nil, err
 	}
+
 	return bytes.NewReader(data), nil
-	//return attachment.Content, nil
 }
 
 // CloseDataReader closes the data reader if necessary
 func (store *CouchStorage) CloseDataReader(dataReader io.Reader) common.SyncServiceError {
-	switch v := dataReader.(type) {
-	case io.ReadCloser:
-		return v.Close()
-	default:
-		return nil
-	}
+	return nil
 }
 
 // ReadObjectData returns the object data with the specified parameters
@@ -953,6 +961,7 @@ func (store *CouchStorage) ReadObjectData(orgID string, objectType string, objec
 	}
 
 	data, err := ioutil.ReadAll(attachment.Content)
+	defer attachment.Content.Close()
 	if err != nil {
 		return nil, true, 0, err
 	}
@@ -999,16 +1008,21 @@ func (store *CouchStorage) StoreObjectData(orgID string, objectType string, obje
 		result.LastUpdate = time.Now()
 	}
 
-	newRev, size, err := store.addAttachmentContent(id, dataReader)
+	size, err := store.addAttachment(id, dataReader)
 	if err != nil {
 		return false, err
 	}
 
-	result.MetaData.ObjectSize = size
-	result.Rev = newRev
+	// need to get result object again because attachment has been added
+	updatedResult := &couchObject{}
+	if err := store.getOne(id, updatedResult); err != nil {
+		return false, &Error{fmt.Sprintf("Failed to store the data. Error: %s.", err)}
+	}
 
 	// Update object size
-	if err := store.upsertObject(id, result); err != nil {
+	updatedResult.MetaData.ObjectSize = size
+
+	if err := store.upsertObject(id, updatedResult); err != nil {
 		return false, &Error{fmt.Sprintf("Failed to update object's size. Error: %s.", err)}
 	}
 
@@ -1028,6 +1042,7 @@ func (store *CouchStorage) AppendObjectData(orgID string, objectType string, obj
 	}
 
 	objectData, err := ioutil.ReadAll(attachment.Content)
+	defer attachment.Content.Close()
 	if err != nil {
 		return err
 	}
@@ -1060,7 +1075,7 @@ func (store *CouchStorage) AppendObjectData(orgID string, objectType string, obj
 		}
 	}
 
-	if err := store.addAttachment(id, objectData); err != nil {
+	if _, err := store.addAttachment(id, bytes.NewReader(objectData)); err != nil {
 		return err
 	}
 	return nil
@@ -1236,10 +1251,9 @@ func (store *CouchStorage) RemoveInactiveDestinations(lastTimestamp time.Time) {
 		if err != notFound && log.IsLogging(logger.ERROR) {
 			log.Error("Error in couchStorage.RemoveInactiveDestinations: failed to remove inactive destinations. Error: %s\n", err)
 		}
-	}
-	if len(dests) == 0 {
 		return
 	}
+
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Removing inactive destinations")
 	}
@@ -1256,14 +1270,14 @@ func (store *CouchStorage) RemoveInactiveDestinations(lastTimestamp time.Time) {
 }
 
 // GetNumberOfDestinations returns the number of currently registered ESS nodes (for CSS)
+// This function needs to be checked
 func (store *CouchStorage) GetNumberOfDestinations() (uint32, common.SyncServiceError) {
-	query := map[string]interface{}{
-		"selector": map[string]interface{}{
-			"last-ping-time": map[string]interface{}{
-				"$exists": true,
-			},
-		},
-	}
+
+	query := map[string]interface{}{"selector": map[string]interface{}{
+		"$or": []map[string]interface{}{
+			map[string]interface{}{"destination.communication": common.MQTTProtocol},
+			map[string]interface{}{"destination.communication": common.HTTPProtocol},
+		}}}
 
 	return store.countObjects(query)
 }
@@ -1280,10 +1294,10 @@ func (store *CouchStorage) RetrieveDestinationProtocol(orgID string, destType st
 
 // RetrieveAllObjects retrieves All Objects
 func (store *CouchStorage) RetrieveAllObjects(orgID string, objectType string) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
-	query := map[string]interface{}{
+	query := map[string]interface{}{"selector": map[string]interface{}{
 		"metadata.destinationOrgID": orgID,
 		"metadata.objectType":       objectType,
-	}
+	}}
 	return store.retrievePolicies(query)
 }
 

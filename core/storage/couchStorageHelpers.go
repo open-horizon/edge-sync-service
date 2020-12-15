@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	_ "github.com/go-kivik/couchdb/v3" // The CouchDB Driver
@@ -19,7 +18,6 @@ import (
 	"github.com/open-horizon/edge-utilities/logger/trace"
 )
 
-// This function is not final
 func (store *CouchStorage) checkObjects() {
 	if !store.connected {
 		return
@@ -92,47 +90,29 @@ func (store *CouchStorage) getOne(id string, result interface{}) common.SyncServ
 	return nil
 }
 
-func (store *CouchStorage) addAttachment(id string, data []byte) common.SyncServiceError {
+func (store *CouchStorage) addAttachment(id string, dataReader io.Reader) (int64, common.SyncServiceError) {
 
 	db := store.client.DB(context.TODO(), store.loginInfo["dbName"])
 	row := db.Get(context.TODO(), id)
 	if kivik.StatusCode(row.Err) == http.StatusNotFound {
-		return notFound
-	}
-
-	content := ioutil.NopCloser(bytes.NewReader(data))
-	defer content.Close()
-
-	attachment := &kivik.Attachment{Filename: id, ContentType: "application/octet-stream", Content: content}
-	if _, err := db.PutAttachment(context.TODO(), id, row.Rev, attachment); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (store *CouchStorage) addAttachmentContent(id string, dataReader io.Reader) (string, int64, common.SyncServiceError) {
-
-	db := store.client.DB(context.TODO(), store.loginInfo["dbName"])
-	row := db.Get(context.TODO(), id)
-	if kivik.StatusCode(row.Err) == http.StatusNotFound {
-		return "", 0, notFound
+		return 0, notFound
 	}
 
 	content := ioutil.NopCloser(dataReader)
 	defer content.Close()
 
 	attachment := &kivik.Attachment{Filename: id, ContentType: "application/octet-stream", Content: content}
-	newRev, err := db.PutAttachment(context.TODO(), id, row.Rev, attachment)
+	_, err := db.PutAttachment(context.TODO(), id, row.Rev, attachment)
 	if err != nil {
-		return "", 0, err
+		return 0, err
 	}
 
 	attachmentMeta, err := db.GetAttachmentMeta(context.TODO(), id, id)
 	if err != nil {
-		return "", 0, err
+		return 0, err
 	}
 
-	return newRev, attachmentMeta.Size, nil
+	return attachmentMeta.Size, nil
 }
 
 func (store *CouchStorage) removeAttachment(id string) common.SyncServiceError {
@@ -359,12 +339,12 @@ func (store *CouchStorage) retrievePolicies(query interface{}) ([]common.ObjectD
 	results := []couchObject{}
 
 	if err := store.findAll(query, &results); err != nil {
+		if err == notFound {
+			return nil, nil
+		}
 		return nil, &Error{fmt.Sprintf("Failed to fetch the objects with a Destination Policy. Error: %s", err)}
 	}
 
-	if len(results) == 0 {
-		return nil, nil
-	}
 	objects := make([]common.ObjectDestinationPolicy, len(results))
 	for index, oneResult := range results {
 		destinationList := make([]common.DestinationsStatus, len(oneResult.Destinations))
@@ -599,17 +579,4 @@ func (store *CouchStorage) retrieveObjOrDestTypeForGivenACLUserHelper(aclType st
 
 	}
 	return result, nil
-}
-
-//This function should be moved to storage.go after it is finalized
-func createDSN(ipAddress, username, password string) string {
-	var strBuilder strings.Builder
-	strBuilder.WriteString("http://")
-	strBuilder.WriteString(username)
-	strBuilder.WriteByte(':')
-	strBuilder.WriteString(password)
-	strBuilder.WriteByte('@')
-	strBuilder.WriteString(ipAddress)
-	strBuilder.WriteByte('/')
-	return strBuilder.String()
 }

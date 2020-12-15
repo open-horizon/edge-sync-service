@@ -551,3 +551,16 @@ func DeleteStoredData(store Storage, metaData common.MetaData) common.SyncServic
 
 	return store.DeleteStoredData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 }
+
+// Only for CouchDB
+func createDSN(ipAddress, username, password string) string {
+	var strBuilder strings.Builder
+	strBuilder.WriteString("http://")
+	strBuilder.WriteString(username)
+	strBuilder.WriteByte(':')
+	strBuilder.WriteString(password)
+	strBuilder.WriteByte('@')
+	strBuilder.WriteString(ipAddress)
+	strBuilder.WriteByte('/')
+	return strBuilder.String()
+}
