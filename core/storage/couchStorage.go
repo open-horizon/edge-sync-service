@@ -1,19 +1,20 @@
 package storage
 
 import (
-	_ "github.com/go-kivik/couchdb/v3" // The CouchDB Driver
+	"github.com/go-kivik/couchdb/v3" // The CouchDB Driver
+	"github.com/go-kivik/couchdb/v3/chttp"
 	kivik "github.com/go-kivik/kivik/v3"
 	"strings"
 
+	"bytes"
 	"context"
-	//"crypto/tls"
-	//"crypto/x509"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"io/ioutil"
-	//"net/http"
-	//"os"
-	"bytes"
+	"net/http"
+	"os"
 	"time"
 
 	"github.com/open-horizon/edge-sync-service/common"
@@ -96,64 +97,57 @@ func (store *CouchStorage) Init() common.SyncServiceError {
 		"Password":  common.Configuration.CouchPassword,
 	}
 
-	store.dsn = createDSN(store.loginInfo["ipAddress"], store.loginInfo["Username"], store.loginInfo["Password"])
+	store.dsn = createDSN(store.loginInfo["ipAddress"])
 	var client *kivik.Client
 	var err error
-
-	// if common.Configuration.CouchUseSSL {
-	// 	tlsConfig := &tls.Config{}
-	// 	if common.Configuration.CouchCACertificate != "" {
-	// 		var caFile string
-	// 		if strings.HasPrefix(common.Configuration.CouchCACertificate, "/") {
-	// 			caFile = common.Configuration.CouchCACertificate
-	// 		} else {
-	// 			caFile = common.Configuration.PersistenceRootPath + common.Configuration.CouchCACertificate
-	// 		}
-	// 		serverCaCert, err := ioutil.ReadFile(caFile)
-	// 		if err != nil {
-	// 			if _, ok := err.(*os.PathError); ok {
-	// 				serverCaCert = []byte(common.Configuration.CouchCACertificate)
-	// 				err = nil
-	// 			} else {
-	// 				message := fmt.Sprintf("Failed to find couch SSL CA file. Error: %s.", err)
-	// 				return &Error{message}
-	// 			}
-	// 		}
-
-	// 		caCertPool := x509.NewCertPool()
-	// 		caCertPool.AppendCertsFromPEM(serverCaCert)
-	// 		tlsConfig.RootCAs = caCertPool
-	// 	}
-
-	// 	// Please avoid using this if possible! Makes using TLS pointless
-	// 	if common.Configuration.CouchAllowInvalidCertificates {
-	// 		tlsConfig.InsecureSkipVerify = true
-	// 	}
-
-	// 	setXport := couchdb.SetTransport(&http.Transport{TLSClientConfig: tlsConfig})
-	// 	client, err = kivik.New("couch", store.dsn)
-	// 	if err != nil {
-	// 		message := fmt.Sprintf("Failed to connect. Error: %s.", err)
-	// 		return &Error{message}
-	// 	}
-
-	// 	err = client.Authenticate(context.TODO(), setXport)
-	// 	if err != nil {
-	// 		message := fmt.Sprintf("Authentication Failed. Error: %s.", err)
-	// 		return &Error{message}
-	// 	}
-	//}
-
-	// basicAuth := couchdb.BasicAuth(store.loginInfo["Username"], store.loginInfo["Password"])
-	// err = client.Authenticate(context.TODO(), basicAuth)
-	// if err != nil {
-	// 	return err
-	// }
 
 	client, err = kivik.New("couch", store.dsn)
 	if client == nil || err != nil {
 		message := fmt.Sprintf("Failed to connect to couch. Error: %s.", err)
 		return &Error{message}
+	}
+
+	if common.Configuration.CouchUseSSL {
+		tlsConfig := &tls.Config{}
+		if common.Configuration.CouchCACertificate != "" {
+			var caFile string
+			if strings.HasPrefix(common.Configuration.CouchCACertificate, "/") {
+				caFile = common.Configuration.CouchCACertificate
+			} else {
+				caFile = common.Configuration.PersistenceRootPath + common.Configuration.CouchCACertificate
+			}
+			serverCaCert, err := ioutil.ReadFile(caFile)
+			if err != nil {
+				if _, ok := err.(*os.PathError); ok {
+					serverCaCert = []byte(common.Configuration.CouchCACertificate)
+					err = nil
+				} else {
+					message := fmt.Sprintf("Failed to find Couch SSL CA file. Error: %s.", err)
+					return &Error{message}
+				}
+			}
+
+			caCertPool := x509.NewCertPool()
+			caCertPool.AppendCertsFromPEM(serverCaCert)
+			tlsConfig.RootCAs = caCertPool
+		}
+
+		// Please avoid using this if possible! Makes using TLS pointless
+		if common.Configuration.CouchAllowInvalidCertificates {
+			tlsConfig.InsecureSkipVerify = true
+		}
+
+		setXport := couchdb.SetTransport(&http.Transport{TLSClientConfig: tlsConfig})
+		err = client.Authenticate(context.TODO(), setXport)
+		if err != nil {
+			message := fmt.Sprintf("Authentication Failed. Error: %s.", err)
+			return &Error{message}
+		}
+	}
+
+	err = client.Authenticate(context.TODO(), &chttp.BasicAuth{Username: store.loginInfo["Username"], Password: store.loginInfo["Password"]})
+	if err != nil {
+		return err
 	}
 
 	available, err := client.Ping(context.TODO())
@@ -271,6 +265,9 @@ func (store *CouchStorage) StoreObject(metaData common.MetaData, data []byte, st
 		RemainingConsumers: metaData.ExpectedConsumers,
 		RemainingReceivers: metaData.ExpectedConsumers, Destinations: dests}
 
+	// In case of existing object, check if it had attachment and add to newObject if present
+	// This is done only in case of metaOnly update
+	// otherwise updated attachment will be added in the next block
 	if existingObject != nil {
 		newObject.Rev = existingObject.Rev
 		if metaData.MetaOnly && data == nil {
@@ -286,6 +283,7 @@ func (store *CouchStorage) StoreObject(metaData common.MetaData, data []byte, st
 		}
 	}
 
+	// Add attachment to newObject for NoData=false
 	if !metaData.NoData && data != nil {
 		content := ioutil.NopCloser(bytes.NewReader(data))
 		defer content.Close()
@@ -295,6 +293,8 @@ func (store *CouchStorage) StoreObject(metaData common.MetaData, data []byte, st
 		newObject.Attachments = attachments
 	}
 
+	// Cases where attachment needs to be removed are handled implicitly
+	// by not adding the existing attachment to newObject
 	if err := store.upsertObject(id, newObject); err != nil {
 		return nil, &Error{fmt.Sprintf("Failed to store an object. Error: %s.", err)}
 	}

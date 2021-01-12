@@ -18,6 +18,11 @@ import (
 	"github.com/open-horizon/edge-utilities/logger/trace"
 )
 
+// Note:
+// To update/delete an object in CouchDB, the first step is always to GET() the object
+// This is because the current 'rev' i.e 'revision' is needed to perform any modifications
+// Due to this - there are no direct methods to delete/update objects based on queries
+
 func (store *CouchStorage) checkObjects() {
 	if !store.connected {
 		return
@@ -62,7 +67,7 @@ func (store *CouchStorage) checkObjects() {
 			query = map[string]interface{}{"selector": map[string]interface{}{"_id": id, "last-update": object.LastUpdate}}
 		}
 
-		if err := store.deleteAllCouchObjects(query); err != nil {
+		if err = store.deleteAllCouchObjects(query); err != nil {
 			if err != notFound || object.LastUpdate.IsZero() {
 				log.Error("Error in CouchStorage.checkObjects: failed to remove expired objects. Error: %s\n", err)
 			}
@@ -81,6 +86,7 @@ func (store *CouchStorage) getOne(id string, result interface{}) common.SyncServ
 	db := store.client.DB(context.TODO(), store.loginInfo["dbName"])
 
 	row := db.Get(context.TODO(), id)
+	// Other Runtime errors are returned after the row.ScanDoc() call
 	if kivik.StatusCode(row.Err) == http.StatusNotFound {
 		return notFound
 	}
@@ -94,8 +100,11 @@ func (store *CouchStorage) addAttachment(id string, dataReader io.Reader) (int64
 
 	db := store.client.DB(context.TODO(), store.loginInfo["dbName"])
 	row := db.Get(context.TODO(), id)
-	if kivik.StatusCode(row.Err) == http.StatusNotFound {
-		return 0, notFound
+	if row.Err != nil {
+		if kivik.StatusCode(row.Err) == http.StatusNotFound {
+			return 0, notFound
+		}
+		return 0, row.Err
 	}
 
 	content := ioutil.NopCloser(dataReader)
@@ -119,16 +128,20 @@ func (store *CouchStorage) removeAttachment(id string) common.SyncServiceError {
 
 	db := store.client.DB(context.TODO(), store.loginInfo["dbName"])
 	row := db.Get(context.TODO(), id)
-	if kivik.StatusCode(row.Err) == http.StatusNotFound {
-		return notFound
+	if row.Err != nil {
+		if kivik.StatusCode(row.Err) == http.StatusNotFound {
+			return notFound
+		}
+		return row.Err
 	}
-
 	if _, err := db.DeleteAttachment(context.TODO(), id, row.Rev, id); err != nil {
 		return err
 	}
 	return nil
 }
 
+// In case of updating existing object, Rev is needs to be set in object
+// This has been set in the passed object by calling function
 func (store *CouchStorage) upsertObject(id string, object interface{}) common.SyncServiceError {
 
 	db := store.client.DB(context.TODO(), store.loginInfo["dbName"])
@@ -143,6 +156,10 @@ func (store *CouchStorage) getInstanceID() int64 {
 	return time.Now().UnixNano() / (int64(time.Millisecond) / int64(time.Nanosecond))
 }
 
+// Storage interface has many types of objects - couchObject, couchDestinationObject, couchACLObject, etc.
+// To make this a generic function for all object types, address of relevant type's slice is passed in result interface
+// Reflection is needed to be able to access and modify the underlying slice i.e
+// append each object to it after iterating over the rows returned
 func (store *CouchStorage) findAll(query interface{}, result interface{}) common.SyncServiceError {
 
 	db := store.client.DB(context.TODO(), store.loginInfo["dbName"])
@@ -219,8 +236,11 @@ func (store *CouchStorage) deleteObject(id string) common.SyncServiceError {
 
 	db := store.client.DB(context.TODO(), store.loginInfo["dbName"])
 	row := db.Get(context.TODO(), id)
-	if kivik.StatusCode(row.Err) == http.StatusNotFound {
-		return notFound
+	if row.Err != nil {
+		if kivik.StatusCode(row.Err) == http.StatusNotFound {
+			return notFound
+		}
+		return row.Err
 	}
 
 	if _, err := db.Delete(context.TODO(), id, row.Rev); err != nil {
@@ -579,4 +599,20 @@ func (store *CouchStorage) retrieveObjOrDestTypeForGivenACLUserHelper(aclType st
 
 	}
 	return result, nil
+}
+
+func createDSN(ipAddress string) string {
+	var strBuilder strings.Builder
+	if common.Configuration.CouchUseSSL {
+		strBuilder.WriteString("https://")
+	} else {
+		strBuilder.WriteString("http://")
+	}
+	strBuilder.WriteString(ipAddress)
+	if common.Configuration.CouchUseSSL {
+		strBuilder.WriteString(":6984/")
+	} else {
+		strBuilder.WriteString(":5984/")
+	}
+	return strBuilder.String()
 }
