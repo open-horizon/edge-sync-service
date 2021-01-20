@@ -144,6 +144,10 @@ func TestMongoStorageOrgDeleteNotifications(t *testing.T) {
 	testStorageOrgDeleteNotifications(common.Mongo, t)
 }
 
+func TestMongoStorageOrgDeleteACLs(t *testing.T) {
+	testStorageOrgDeleteACLs(common.Mongo, t)
+}
+
 func TestMongoStorageMessagingGroups(t *testing.T) {
 	testStorageMessagingGroups(common.Mongo, t)
 }

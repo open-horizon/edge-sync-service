@@ -444,6 +444,27 @@ func (store *BoltStorage) updateACLHelper(aclType string, orgID string, key stri
 	return err
 }
 
+func (store *BoltStorage) deleteACLsHelper(match func(acl boltACL) bool) common.SyncServiceError {
+	err := store.db.Update(func(tx *bolt.Tx) error {
+		cursor := tx.Bucket(aclBucket).Cursor()
+
+		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+			var acl boltACL
+			if err := json.Unmarshal(value, &acl); err != nil {
+				return err
+			}
+			if match(acl) {
+				if err := tx.Bucket(aclBucket).Delete(key); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+
+	return err
+}
+
 func (store *BoltStorage) retrieveACLHelper(retrieve func(boltACL)) common.SyncServiceError {
 	err := store.db.View(func(tx *bolt.Tx) error {
 		cursor := tx.Bucket(aclBucket).Cursor()

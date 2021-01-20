@@ -1860,6 +1860,10 @@ func (store *MongoStorage) DeleteOrganization(orgID string) common.SyncServiceEr
 		return &Error{fmt.Sprintf("Failed to delete notifications. Error: %s.", err)}
 	}
 
+	if err := store.removeAll(acls, bson.M{"org-id": orgID}); err != nil && err != mgo.ErrNotFound {
+		return &Error{fmt.Sprintf("Failed to delete ACLs. Error: %s.", err)}
+	}
+
 	type idstruct struct {
 		ID string `bson:"_id"`
 	}

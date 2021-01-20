@@ -253,6 +253,10 @@ func TestBoltStorageOrgDeleteNotifications(t *testing.T) {
 	testStorageOrgDeleteNotifications(common.Bolt, t)
 }
 
+func TestBoltStorageOrgDeleteACLs(t *testing.T) {
+	testStorageOrgDeleteACLs(common.Bolt, t)
+}
+
 func TestBoltStorageMessagingGroups(t *testing.T) {
 	testStorageMessagingGroups(common.Bolt, t)
 }

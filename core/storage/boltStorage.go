@@ -1707,6 +1707,16 @@ func (store *BoltStorage) DeleteOrganization(orgID string) common.SyncServiceErr
 		return &Error{fmt.Sprintf("Failed to delete objects. Error: %s.", err)}
 	}
 
+	aclFunction := func(acl boltACL) bool {
+		if acl.OrgID == orgID {
+			return true
+		}
+		return false
+	}
+	if err := store.deleteACLsHelper(aclFunction); err != nil {
+		return &Error{fmt.Sprintf("Failed to delete ACLs. Error: %s.", err)}
+	}
+
 	return nil
 }
 

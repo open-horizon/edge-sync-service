@@ -1449,6 +1449,118 @@ func testStorageOrgDeleteNotifications(storageType string, t *testing.T) {
 	}
 }
 
+func testStorageOrgDeleteACLs(storageType string, t *testing.T) {
+	common.Configuration.NodeType = common.CSS
+	store, err := setUpStorage(storageType)
+	if err != nil {
+		t.Errorf(err.Error())
+		return
+	}
+	defer store.Stop()
+
+	tests := []struct {
+		acl boltACL
+	}{
+		{boltACL{
+			Users: []common.ACLentry{
+				{
+					Username:    "user1",
+					ACLUserType: "type1",
+					ACLRole:     "role1",
+				},
+				{
+					Username:    "user2",
+					ACLUserType: "type2",
+					ACLRole:     "role2",
+				},
+			},
+			OrgID:   "myorg123",
+			ACLType: "type1",
+			Key:     "key1",
+		}},
+		{boltACL{
+			Users: []common.ACLentry{
+				{
+					Username:    "user3",
+					ACLUserType: "type3",
+					ACLRole:     "role3",
+				},
+				{
+					Username:    "user4",
+					ACLUserType: "type4",
+					ACLRole:     "role4",
+				},
+			},
+			OrgID:   "myorg123",
+			ACLType: "type1",
+			Key:     "key2",
+		}},
+		{boltACL{
+			Users: []common.ACLentry{
+				{
+					Username:    "user4",
+					ACLUserType: "type4",
+					ACLRole:     "role4",
+				},
+				{
+					Username:    "user5",
+					ACLUserType: "type5",
+					ACLRole:     "role5",
+				},
+			},
+			OrgID:   "myorg123",
+			ACLType: "type2",
+			Key:     "key3",
+		}},
+		{boltACL{
+			Users: []common.ACLentry{
+				{
+					Username:    "user1",
+					ACLUserType: "type1",
+					ACLRole:     "role1",
+				},
+				{
+					Username:    "user2",
+					ACLUserType: "type2",
+					ACLRole:     "role2",
+				},
+			},
+			OrgID:   "myorg456",
+			ACLType: "type1",
+			Key:     "key1",
+		}},
+	}
+
+	// DeleteOrganization deletes all the ACLs of this org
+	for _, test := range tests {
+		acl := test.acl
+		if err := store.AddUsersToACL(acl.ACLType, acl.OrgID, acl.Key, acl.Users); err != nil {
+			t.Errorf("AddUsersToACL failed. Error: %s\n", err.Error())
+		}
+	}
+
+	if err := store.DeleteOrganization("myorg123"); err != nil {
+		t.Errorf("DeleteOrganization failed. Error: %s\n", err.Error())
+	}
+	if acls, err := store.RetrieveACLsInOrg("type1", "myorg123"); err != nil {
+		t.Errorf("RetrieveACLsInOrg failed. Error: %s\n", err.Error())
+	} else if len(acls) != 0 {
+		t.Errorf("RetrieveACLsInOrg returned ACLs after the organization has been deleted\n")
+	}
+
+	if acls, err := store.RetrieveACLsInOrg("type2", "myorg123"); err != nil {
+		t.Errorf("RetrieveACLsInOrg failed. Error: %s\n", err.Error())
+	} else if len(acls) != 0 {
+		t.Errorf("RetrieveACLsInOrg returned ACLs after the organization has been deleted\n")
+	}
+
+	if acls, err := store.RetrieveACLsInOrg("type1", "myorg456"); err != nil {
+		t.Errorf("RetrieveACLsInOrg failed. Error: %s\n", err.Error())
+	} else if len(acls) != 1 {
+		t.Errorf("RetrieveACLsInOrg returned wrong number of ACLs (%d) for organization that hasn't been deleted\n", len(acls))
+	}
+}
+
 func testStorageMessagingGroups(storageType string, t *testing.T) {
 	common.Configuration.NodeType = common.CSS
 	store, err := setUpStorage(storageType)
