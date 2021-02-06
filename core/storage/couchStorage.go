@@ -160,7 +160,7 @@ func (store *CouchStorage) Init() common.SyncServiceError {
 		return err
 	}
 	if !exists {
-		client.CreateDB(context.TODO(), store.loginInfo["dbName"])
+		err := client.CreateDB(context.TODO(), store.loginInfo["dbName"])
 		if err != nil {
 			return err
 		}
@@ -316,9 +316,11 @@ func (store *CouchStorage) RetrieveObjectAndStatus(orgID string, objectType stri
 	return &result.MetaData, result.Status, nil
 }
 
-// DeleteStoredObject deletes the object
+// DeleteStoredObject deletes the object and any associated data
 func (store *CouchStorage) DeleteStoredObject(orgID string, objectType string, objectID string) common.SyncServiceError {
 	id := createObjectCollectionID(orgID, objectType, objectID)
+	// In CouchDB, data is stored as attachment to object
+	// so data is deleted automatically when object is deleted
 	if err := store.deleteObject(id); err != nil {
 		if err != notFound {
 			return err
@@ -512,6 +514,9 @@ func (store *CouchStorage) RetrieveUpdatedObjects(orgID string, objectType strin
 	}
 
 	if err := store.findAll(query, &result); err != nil {
+		if err == notFound {
+			return nil, nil
+		}
 		return nil, &Error{fmt.Sprintf("Failed to fetch the objects. Error: %s.", err)}
 	}
 
@@ -534,6 +539,9 @@ func (store *CouchStorage) RetrieveObjects(orgID string, destType string, destID
 			}}}
 
 	if err := store.findAll(query, &result); err != nil {
+		if err == notFound {
+			return nil, nil
+		}
 		return nil, &Error{fmt.Sprintf("Failed to fetch the objects. Error: %s.", err)}
 	}
 
@@ -714,7 +722,7 @@ func (store *CouchStorage) RetrieveDestinations(orgID string, destType string) (
 			err = store.findAll(query, &result)
 		}
 	}
-	if err != nil {
+	if err != nil && err != notFound {
 		return nil, &Error{fmt.Sprintf("Failed to fetch the destinations. Error: %s.", err)}
 	}
 
@@ -957,13 +965,13 @@ func (store *CouchStorage) ReadObjectData(orgID string, objectType string, objec
 		if err == notFound {
 			return nil, true, 0, notFound
 		}
-		return nil, true, 0, err
+		return nil, true, 0, &Error{fmt.Sprintf("Failed to get data. Error: %s.", err)}
 	}
 
 	data, err := ioutil.ReadAll(attachment.Content)
 	defer attachment.Content.Close()
 	if err != nil {
-		return nil, true, 0, err
+		return nil, true, 0, &Error{fmt.Sprintf("Failed to read the data. Error: %s.", err)}
 	}
 
 	lod := int64(len(data))
@@ -1001,11 +1009,21 @@ func (store *CouchStorage) StoreObjectData(orgID string, objectType string, obje
 		store.UpdateObjectStatus(orgID, objectType, objectID, common.ReadyToSend)
 	}
 
-	if result.Status == common.NotReadyToSend || result.Status == common.ReadyToSend {
+	// need to get result object again because status has been updated
+	updatedResult1 := &couchObject{}
+	if err := store.getOne(id, updatedResult1); err != nil {
+		return false, &Error{fmt.Sprintf("Failed to store the data. Error: %s.", err)}
+	}
+
+	if updatedResult1.Status == common.ReadyToSend {
 		newID := store.getInstanceID()
-		result.MetaData.DataID = newID
-		result.MetaData.InstanceID = newID
-		result.LastUpdate = time.Now()
+		updatedResult1.MetaData.DataID = newID
+		updatedResult1.MetaData.InstanceID = newID
+		updatedResult1.LastUpdate = time.Now()
+	}
+
+	if err := store.upsertObject(id, updatedResult1); err != nil {
+		return false, &Error{fmt.Sprintf("Failed to update object. Error: %s.", err)}
 	}
 
 	size, err := store.addAttachment(id, dataReader)
@@ -1014,15 +1032,15 @@ func (store *CouchStorage) StoreObjectData(orgID string, objectType string, obje
 	}
 
 	// need to get result object again because attachment has been added
-	updatedResult := &couchObject{}
-	if err := store.getOne(id, updatedResult); err != nil {
+	updatedResult2 := &couchObject{}
+	if err := store.getOne(id, updatedResult2); err != nil {
 		return false, &Error{fmt.Sprintf("Failed to store the data. Error: %s.", err)}
 	}
 
 	// Update object size
-	updatedResult.MetaData.ObjectSize = size
+	updatedResult2.MetaData.ObjectSize = size
 
-	if err := store.upsertObject(id, updatedResult); err != nil {
+	if err := store.upsertObject(id, updatedResult2); err != nil {
 		return false, &Error{fmt.Sprintf("Failed to update object's size. Error: %s.", err)}
 	}
 
@@ -1270,7 +1288,6 @@ func (store *CouchStorage) RemoveInactiveDestinations(lastTimestamp time.Time) {
 }
 
 // GetNumberOfDestinations returns the number of currently registered ESS nodes (for CSS)
-// This function needs to be checked
 func (store *CouchStorage) GetNumberOfDestinations() (uint32, common.SyncServiceError) {
 
 	query := map[string]interface{}{"selector": map[string]interface{}{
@@ -1455,7 +1472,6 @@ func (store *CouchStorage) RetrieveNotificationRecord(orgID string, objectType s
 }
 
 // DeleteNotificationRecords deletes notification records to an object
-//very different
 func (store *CouchStorage) DeleteNotificationRecords(orgID string, objectType string, objectID string, destType string, destID string) common.SyncServiceError {
 	var err error
 	if objectType != "" && objectID != "" {
@@ -1688,6 +1704,10 @@ func (store *CouchStorage) DeleteOrganization(orgID string) common.SyncServiceEr
 
 	if err := store.deleteAllCouchObjects(map[string]interface{}{"selector": map[string]interface{}{"metadata.destinationOrgID": orgID}}); err != nil && err != notFound {
 		return &Error{fmt.Sprintf("Failed to delete objects. Error: %s.", err)}
+	}
+
+	if err := store.deleteAllACLObjects(map[string]interface{}{"selector": map[string]interface{}{"org-id": orgID}}); err != nil && err != notFound {
+		return &Error{fmt.Sprintf("Failed to delete ACLs. Error: %s.", err)}
 	}
 
 	return nil

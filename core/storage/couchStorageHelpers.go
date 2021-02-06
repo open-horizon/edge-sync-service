@@ -342,6 +342,37 @@ func (store *CouchStorage) deleteAllNotificationObjects(query interface{}) commo
 	return nil
 }
 
+func (store *CouchStorage) deleteAllACLObjects(query interface{}) common.SyncServiceError {
+
+	db := store.client.DB(context.TODO(), store.loginInfo["dbName"])
+
+	rows, err := db.Find(context.TODO(), query)
+	if err != nil {
+		if kivik.StatusCode(err) == http.StatusNotFound {
+			return notFound
+		}
+		return err
+	}
+
+	for rows.Next() {
+
+		var tempObject couchACLObject
+		err = rows.ScanDoc(&tempObject)
+		if err != nil {
+			return err
+		}
+
+		if _, err := db.Delete(context.TODO(), tempObject.ID, tempObject.Rev); err != nil {
+			return err
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (store *CouchStorage) getAttachment(id string) (*kivik.Attachment, common.SyncServiceError) {
 
 	db := store.client.DB(context.TODO(), store.loginInfo["dbName"])
