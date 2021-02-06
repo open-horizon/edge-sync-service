@@ -58,6 +58,9 @@ func TestCouchStorageOrgDeleteNotifications(t *testing.T) {
 	testStorageOrgDeleteNotifications(common.Couch, t)
 }
 
+func TestCouchStorageOrgDeleteACLs(t *testing.T) {
+	testStorageOrgDeleteACLs(common.Couch, t)
+}
 func TestCouchStorageMessagingGroups(t *testing.T) {
 	testStorageMessagingGroups(common.Couch, t)
 }
