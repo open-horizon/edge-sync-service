@@ -11,7 +11,7 @@ services:
 
 env:
   global:
-    - IMPORT_PEFIX=github.com/open-horizon
+    - IMPORT_PEFIX=github.com/edeediong
     - EDGE_COMPONENT_NAME=edge-sync-service
     - BUILD_FLAGS='-i -tags "netgo"'
     - LD_FLAGS="-linkmode external -extldflags -static -s -w"
