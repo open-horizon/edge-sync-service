@@ -870,6 +870,9 @@ func BlockUntilNoRunningGoRoutines() {
 // IsValidName checks if the string only contains letters, digits, and !@#%^*-_.~
 var IsValidName = regexp.MustCompile(`^[a-zA-Z0-9|!|@|#|$|^|*|\-|_|.|~]+$`).MatchString
 
+// IsInvalidDescription checks if metadata description text contains XSS tags in this format: <abc> or </abc>
+var IsInvalidDescription = regexp.MustCompile(`<[/]?[a-zA-Z0-9]+>`).MatchString
+
 // ValidateDestinationListInput checks if destinationsList contains < or >, to avoid injecting html like tags from user
 func ValidateDestinationListInput(destinationsList []string) (bool, SyncServiceError) {
 	if len(destinationsList) == 0 {

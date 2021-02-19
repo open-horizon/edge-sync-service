@@ -156,6 +156,7 @@ func (communication *HTTP) createError(response *http.Response, action string) c
 	return &Error{message}
 }
 
+// CSS server backend function for GET /spi/v1/objects
 func (communication *HTTP) handleGetUpdates(writer http.ResponseWriter, request *http.Request) {
 	ok, orgID, destType, destID := security.ValidateSPIRequestIdentity(request)
 	if !ok {
@@ -792,6 +793,7 @@ func (communication *HTTP) extract(writer http.ResponseWriter, request *http.Req
 	return
 }
 
+// server backend function of CSS /spi/v1/objects/
 func (communication *HTTP) handleObjects(writer http.ResponseWriter, request *http.Request) {
 	if !communication.started || !common.Running {
 		writer.WriteHeader(http.StatusServiceUnavailable)
