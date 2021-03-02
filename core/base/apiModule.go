@@ -65,6 +65,7 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 		if common.Configuration.NodeType == common.ESS {
 			return &common.InvalidRequest{Message: "Object expiration is disabled on ESS"}
 		}
+
 		expiration, err := time.Parse(time.RFC3339, metaData.Expiration)
 		if err != nil {
 			return &common.InvalidRequest{Message: "Failed to parse expiration in object's meta data. Error: " + err.Error()}
@@ -72,6 +73,13 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 		if time.Now().After(expiration) {
 			return &common.InvalidRequest{Message: "Invalid expiration time in object's meta data"}
 		}
+	}
+
+	if metaData.Version != "" && !common.IsValidName(metaData.Version) {
+		return &common.InvalidRequest{Message: fmt.Sprintf("Version (%s) contains one/some invalid characters (eg: <, >, =, ', \", &, space, \\, /)", metaData.Version)}
+	}
+	if metaData.Description != "" && common.IsInvalidDescription(metaData.Description) {
+		return &common.InvalidRequest{Message: fmt.Sprintf("Description (%s) contains one/some invalid characters (<, >, =, ', \", &, space, \\, /)", metaData.Description)}
 	}
 
 	if metaData.MetaOnly && len(data) != 0 {
@@ -147,6 +155,7 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 		if common.Configuration.NodeType == common.ESS {
 			return &common.InvalidRequest{Message: "Data URI is disabled on CSS"}
 		}
+
 		uri, err := url.Parse(metaData.DestinationDataURI)
 		if err != nil || !strings.EqualFold(uri.Scheme, "file") || uri.Host != "" {
 			return &common.InvalidRequest{Message: "Invalid destination data URI"}
@@ -160,6 +169,7 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 		if data != nil {
 			return &common.InvalidRequest{Message: "Both source data URI and data are set"}
 		}
+
 		uri, err := url.Parse(metaData.SourceDataURI)
 		if err != nil || !strings.EqualFold(uri.Scheme, "file") || uri.Host != "" {
 			return &common.InvalidRequest{Message: "Invalid source data URI"}
@@ -176,10 +186,19 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 		// Set the origin so the other side can respond
 		metaData.OriginType = common.Configuration.DestinationType
 		metaData.OriginID = common.Configuration.DestinationID
+	} else {
+		// metaData.OriginType != "" && metaData.OriginID != "", check if given valud is valid
+		if !common.IsValidName(metaData.OriginType) {
+			return &common.InvalidRequest{Message: fmt.Sprintf("OriginType (%s) contains one/some invalid characters (eg: <, >, =, ', \", &, space, \\, /)", metaData.OriginType)}
+		} else if !common.IsValidName(metaData.OriginID) {
+			return &common.InvalidRequest{Message: fmt.Sprintf("OriginID (%s) contains one/some invalid characters (eg: <, >, =, ', \", &, space, \\, /)", metaData.OriginID)}
+		}
 	}
 
 	if metaData.DestOrgID == "" {
 		metaData.DestOrgID = orgID
+	} else if !common.IsValidName(metaData.DestOrgID) {
+		return &common.InvalidRequest{Message: fmt.Sprintf("DestOrgID (%s) contains one/some invalid characters (eg: <, >, =, ', \", &, space, \\, /)", metaData.DestOrgID)}
 	}
 
 	if metaData.ExpectedConsumers == 0 {
@@ -987,6 +1006,10 @@ func updateOrganization(orgID string, org common.Organization) common.SyncServic
 
 	if orgID != org.OrgID {
 		return &common.InvalidRequest{Message: fmt.Sprintf("Org ID (%s) in the URL doesn't match the org-id (%s) in the payload", orgID, org.OrgID)}
+	}
+
+	if !common.IsValidName(orgID) {
+		return &common.InvalidRequest{Message: fmt.Sprintf("Org ID (%s) contains invalid characters", org.OrgID)}
 	}
 
 	apiLock.Lock()

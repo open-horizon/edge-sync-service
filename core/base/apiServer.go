@@ -1,6 +1,7 @@
 package base
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -136,6 +137,11 @@ func handleDestinations(writer http.ResponseWriter, request *http.Request) {
 		orgID = common.Configuration.OrgID
 	}
 
+	if pathParamValid := validatePathParam(writer, orgID, "", "", "", ""); !pathParamValid {
+		// header and message are set in function validatePathParam
+		return
+	}
+
 	if userOrg != orgID && code != security.AuthSyncAdmin {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
@@ -247,6 +253,10 @@ func handleDestinations(writer http.ResponseWriter, request *http.Request) {
 		//     description: Failed to retrieve the objects
 		//     schema:
 		//       type: string
+		if pathParamValid := validatePathParam(writer, orgID, "", "", parts[0], parts[1]); !pathParamValid {
+			// header and message are set in function validatePathParam
+			return
+		}
 		if objects, err := GetObjectsForDestination(orgID, parts[0], parts[1]); err != nil {
 			communications.SendErrorResponse(writer, err, "Failed to fetch the objects. Error: ", 0)
 		} else {
@@ -497,6 +507,12 @@ func handleObjects(writer http.ResponseWriter, request *http.Request) {
 }
 
 func handleObjectRequest(orgID string, objectType string, objectID string, writer http.ResponseWriter, request *http.Request) {
+	// We need to check XSS for orgID before sending the value to security component
+	if pathParamValid := validatePathParam(writer, orgID, objectType, objectID, "", ""); !pathParamValid {
+		// header and message are set in function validatePathParam
+		return
+	}
+
 	setCacheControlHeaders(writer)
 
 	switch request.Method {
@@ -861,6 +877,12 @@ func handleListObjectsWithFilters(orgID string, writer http.ResponseWriter, requ
 		trace.Debug("In handleListObjectsWithFilters")
 	}
 
+	// We need to check XSS for orgID before sending the value to security component
+	if pathParamValid := validatePathParam(writer, orgID, "", "", "", ""); !pathParamValid {
+		// header and message are set in function validatePathParam
+		return
+	}
+
 	// only allow AuthSyncAdmin, AuthAdmin, AuthUser and AuthNodeUser to access, it is okay if orgID != userOrgID to display "public" object
 	code, userOrgID, userID := security.Authenticate(request)
 	if code == security.AuthFailed || (code != security.AuthSyncAdmin && code != security.AuthAdmin && code != security.AuthUser && code != security.AuthNodeUser) {
@@ -900,6 +922,11 @@ func handleListObjectsWithFilters(orgID string, writer http.ResponseWriter, requ
 
 		dpPropertyName = request.URL.Query().Get("dpPropertyName")
 
+		if pathParamValid := validatePathParamForService(writer, dpServiceOrgID, dpServiceName, dpPropertyName); !pathParamValid {
+			// header and message are set in function validatePathParam
+			return
+		}
+
 		sinceString := request.URL.Query().Get("since")
 		if sinceString != "" {
 			var err error
@@ -929,6 +956,11 @@ func handleListObjectsWithFilters(orgID string, writer http.ResponseWriter, requ
 	destinationID := ""
 	if destinationType != "" {
 		destinationID = request.URL.Query().Get("destinationID")
+	}
+
+	if pathParamValid := validatePathParam(writer, orgID, objectType, objectID, destinationType, destinationID); !pathParamValid {
+		// header and message are set in function validatePathParam
+		return
 	}
 
 	var noData *bool
@@ -986,6 +1018,11 @@ func handleObjectOperation(operation string, orgID string, objectType string, ob
 	var canAccessAllObjects bool
 	var code int
 	var userID string
+
+	if pathParamValid := validatePathParam(writer, orgID, objectType, objectID, "", ""); !pathParamValid {
+		// header and message are set in function validatePathParam
+		return
+	}
 
 	if operation != "deleted" {
 		canAccessAllObjects, code, userID = canUserAccessObject(request, orgID, objectType, objectID, false)
@@ -2126,6 +2163,12 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 		trace.Debug("In handleListUpdatedObjects. List %s, Method %s, orgID %s, objectType %s. Include received %t\n",
 			objectType, request.Method, orgID, objectType, received)
 	}
+
+	if pathParamValid := validatePathParam(writer, orgID, objectType, "", "", ""); !pathParamValid {
+		// header and message are set in function validatePathParam
+		return
+	}
+
 	canAccessAllObjects, code, userID := canUserAccessObject(request, orgID, objectType, "", true) //objectID == "", so checkLastDestinationPolicyServices will not be used
 	if code == security.AuthFailed {
 		writer.WriteHeader(http.StatusForbidden)
@@ -2290,6 +2333,11 @@ func handleListAllObjects(orgID string, objectType string, writer http.ResponseW
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In handleListAllObjects. List %s, Method %s, orgID %s, objectType %s\n",
 			objectType, request.Method, orgID, objectType)
+	}
+
+	if pathParamValid := validatePathParam(writer, orgID, objectType, "", "", ""); !pathParamValid {
+		// header and message are set in function validatePathParam
+		return
 	}
 
 	canAccessAllObjects, code, userID := canUserAccessObject(request, orgID, objectType, "", false)
@@ -2506,6 +2554,11 @@ func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWr
 		}
 		serviceOrgID = parts[0]
 		serviceName = parts[1]
+
+		if valid := validatePathParamForService(writer, serviceOrgID, serviceName, ""); !valid {
+			// header and message are set in function validatePathParam
+			return
+		}
 	}
 
 	since := int64(0)
@@ -2658,6 +2711,12 @@ func handleWebhook(orgID string, objectType string, writer http.ResponseWriter, 
 		writer.WriteHeader(http.StatusBadRequest)
 		return
 	}
+
+	if pathParamValid := validatePathParam(writer, orgID, objectType, "", "", ""); !pathParamValid {
+		// header and message are set in function validatePathParam
+		return
+	}
+
 	_, code, userID := canUserAccessObject(request, orgID, objectType, "", false)
 	if code == security.AuthFailed || code == security.AuthService {
 		writer.WriteHeader(http.StatusForbidden)
@@ -2919,6 +2978,11 @@ func handleOrganizations(writer http.ResponseWriter, request *http.Request) {
 	}
 	orgID = parts[0]
 
+	if pathParamValid := validatePathParam(writer, orgID, "", "", "", ""); !pathParamValid {
+		// header and message are set in function validatePathParam
+		return
+	}
+
 	code, userOrg, _ := security.Authenticate(request)
 	if !((code == security.AuthAdmin && orgID == userOrg) || code == security.AuthSyncAdmin) {
 		writer.WriteHeader(http.StatusForbidden)
@@ -3162,6 +3226,10 @@ func handleSecurity(writer http.ResponseWriter, request *http.Request) {
 //     schema:
 //       type: string
 func handleACLDelete(aclType string, orgID string, parts []string, writer http.ResponseWriter) {
+	if pathParamValid := validatePathParamForSecurity(writer, orgID, parts[0], parts[1], parts[2]); !pathParamValid {
+		return
+	}
+
 	users := make([]common.ACLentry, 0)
 	user := common.ACLentry{
 		Username:    parts[2],
@@ -3235,6 +3303,10 @@ func handleACLGet(aclType string, orgID string, key string, aclUserType string, 
 	//     description: Failed to retrieve the list of ACLs retrieved of the specified type.
 	//     schema:
 	//       type: string
+
+	if pathParamValid := validatePathParamForSecurity(writer, orgID, key, aclUserType, ""); !pathParamValid {
+		return
+	}
 
 	requestType := "ACLs"
 	if allKeysParam {
@@ -3337,6 +3409,10 @@ func handleACLUpdate(request *http.Request, aclType string, orgID string, parts 
 		//     description: Failed to add/remove the user(s)to/from the specified ACL.
 		//     schema:
 		//       type: string
+		if pathParamValid := validatePathParamForSecurity(writer, orgID, parts[0], "", ""); !pathParamValid {
+			return
+		}
+
 		var payload bulkACLUpdate
 		err := json.NewDecoder(request.Body).Decode(&payload)
 		if err == nil {
@@ -3424,6 +3500,10 @@ func handleACLUpdate(request *http.Request, aclType string, orgID string, parts 
 		//     description: Failed to add/remove the username(s) to/from the specified ACL.
 		//     schema:
 		//       type: string
+		if pathParamValid := validatePathParamForSecurity(writer, orgID, "", "", ""); !pathParamValid {
+			return
+		}
+
 		var payload bulkACLUpdate
 		err := json.NewDecoder(request.Body).Decode(&payload)
 		if err == nil {
@@ -3800,4 +3880,107 @@ func handleHealth(writer http.ResponseWriter, request *http.Request) {
 func setCacheControlHeaders(writer http.ResponseWriter) {
 	writer.Header().Set("Cache-Control", "no-store")
 	writer.Header().Set("Pragma", "no-cache")
+}
+
+func validatePathParam(writer http.ResponseWriter, orgID string, objectType string, objectID string, destinationType string, destinationID string) bool {
+	var errorMessage string
+	orgIDIsValid := true
+	objectTypeIsValid := true
+	objectIDIsValid := true
+	destinationValid := true
+
+	if orgID != "" && !common.IsValidName(orgID) {
+		errorMessage = fmt.Sprintf("Organization ID (%s) contains invalid characters", orgID)
+		orgIDIsValid = false
+	} else if objectType != "" && !common.IsValidName(objectType) {
+		errorMessage = fmt.Sprintf("object Type (%s) contains invalid characters", objectType)
+		objectTypeIsValid = false
+	} else if objectID != "" && !common.IsValidName(objectID) {
+		errorMessage = fmt.Sprintf("object ID (%s) contains invalid characters", objectID)
+		objectIDIsValid = false
+	}
+
+	if destinationType != "" || destinationID != "" {
+		destinations := make([]string, 0)
+		destination := fmt.Sprintf("%s:%s", destinationType, destinationID)
+		destinations = append(destinations, destination)
+		if valid, _ := common.ValidateDestinationListInput(destinations); !valid {
+			errorMessage = fmt.Sprintf("Destination Type and/or destination ID (%s) contains invalid characters", destination)
+			destinationValid = false
+		}
+
+	}
+
+	if orgIDIsValid && objectTypeIsValid && objectIDIsValid && destinationValid {
+		return true
+	}
+
+	writer.WriteHeader(http.StatusBadRequest)
+	writer.Header().Add("Content-Type", "Text/Plain")
+	buffer := bytes.NewBufferString(errorMessage)
+	buffer.WriteString("\n")
+	writer.Write(buffer.Bytes())
+	return false
+
+}
+
+func validatePathParamForService(writer http.ResponseWriter, serviceOrgID string, serviceName string, propertyName string) bool {
+	var errorMessage string
+	serviceOrgIDvalid := true
+	serviceNameValid := true
+	propertyNameValid := true
+
+	if serviceOrgID != "" && !common.IsValidName(serviceOrgID) {
+		errorMessage = fmt.Sprintf("Service ID (%s) contains invalid characters", serviceOrgID)
+		serviceOrgIDvalid = false
+	} else if serviceName != "" && !common.IsValidName(serviceName) {
+		errorMessage = fmt.Sprintf("Service name (%s) contains invalid characters", serviceName)
+		serviceNameValid = false
+	} else if propertyName != "" && !common.IsValidName(propertyName) {
+		errorMessage = fmt.Sprintf("Property name (%s) contains invalid characters", propertyName)
+		propertyNameValid = false
+	}
+
+	if serviceOrgIDvalid && serviceNameValid && propertyNameValid {
+		return true
+	}
+
+	writer.WriteHeader(http.StatusBadRequest)
+	writer.Header().Add("Content-Type", "Text/Plain")
+	buffer := bytes.NewBufferString(errorMessage)
+	buffer.WriteString("\n")
+	writer.Write(buffer.Bytes())
+	return false
+}
+
+func validatePathParamForSecurity(writer http.ResponseWriter, orgID string, key string, aclUserType string, username string) bool {
+	var errorMessage string
+	orgIDIsValid := true
+	keyIsValid := true
+	aclUserTypeIsValid := true
+	usernameIsValid := true
+
+	if orgID != "" && !common.IsValidName(orgID) {
+		errorMessage = fmt.Sprintf("Organization ID (%s) contains invalid characters", orgID)
+		orgIDIsValid = false
+	} else if key != "" && !common.IsValidName(key) {
+		errorMessage = fmt.Sprintf("Key (destination type/object type) %s contains invalid characters", key)
+		keyIsValid = false
+	} else if aclUserType != "" && aclUserType != security.ACLUser && aclUserType != security.ACLNode {
+		errorMessage = fmt.Sprintf("Invalid acl user type %s in URL. The value should be \"user\" or \"node\"", aclUserType)
+		aclUserTypeIsValid = false
+	} else if username != "" && !common.IsValidName(username) {
+		errorMessage = fmt.Sprintf("Username (%s) contains invalid characters", username)
+		usernameIsValid = false
+	}
+
+	if orgIDIsValid && keyIsValid && aclUserTypeIsValid && usernameIsValid {
+		return true
+	}
+
+	writer.WriteHeader(http.StatusBadRequest)
+	writer.Header().Add("Content-Type", "Text/Plain")
+	buffer := bytes.NewBufferString(errorMessage)
+	writer.Write(buffer.Bytes())
+	return false
 }
