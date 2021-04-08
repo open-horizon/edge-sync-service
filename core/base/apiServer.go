@@ -1894,8 +1894,7 @@ func handleObjectGetData(orgID string, objectType string, objectID string, canAc
 			communications.SendErrorResponse(writer, err, "", 0)
 			return
 		} else if metaData == nil || !metaData.Public {
-			writer.WriteHeader(http.StatusForbidden)
-			writer.Write(unauthorizedBytes)
+			communications.SendErrorResponse(writer, nil, fmt.Sprintf("Unauthorized. The object may not exist or be public."), http.StatusForbidden)
 			return
 		}
 	}
