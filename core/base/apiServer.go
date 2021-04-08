@@ -96,7 +96,7 @@ func setupAPIServer() {
 }
 
 func handleDestinations(writer http.ResponseWriter, request *http.Request) {
-	setCacheControlHeaders(writer)
+	setResponseHeaders(writer)
 
 	if !common.Running {
 		writer.WriteHeader(http.StatusServiceUnavailable)
@@ -304,7 +304,7 @@ func handleDestinations(writer http.ResponseWriter, request *http.Request) {
 //     schema:
 //       type: string
 func handleResend(writer http.ResponseWriter, request *http.Request) {
-	setCacheControlHeaders(writer)
+	setResponseHeaders(writer)
 
 	if !common.Running {
 		writer.WriteHeader(http.StatusServiceUnavailable)
@@ -334,7 +334,7 @@ func handleResend(writer http.ResponseWriter, request *http.Request) {
 
 // POST /api/v1/shutdown?essunregister=true
 func handleShutdown(writer http.ResponseWriter, request *http.Request) {
-	setCacheControlHeaders(writer)
+	setResponseHeaders(writer)
 
 	code, _, _ := security.Authenticate(request)
 	if code != security.AuthSyncAdmin {
@@ -396,7 +396,7 @@ func handleShutdown(writer http.ResponseWriter, request *http.Request) {
 }
 
 func handleObjects(writer http.ResponseWriter, request *http.Request) {
-	setCacheControlHeaders(writer)
+	setResponseHeaders(writer)
 
 	if !common.Running {
 		writer.WriteHeader(http.StatusServiceUnavailable)
@@ -513,7 +513,7 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 		return
 	}
 
-	setCacheControlHeaders(writer)
+	setResponseHeaders(writer)
 
 	switch request.Method {
 
@@ -2911,7 +2911,7 @@ func handleUpdateObject(orgID string, objectType string, objectID string, writer
 //     schema:
 //       type: string
 func handleGetOrganizations(writer http.ResponseWriter, request *http.Request) {
-	setCacheControlHeaders(writer)
+	setResponseHeaders(writer)
 
 	if !common.Running {
 		writer.WriteHeader(http.StatusServiceUnavailable)
@@ -2957,7 +2957,7 @@ func handleGetOrganizations(writer http.ResponseWriter, request *http.Request) {
 }
 
 func handleOrganizations(writer http.ResponseWriter, request *http.Request) {
-	setCacheControlHeaders(writer)
+	setResponseHeaders(writer)
 
 	if !common.Running {
 		writer.WriteHeader(http.StatusServiceUnavailable)
@@ -3088,7 +3088,7 @@ func handleOrganizations(writer http.ResponseWriter, request *http.Request) {
 }
 
 func handleSecurity(writer http.ResponseWriter, request *http.Request) {
-	setCacheControlHeaders(writer)
+	setResponseHeaders(writer)
 
 	if !common.Running {
 		writer.WriteHeader(http.StatusServiceUnavailable)
@@ -3818,7 +3818,7 @@ type healthReport struct {
 //     schema:
 //       type: string
 func handleHealth(writer http.ResponseWriter, request *http.Request) {
-	setCacheControlHeaders(writer)
+	setResponseHeaders(writer)
 
 	detailsString := request.URL.Query().Get("details")
 	details := false
@@ -3876,9 +3876,13 @@ func handleHealth(writer http.ResponseWriter, request *http.Request) {
 }
 
 // Set HTTP cache control headers for http 1.0 and 1.1 clients.
-func setCacheControlHeaders(writer http.ResponseWriter) {
+func setResponseHeaders(writer http.ResponseWriter) {
+	// Set HTTP cache control headers for http 1.0 and 1.1 clients.
 	writer.Header().Set("Cache-Control", "no-store")
 	writer.Header().Set("Pragma", "no-cache")
+
+	// Set Strict-Transport-Security headers
+	writer.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
 }
 
 func validatePathParam(writer http.ResponseWriter, orgID string, objectType string, objectID string, destinationType string, destinationID string) bool {
