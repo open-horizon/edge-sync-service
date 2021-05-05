@@ -270,7 +270,9 @@ func (store *BoltStorage) StoreObject(metaData common.MetaData, data []byte, sta
 				return object, &common.InvalidRequest{"Can't update the existence of Destination Policy"}
 			}
 
-			metaData.DataID = object.Meta.DataID // Keep the previous data id
+			metaData.DataID = object.Meta.DataID       // Keep the previous data id
+			metaData.PublicKey = object.Meta.PublicKey // Keep the previous publicKey and signature
+			metaData.Signature = object.Meta.Signature
 			object.Meta = metaData
 			object.Status = status
 			object.PolicyReceived = false

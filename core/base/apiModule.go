@@ -1,6 +1,8 @@
 package base
 
 import (
+	"bytes"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"math"
@@ -59,6 +61,19 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 	}
 	if !common.IsValidName(objectType) {
 		return &common.InvalidRequest{Message: fmt.Sprintf("Object type (%s) contains invalid characters", objectType)}
+	}
+
+	// verify publicKey and signature is base64 encoded
+	if metaData.PublicKey != "" {
+		if _, err := base64.StdEncoding.DecodeString(metaData.PublicKey); err != nil {
+			return &common.InvalidRequest{Message: "PublicKey is not base64 encoded. Error: " + err.Error()}
+		}
+	}
+
+	if metaData.Signature != "" {
+		if _, err := base64.StdEncoding.DecodeString(metaData.Signature); err != nil {
+			return &common.InvalidRequest{Message: "Signature is not base64 encoded. Error: " + err.Error()}
+		}
 	}
 
 	if metaData.Expiration != "" {
@@ -225,7 +240,17 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 		data = nil
 		metaData.Link = ""
 		metaData.SourceDataURI = ""
+		metaData.PublicKey = ""
+		metaData.Signature = ""
 	} else if data != nil {
+		// data signature verification if metadata has both publicKey and signature
+		// data is nil for metaOnly object. Meta-only object will not apply data verification
+		if metaData.PublicKey != "" && metaData.Signature != "" {
+			if err := common.VerifyDataSignature(data, metaData.PublicKey, metaData.Signature); err != nil {
+				return err
+			}
+		}
+
 		metaData.ObjectSize = int64(len(data))
 	}
 	metaData.ChunkSize = common.Configuration.MaxDataChunkSize
@@ -462,6 +487,7 @@ func GetRemovedDestinationPolicyServicesFromESS(orgID string, objectType string,
 }
 
 // PutObjectData stores an object's data
+// Verify data signature (if publicKey and signature both have value)
 // Call the storage module to store the object's data
 // Return true if the object was found and updated
 // Return false and no error if the object was not found
@@ -494,6 +520,20 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 	if metaData.NoData {
 		common.ObjectLocks.Unlock(lockIndex)
 		return false, &common.InvalidRequest{Message: "Can't update data, the NoData flag is set to true"}
+	}
+
+	if metaData.PublicKey != "" && metaData.Signature != "" {
+		// start data verification
+		buffer := new(bytes.Buffer)
+		buffer.ReadFrom(dataReader)
+		dataBytes := buffer.Bytes()
+
+		if err := common.VerifyDataSignature(dataBytes, metaData.PublicKey, metaData.Signature); err != nil {
+			common.ObjectLocks.Unlock(lockIndex)
+			return false, err
+		}
+
+		dataReader = bytes.NewReader(dataBytes)
 	}
 
 	if exists, err := store.StoreObjectData(orgID, objectType, objectID, dataReader); err != nil || !exists {

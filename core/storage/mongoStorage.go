@@ -349,6 +349,8 @@ func (store *MongoStorage) StoreObject(metaData common.MetaData, data []byte, st
 			metaData.DataID = existingObject.MetaData.DataID
 			metaData.ObjectSize = existingObject.MetaData.ObjectSize
 			metaData.ChunkSize = existingObject.MetaData.ChunkSize
+			metaData.PublicKey = existingObject.MetaData.PublicKey
+			metaData.Signature = existingObject.MetaData.Signature
 		}
 		if metaData.DestinationPolicy != nil {
 			dests = existingObject.Destinations

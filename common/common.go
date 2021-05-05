@@ -1,6 +1,11 @@
 package common
 
 import (
+	"crypto"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"regexp"
@@ -243,6 +248,37 @@ func StringListContains(stringList []string, str string) bool {
 	return false
 }
 
+func VerifyDataSignature(data []byte, publicKey string, signature string) SyncServiceError {
+	if publicKey == "" || signature == "" {
+		message := fmt.Sprintf("public key or signature is empty")
+		return &InvalidRequest{Message: message}
+
+	}
+
+	if publicKeyBytes, err := base64.StdEncoding.DecodeString(publicKey); err != nil {
+		return &InvalidRequest{Message: "PublicKey is not base64 encoded. Error: " + err.Error()}
+	} else if signatureBytes, err := base64.StdEncoding.DecodeString(signature); err != nil {
+		return &InvalidRequest{Message: "Signature is not base64 encoded. Error: " + err.Error()}
+	} else {
+		dataHash := sha256.New()
+		if _, err := dataHash.Write(data); err != nil {
+			return &InvalidRequest{Message: "Failed to hash object data, Error: " + err.Error()}
+		}
+		dataHashSum := dataHash.Sum(nil)
+
+		if pubKey, err := x509.ParsePKIXPublicKey(publicKeyBytes); err != nil {
+			return &InvalidRequest{Message: "Failed to parse public key, Error: " + err.Error()}
+		} else {
+			pubKeyToUse := pubKey.(*rsa.PublicKey)
+			if err = rsa.VerifyPSS(pubKeyToUse, crypto.SHA256, dataHashSum, signatureBytes, nil); err != nil {
+				return &InvalidRequest{Message: "Failed to verify data with public key and data signature, Error: " + err.Error()}
+			}
+		}
+	}
+
+	return nil
+}
+
 // MetaData is the metadata that identifies and defines the sync service object.
 // Every object includes metadata (mandatory) and data (optional). The metadata and data can be updated independently.
 // Each sync service node (ESS) has an address that is composed of the node's ID, Type, and Organization.
@@ -370,6 +406,14 @@ type MetaData struct {
 	// ChunkSize is an internal field indicating the maximal message payload size.
 	// This field should not be set by users.
 	ChunkSize int `json:"chunkSize" bson:"chunk-size"`
+
+	// PublicKey is a base64 encoded string. It is the publicKey to verify the data of the object
+	// Optional field, if omitted the data will not be verified with public key and signature
+	PublicKey string `json:"publicKey" bson:"public-key"`
+
+	// Signature is a base64 encoded string. It is the data signature to verify data of the object
+	// Optional field, if omitted the data will not be verified with public key and signature
+	Signature string `json:"signature" bson:"signature"`
 
 	// Public is a flag indicate this object is visiable to all users in all orgs
 	// Optional field, default is false (not visiable to all users)

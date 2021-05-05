@@ -2586,6 +2586,16 @@
           "type": "boolean",
           "x-go-name": "Public"
         },
+        "publicKey": {
+          "description": "PublicKey is encoded in base64. It is the publicKey to verify the data of the object\nOptional field, if omitted the data will not be verified with public key and signature",
+          "type": "string",
+          "x-go-name": "PublicKey"
+        },
+        "signature": {
+          "description": "Signature is encoded in base64. It is the data signature to verify data of the object\nOptional field, if omitted the data will not be verified with public key and signature",
+          "type": "string",
+          "x-go-name": "Signature"
+        },
         "sourceDataUri": {
           "description": "SourceDataURI is a URI indicating where the sender of the object should read the data from.\nCurrently only file URIs are supported.\nThis field is available only when working with the ESS.\nOptional field, if omitted the object's data should be provided by the user.",
           "type": "string",
