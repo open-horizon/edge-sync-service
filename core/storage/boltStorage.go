@@ -270,7 +270,9 @@ func (store *BoltStorage) StoreObject(metaData common.MetaData, data []byte, sta
 				return object, &common.InvalidRequest{"Can't update the existence of Destination Policy"}
 			}
 
-			metaData.DataID = object.Meta.DataID // Keep the previous data id
+			metaData.DataID = object.Meta.DataID       // Keep the previous data id
+			metaData.PublicKey = object.Meta.PublicKey // Keep the previous publicKey and signature
+			metaData.Signature = object.Meta.Signature
 			object.Meta = metaData
 			object.Status = status
 			object.PolicyReceived = false
@@ -365,6 +367,34 @@ func (store *BoltStorage) StoreObjectData(orgID string, objectType string, objec
 	}
 
 	return true, nil
+}
+
+func (store *BoltStorage) StoreObjectTempData(orgID string, objectType string, objectID string, dataReader io.Reader) (bool, common.SyncServiceError) {
+	tmpDataPath := createDataPathForTempData(store.localDataPath, orgID, objectType, objectID)
+	_, err := dataURI.StoreData(tmpDataPath, dataReader, 0)
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+func (store *BoltStorage) RemoveObjectTempData(orgID string, objectType string, objectID string) common.SyncServiceError {
+	tmpDataPath := createDataPathForTempData(store.localDataPath, orgID, objectType, objectID)
+	if err := dataURI.DeleteStoredData(tmpDataPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (store *BoltStorage) RetrieveTempObjectData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
+	var dataReader io.Reader
+	tmpDataPath := createDataPathForTempData(store.localDataPath, orgID, objectType, objectID)
+	dataReader, err := dataURI.GetData(tmpDataPath)
+	if err != nil {
+		return nil, err
+	}
+	return dataReader, nil
 }
 
 // RetrieveObject returns the object meta data with the specified parameters

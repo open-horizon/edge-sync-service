@@ -1,6 +1,12 @@
 package base
 
 import (
+	"bytes"
+	"crypto"
+	"crypto/rsa"
+	"crypto/sha1"
+	"crypto/x509"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"math"
@@ -59,6 +65,19 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 	}
 	if !common.IsValidName(objectType) {
 		return &common.InvalidRequest{Message: fmt.Sprintf("Object type (%s) contains invalid characters", objectType)}
+	}
+
+	// verify publicKey and signature is base64 encoded
+	if metaData.PublicKey != "" {
+		if _, err := base64.StdEncoding.DecodeString(metaData.PublicKey); err != nil {
+			return &common.InvalidRequest{Message: "PublicKey is not base64 encoded. Error: " + err.Error()}
+		}
+	}
+
+	if metaData.Signature != "" {
+		if _, err := base64.StdEncoding.DecodeString(metaData.Signature); err != nil {
+			return &common.InvalidRequest{Message: "Signature is not base64 encoded. Error: " + err.Error()}
+		}
 	}
 
 	if metaData.Expiration != "" {
@@ -221,20 +240,35 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 			store.CloseDataReader(reader)
 		}
 	}
-	if metaData.NoData {
-		data = nil
-		metaData.Link = ""
-		metaData.SourceDataURI = ""
-	} else if data != nil {
-		metaData.ObjectSize = int64(len(data))
-	}
-	metaData.ChunkSize = common.Configuration.MaxDataChunkSize
 
 	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 	apiObjectLocks.Lock(lockIndex)
 	defer apiObjectLocks.Unlock(lockIndex)
 
 	common.ObjectLocks.Lock(lockIndex)
+
+	if metaData.NoData {
+		data = nil
+		metaData.Link = ""
+		metaData.SourceDataURI = ""
+		metaData.PublicKey = ""
+		metaData.Signature = ""
+	} else if data != nil {
+		// data signature verification if metadata has both publicKey and signature
+		// data is nil for metaOnly object. Meta-only object will not apply data verification
+		if metaData.PublicKey != "" && metaData.Signature != "" {
+			dataReader := bytes.NewReader(data)
+			// will no store data if object metadata not exist
+			if success, err := VerifyAndStoreData(dataReader, orgID, metaData.ObjectType, metaData.ObjectID, metaData.PublicKey, metaData.Signature, false); err != nil || !success {
+				common.ObjectLocks.Unlock(lockIndex)
+				return err
+			}
+		}
+
+		metaData.ObjectSize = int64(len(data))
+	}
+	metaData.ChunkSize = common.Configuration.MaxDataChunkSize
+
 	deletedDestinations, err := store.StoreObject(metaData, data, status)
 	if err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
@@ -462,6 +496,7 @@ func GetRemovedDestinationPolicyServicesFromESS(orgID string, objectType string,
 }
 
 // PutObjectData stores an object's data
+// Verify data signature (if publicKey and signature both have value)
 // Call the storage module to store the object's data
 // Return true if the object was found and updated
 // Return false and no error if the object was not found
@@ -496,9 +531,21 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 		return false, &common.InvalidRequest{Message: "Can't update data, the NoData flag is set to true"}
 	}
 
-	if exists, err := store.StoreObjectData(orgID, objectType, objectID, dataReader); err != nil || !exists {
-		common.ObjectLocks.Unlock(lockIndex)
-		return false, err
+	if metaData.PublicKey != "" && metaData.Signature != "" {
+		//start data verification
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectData. Start data verification %s %s\n", objectType, objectID)
+		}
+
+		if success, err := VerifyAndStoreData(dataReader, orgID, objectType, objectID, metaData.PublicKey, metaData.Signature, true); !success || err != nil {
+			common.ObjectLocks.Unlock(lockIndex)
+			return false, &common.InvalidRequest{Message: "Failed to verify and store data, Error: " + err.Error()}
+		}
+	} else {
+		if exists, err := store.StoreObjectData(orgID, objectType, objectID, dataReader); err != nil || !exists {
+			common.ObjectLocks.Unlock(lockIndex)
+			return false, err
+		}
 	}
 
 	if metaData.SourceDataURI != "" {
@@ -527,6 +574,10 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 	common.ObjectLocks.Unlock(lockIndex)
 	if err != nil {
 		return true, err
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In PutObjectData. done with storing data for object %s %s\n", objectType, objectID)
 	}
 	return true, communications.SendNotifications(notificationsInfo)
 }
@@ -1215,4 +1266,79 @@ func RetrieveACLsInOrg(aclType string, orgID string) ([]string, common.SyncServi
 	apiLock.Lock()
 	defer apiLock.Unlock()
 	return store.RetrieveACLsInOrg(aclType, orgID)
+}
+
+func VerifyAndStoreData(data io.Reader, orgID string, objectType string, objectID string, publicKey string, signature string, storeData bool) (bool, common.SyncServiceError) {
+	if publicKey == "" || signature == "" {
+		message := fmt.Sprintf("public key or signature is empty")
+		return false, &common.InvalidRequest{Message: message}
+
+	}
+
+	var dataReader io.Reader
+	var err error
+	if publicKeyBytes, err := base64.StdEncoding.DecodeString(publicKey); err != nil {
+		return false, &common.InvalidRequest{Message: "PublicKey is not base64 encoded. Error: " + err.Error()}
+	} else if signatureBytes, err := base64.StdEncoding.DecodeString(signature); err != nil {
+		return false, &common.InvalidRequest{Message: "Signature is not base64 encoded. Error: " + err.Error()}
+	} else {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In VerifyAndStoreData, starting data hash\n")
+		}
+		dataHash := sha1.New()
+		dr := io.TeeReader(data, dataHash)
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In VerifyAndStoreData, storing temp data for object %s %s\n", objectType, objectID)
+		}
+
+		if exists, err := store.StoreObjectTempData(orgID, objectType, objectID, dr); err != nil || !exists {
+			return false, err
+		}
+
+		dataHashSum := dataHash.Sum(nil)
+
+		if pubKey, err := x509.ParsePKIXPublicKey(publicKeyBytes); err != nil {
+			return false, &common.InvalidRequest{Message: "Failed to parse public key, Error: " + err.Error()}
+		} else {
+			pubKeyToUse := pubKey.(*rsa.PublicKey)
+			if err = rsa.VerifyPSS(pubKeyToUse, crypto.SHA1, dataHashSum, signatureBytes, nil); err != nil {
+				store.RemoveObjectTempData(orgID, objectType, objectID)
+				return false, &common.InvalidRequest{Message: "Failed to verify data with public key and data signature, Error: " + err.Error()}
+			}
+		}
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In VerifyAndStoreData, data verification is done, retrieve temp data for object %s %s\n", objectType, objectID)
+	}
+
+	if storeData {
+		dataReader, err = store.RetrieveTempObjectData(orgID, objectType, objectID)
+		if err != nil {
+			return false, &common.InvalidRequest{Message: "Failed to read temp data fro, Error: " + err.Error()}
+		} else if dataReader == nil {
+			return false, &common.InvalidRequest{Message: "Read empty temp data, Error: " + err.Error()}
+		}
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In VerifyAndStoreData, storing data for object %s %s\n", objectType, objectID)
+		}
+
+		if exists, err := store.StoreObjectData(orgID, objectType, objectID, dataReader); err != nil || !exists {
+			return false, err
+		}
+		store.CloseDataReader(dataReader)
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In VerifyAndStoreData, remove temp data for object %s %s\n", objectType, objectID)
+	}
+
+	if err = store.RemoveObjectTempData(orgID, objectType, objectID); err != nil {
+		if trace.IsLogging(logger.ERROR) {
+			trace.Error("In VerifyAndStoreData. Failed to remove temp data for object\n")
+		}
+	}
+	return true, nil
 }

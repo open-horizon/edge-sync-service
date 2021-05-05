@@ -2,6 +2,12 @@ package base
 
 import (
 	"bytes"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha1"
+	"crypto/x509"
+	"encoding/base64"
 	"fmt"
 	"math"
 	"os"
@@ -27,6 +33,34 @@ func setupDB(dbType string) {
 	}
 }
 
+func setupDataSignature(data []byte) (string, string, error) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return "", "", err
+	}
+	publicKey := &privateKey.PublicKey
+	publicKeyBytes, err := x509.MarshalPKIXPublicKey(publicKey)
+	if err != nil {
+		return "", "", err
+	}
+	publicKeyString := base64.StdEncoding.EncodeToString(publicKeyBytes)
+
+	dataHash := sha1.New()
+	_, err = dataHash.Write(data)
+	if err != nil {
+		return "", "", err
+	}
+	dataHashSum := dataHash.Sum(nil)
+
+	signature, err := rsa.SignPSS(rand.Reader, privateKey, crypto.SHA1, dataHashSum, nil)
+	if err != nil {
+		return "", "", err
+	}
+
+	signatureString := base64.StdEncoding.EncodeToString(signature)
+	return publicKeyString, signatureString, nil
+}
+
 func TestObjectAPI(t *testing.T) {
 	setupDB(common.Mongo)
 	testObjectAPI(store, t)
@@ -40,6 +74,14 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 	common.InitObjectLocks()
 
 	dests := []string{"device:dev1", "device2:dev", "device2:dev1"}
+
+	// set up data signature value
+	dataToSign := []byte("data to check signature")
+	var publicKey, signature string
+	var err error
+	if publicKey, signature, err = setupDataSignature(dataToSign); err != nil {
+		t.Errorf("Failed to set up publicKey and signature for data. Error: %s\n", err.Error())
+	}
 
 	invalidObjects := []struct {
 		orgID      string
@@ -89,6 +131,17 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 			"updateObject didn't check that autoDelete is set for object without destinations list or dest ID"},
 		{"myorg777", "type1", "123456", common.MetaData{ObjectID: "12345", ObjectType: "type1", DestOrgID: "myorg777", MetaOnly: true}, []byte("data"),
 			"updateObject didn't check that the data is empty for meta only update"},
+		{"myorg777", "type1", "123456", common.MetaData{ObjectID: "12345", ObjectType: "type1", DestOrgID: "myorg777", PublicKey: "123"}, []byte("data"),
+			"updateObject didn't check that the publicKey is base64 encoded"},
+		{"myorg777", "type1", "123456", common.MetaData{ObjectID: "12345", ObjectType: "type1", DestOrgID: "myorg777", Signature: "123"}, []byte("data"),
+			"updateObject didn't check that the signature is base64 encoded"},
+		{"myorg777", "type1", "123456",
+			common.MetaData{ObjectID: "12345", ObjectType: "type1", DestOrgID: "myorg777",
+				PublicKey: publicKey,
+				Signature: signature,
+			},
+			[]byte("wrong data to check signature"),
+			"updateObject didn't verify the data with publicKey and signature"},
 		{"myorg777", "type1", "123456",
 			common.MetaData{ObjectID: "123456", ObjectType: "type1", DestOrgID: "myorg777",
 				DestinationPolicy: &common.Policy{
@@ -234,6 +287,13 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 		{"myorg777", "type1", "6", common.MetaData{ObjectID: "6", ObjectType: "type1", DestOrgID: "myorg777",
 			ExpectedConsumers: 1, DestType: "device3", DestID: "dev1", MetaOnly: true},
 			nil, common.ReadyToSend, 1, []byte("new"), 1, true},
+		{"myorg777", "type1", "7", common.MetaData{ObjectID: "7", ObjectType: "type1", DestOrgID: "myorg777",
+			ExpectedConsumers: 3, DestType: "device", DestID: "dev1", PublicKey: publicKey, Signature: signature},
+			dataToSign, common.ReadyToSend, 3, nil, 1, false},
+		{"myorg777", "type1", "8", common.MetaData{ObjectID: "8", ObjectType: "type1", DestOrgID: "myorg777",
+			ExpectedConsumers: 3, DestType: "device", DestID: "dev1", PublicKey: publicKey, Signature: signature,
+			NoData: true},
+			dataToSign, common.ReadyToSend, 3, nil, 1, false},
 	}
 
 	destination1 := common.Destination{DestOrgID: "myorg777", DestType: "device", DestID: "dev1", Communication: common.MQTTProtocol}
@@ -287,6 +347,10 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 		}
 		if metaData.ExpectedConsumers != row.expectedConsumers {
 			t.Errorf("Wrong number of expected consumers: %d instead of %d (objectID = %s)", metaData.ExpectedConsumers, row.expectedConsumers, row.objectID)
+		}
+
+		if row.metaData.NoData && (metaData.PublicKey != "" || metaData.Signature != "") {
+			t.Errorf("Public key and signature should be empty value if NoData is true (objectID = %s)", row.objectID)
 		}
 
 		// Get data

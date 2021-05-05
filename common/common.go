@@ -371,6 +371,14 @@ type MetaData struct {
 	// This field should not be set by users.
 	ChunkSize int `json:"chunkSize" bson:"chunk-size"`
 
+	// PublicKey is a base64 encoded string. It is the publicKey to verify the data of the object
+	// Optional field, if omitted the data will not be verified with public key and signature
+	PublicKey string `json:"publicKey" bson:"public-key"`
+
+	// Signature is a base64 encoded string. It is the data signature to verify data of the object
+	// Optional field, if omitted the data will not be verified with public key and signature
+	Signature string `json:"signature" bson:"signature"`
+
 	// Public is a flag indicate this object is visiable to all users in all orgs
 	// Optional field, default is false (not visiable to all users)
 	Public bool `json:"public" bson:"public"`

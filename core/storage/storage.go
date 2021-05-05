@@ -44,6 +44,12 @@ type Storage interface {
 	// Return false and no error, if the object doesn't exist
 	StoreObjectData(orgID string, objectType string, objectID string, dataReader io.Reader) (bool, common.SyncServiceError)
 
+	StoreObjectTempData(orgID string, objectType string, objectID string, dataReader io.Reader) (bool, common.SyncServiceError)
+
+	RemoveObjectTempData(orgID string, objectType string, objectID string) common.SyncServiceError
+
+	RetrieveTempObjectData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError)
+
 	// Append a chunk of data to the object's data
 	AppendObjectData(orgID string, objectType string, objectID string, dataReader io.Reader, dataLength uint32, offset int64, total int64, isFirstChunk bool, isLastChunk bool) common.SyncServiceError
 
@@ -364,6 +370,19 @@ func createObjectCollectionID(orgID string, objectType string, objectID string) 
 	return strBuilder.String()
 }
 
+func createTempObjectCollectionID(orgID string, objectType string, objectID string) string {
+	var strBuilder strings.Builder
+	strBuilder.Grow(len(orgID) + len(objectType) + len(objectID) + len("tmp") + 4)
+	strBuilder.WriteString(orgID)
+	strBuilder.WriteByte(':')
+	strBuilder.WriteString(objectType)
+	strBuilder.WriteByte(':')
+	strBuilder.WriteString(objectID)
+	strBuilder.WriteByte(':')
+	strBuilder.WriteString("tmp")
+	return strBuilder.String()
+}
+
 // Notifications
 func getNotificationCollectionID(notification *common.Notification) string {
 	return createNotificationCollectionID(notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType,
@@ -414,6 +433,20 @@ func createDataPath(prefix string, orgID string, objectType string, objectID str
 	strBuilder.WriteString(objectType)
 	strBuilder.WriteByte('-')
 	strBuilder.WriteString(objectID)
+	return strBuilder.String()
+}
+
+func createDataPathForTempData(prefix string, orgID string, objectType string, objectID string) string {
+	var strBuilder strings.Builder
+	strBuilder.Grow(len(prefix) + len(orgID) + len(objectType) + len(objectID) + len("tmp") + 4)
+	strBuilder.WriteString(prefix)
+	strBuilder.WriteString(orgID)
+	strBuilder.WriteByte('-')
+	strBuilder.WriteString(objectType)
+	strBuilder.WriteByte('-')
+	strBuilder.WriteString(objectID)
+	strBuilder.WriteByte('-')
+	strBuilder.WriteString("tmp")
 	return strBuilder.String()
 }
 

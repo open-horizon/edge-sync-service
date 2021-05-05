@@ -72,6 +72,18 @@ func (store *Cache) StoreObjectData(orgID string, objectType string, objectID st
 	return store.Store.StoreObjectData(orgID, objectType, objectID, dataReader)
 }
 
+func (store *Cache) StoreObjectTempData(orgID string, objectType string, objectID string, dataReader io.Reader) (bool, common.SyncServiceError) {
+	return store.Store.StoreObjectTempData(orgID, objectType, objectID, dataReader)
+}
+
+func (store *Cache) RemoveObjectTempData(orgID string, objectType string, objectID string) common.SyncServiceError {
+	return store.Store.RemoveObjectTempData(orgID, objectType, objectID)
+}
+
+func (store *Cache) RetrieveTempObjectData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
+	return store.Store.RetrieveTempObjectData(orgID, objectType, objectID)
+}
+
 // AppendObjectData appends a chunk of data to the object's data
 func (store *Cache) AppendObjectData(orgID string, objectType string, objectID string, dataReader io.Reader, dataLength uint32,
 	offset int64, total int64, isFirstChunk bool, isLastChunk bool) common.SyncServiceError {
