@@ -3,7 +3,7 @@ package common
 import (
 	"crypto"
 	"crypto/rsa"
-	"crypto/sha256"
+	"crypto/sha1"
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
@@ -267,7 +267,7 @@ func VerifyDataSignature(data io.Reader, publicKey string, signature string) Syn
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In VerifyDataSignature. starting data hash %s %s\n")
 		}
-		dataHash := sha256.New()
+		dataHash := sha1.New()
 
 		if _, err = io.Copy(dataHash, data); err != nil {
 			return &InvalidRequest{Message: "Failed to hash object data, Error: " + err.Error()}
@@ -281,7 +281,7 @@ func VerifyDataSignature(data io.Reader, publicKey string, signature string) Syn
 			return &InvalidRequest{Message: "Failed to parse public key, Error: " + err.Error()}
 		} else {
 			pubKeyToUse := pubKey.(*rsa.PublicKey)
-			if err = rsa.VerifyPSS(pubKeyToUse, crypto.SHA256, dataHashSum, signatureBytes, nil); err != nil {
+			if err = rsa.VerifyPSS(pubKeyToUse, crypto.SHA1, dataHashSum, signatureBytes, nil); err != nil {
 				return &InvalidRequest{Message: "Failed to verify data with public key and data signature, Error: " + err.Error()}
 			}
 		}

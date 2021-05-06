@@ -592,7 +592,7 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 	}
 
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("In PutObjectData. storing data for object %s %s\n", objectType, objectID)
+		trace.Debug("In PutObjectData. done with storing data for object %s %s\n", objectType, objectID)
 	}
 	return true, communications.SendNotifications(notificationsInfo)
 }
