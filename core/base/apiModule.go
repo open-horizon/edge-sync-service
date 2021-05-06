@@ -528,13 +528,19 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In PutObjectData. read data to buffer %s %s\n", objectType, objectID)
 		}
-		buffer := new(bytes.Buffer)
-		buffer.ReadFrom(dataReader)
-		dataBytes := buffer.Bytes()
+		// buffer := new(bytes.Buffer)
+		// buffer.ReadFrom(dataReader)
+		// dataBytes := buffer.Bytes()
 
-		dataReader1 := bytes.NewReader(dataBytes)
+		// dataReader1 := bytes.NewReader(dataBytes)
+		var buf bytes.Buffer
+		dr := io.TeeReader(dataReader, &buf)
 
-		if err := common.VerifyDataSignature(dataReader1, metaData.PublicKey, metaData.Signature); err != nil {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectData. read data to buffer done for object %s %s\n", objectType, objectID)
+		}
+
+		if err := common.VerifyDataSignature(dr, metaData.PublicKey, metaData.Signature); err != nil {
 			common.ObjectLocks.Unlock(lockIndex)
 			return false, err
 		}
@@ -543,7 +549,9 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 			trace.Debug("In PutObjectData. data verification done, rewind dataReader\n")
 		}
 
-		dataReader = bytes.NewReader(dataBytes)
+		dataReader = &buf
+
+		//dataReader = bytes.NewReader(dataBytes)
 	}
 
 	if trace.IsLogging(logger.DEBUG) {
