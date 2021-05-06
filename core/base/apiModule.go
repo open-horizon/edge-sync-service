@@ -246,7 +246,8 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 		// data signature verification if metadata has both publicKey and signature
 		// data is nil for metaOnly object. Meta-only object will not apply data verification
 		if metaData.PublicKey != "" && metaData.Signature != "" {
-			if err := common.VerifyDataSignature(data, metaData.PublicKey, metaData.Signature); err != nil {
+			dataReader := bytes.NewReader(data)
+			if err := common.VerifyDataSignature(dataReader, metaData.PublicKey, metaData.Signature); err != nil {
 				return err
 			}
 		}
@@ -523,12 +524,12 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 	}
 
 	if metaData.PublicKey != "" && metaData.Signature != "" {
-		// start data verification
+		//start data verification
 		buffer := new(bytes.Buffer)
 		buffer.ReadFrom(dataReader)
 		dataBytes := buffer.Bytes()
 
-		if err := common.VerifyDataSignature(dataBytes, metaData.PublicKey, metaData.Signature); err != nil {
+		if err := common.VerifyDataSignature(dataReader, metaData.PublicKey, metaData.Signature); err != nil {
 			common.ObjectLocks.Unlock(lockIndex)
 			return false, err
 		}

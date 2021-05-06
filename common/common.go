@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strings"
@@ -248,7 +249,7 @@ func StringListContains(stringList []string, str string) bool {
 	return false
 }
 
-func VerifyDataSignature(data []byte, publicKey string, signature string) SyncServiceError {
+func VerifyDataSignature(data io.Reader, publicKey string, signature string) SyncServiceError {
 	if publicKey == "" || signature == "" {
 		message := fmt.Sprintf("public key or signature is empty")
 		return &InvalidRequest{Message: message}
@@ -261,7 +262,8 @@ func VerifyDataSignature(data []byte, publicKey string, signature string) SyncSe
 		return &InvalidRequest{Message: "Signature is not base64 encoded. Error: " + err.Error()}
 	} else {
 		dataHash := sha256.New()
-		if _, err := dataHash.Write(data); err != nil {
+
+		if _, err = io.Copy(dataHash, data); err != nil {
 			return &InvalidRequest{Message: "Failed to hash object data, Error: " + err.Error()}
 		}
 		dataHashSum := dataHash.Sum(nil)

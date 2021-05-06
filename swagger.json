@@ -2587,12 +2587,12 @@
           "x-go-name": "Public"
         },
         "publicKey": {
-          "description": "PublicKey is encoded in base64. It is the publicKey to verify the data of the object\nOptional field, if omitted the data will not be verified with public key and signature",
+          "description": "PublicKey is a base64 encoded string. It is the publicKey to verify the data of the object\nOptional field, if omitted the data will not be verified with public key and signature",
           "type": "string",
           "x-go-name": "PublicKey"
         },
         "signature": {
-          "description": "Signature is encoded in base64. It is the data signature to verify data of the object\nOptional field, if omitted the data will not be verified with public key and signature",
+          "description": "Signature is a base64 encoded string. It is the data signature to verify data of the object\nOptional field, if omitted the data will not be verified with public key and signature",
           "type": "string",
           "x-go-name": "Signature"
         },
