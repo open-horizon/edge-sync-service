@@ -3,6 +3,7 @@ package common
 import (
 	"crypto"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
@@ -12,8 +13,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"golang.org/x/crypto/blake2b"
 
 	"github.com/open-horizon/edge-utilities/logger"
 	"github.com/open-horizon/edge-utilities/logger/trace"
@@ -268,9 +267,10 @@ func VerifyDataSignature(data io.Reader, publicKey string, signature string) Syn
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In VerifyDataSignature. starting data hash %s %s\n")
 		}
-		dataHash, err := blake2b.New256(nil)
-		if err != nil {
-			return &InvalidRequest{Message: "Failed to get hash, Error: " + err.Error()}
+		dataHash := sha256.New()
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In VerifyDataSignature. dataHash is done. Starting copy data reader to dataHash %s %s\n")
 		}
 
 		if _, err = io.Copy(dataHash, data); err != nil {
@@ -285,7 +285,7 @@ func VerifyDataSignature(data io.Reader, publicKey string, signature string) Syn
 			return &InvalidRequest{Message: "Failed to parse public key, Error: " + err.Error()}
 		} else {
 			pubKeyToUse := pubKey.(*rsa.PublicKey)
-			if err = rsa.VerifyPSS(pubKeyToUse, crypto.BLAKE2b_256, dataHashSum, signatureBytes, nil); err != nil {
+			if err = rsa.VerifyPSS(pubKeyToUse, crypto.SHA256, dataHashSum, signatureBytes, nil); err != nil {
 				return &InvalidRequest{Message: "Failed to verify data with public key and data signature, Error: " + err.Error()}
 			}
 		}
