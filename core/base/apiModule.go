@@ -525,16 +525,29 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 
 	if metaData.PublicKey != "" && metaData.Signature != "" {
 		//start data verification
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectData. read data to buffer %s %s\n", objectType, objectID)
+		}
 		buffer := new(bytes.Buffer)
 		buffer.ReadFrom(dataReader)
 		dataBytes := buffer.Bytes()
 
-		if err := common.VerifyDataSignature(dataReader, metaData.PublicKey, metaData.Signature); err != nil {
+		dataReader1 := bytes.NewReader(dataBytes)
+
+		if err := common.VerifyDataSignature(dataReader1, metaData.PublicKey, metaData.Signature); err != nil {
 			common.ObjectLocks.Unlock(lockIndex)
 			return false, err
 		}
 
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectData. data verification done, rewind dataReader\n")
+		}
+
 		dataReader = bytes.NewReader(dataBytes)
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In PutObjectData. storing data for object %s %s\n", objectType, objectID)
 	}
 
 	if exists, err := store.StoreObjectData(orgID, objectType, objectID, dataReader); err != nil || !exists {
@@ -568,6 +581,10 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 	common.ObjectLocks.Unlock(lockIndex)
 	if err != nil {
 		return true, err
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In PutObjectData. storing data for object %s %s\n", objectType, objectID)
 	}
 	return true, communications.SendNotifications(notificationsInfo)
 }

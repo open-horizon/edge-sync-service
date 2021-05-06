@@ -13,6 +13,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/open-horizon/edge-utilities/logger"
+	"github.com/open-horizon/edge-utilities/logger/trace"
 )
 
 // SyncServiceError is a common error type used in the sync service
@@ -261,12 +264,18 @@ func VerifyDataSignature(data io.Reader, publicKey string, signature string) Syn
 	} else if signatureBytes, err := base64.StdEncoding.DecodeString(signature); err != nil {
 		return &InvalidRequest{Message: "Signature is not base64 encoded. Error: " + err.Error()}
 	} else {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In VerifyDataSignature. starting data hash %s %s\n")
+		}
 		dataHash := sha256.New()
 
 		if _, err = io.Copy(dataHash, data); err != nil {
 			return &InvalidRequest{Message: "Failed to hash object data, Error: " + err.Error()}
 		}
 		dataHashSum := dataHash.Sum(nil)
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In VerifyDataSignature. data hash done\n")
+		}
 
 		if pubKey, err := x509.ParsePKIXPublicKey(publicKeyBytes); err != nil {
 			return &InvalidRequest{Message: "Failed to parse public key, Error: " + err.Error()}
