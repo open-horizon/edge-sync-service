@@ -252,17 +252,18 @@ func StringListContains(stringList []string, str string) bool {
 	return false
 }
 
-func VerifyDataSignature(data io.Reader, publicKey string, signature string) SyncServiceError {
+func VerifyDataSignature(data io.Reader, publicKey string, signature string) (io.Reader, SyncServiceError) {
 	if publicKey == "" || signature == "" {
 		message := fmt.Sprintf("public key or signature is empty")
-		return &InvalidRequest{Message: message}
+		return nil, &InvalidRequest{Message: message}
 
 	}
 
+	var dataReader io.Reader
 	if publicKeyBytes, err := base64.StdEncoding.DecodeString(publicKey); err != nil {
-		return &InvalidRequest{Message: "PublicKey is not base64 encoded. Error: " + err.Error()}
+		return nil, &InvalidRequest{Message: "PublicKey is not base64 encoded. Error: " + err.Error()}
 	} else if signatureBytes, err := base64.StdEncoding.DecodeString(signature); err != nil {
-		return &InvalidRequest{Message: "Signature is not base64 encoded. Error: " + err.Error()}
+		return nil, &InvalidRequest{Message: "Signature is not base64 encoded. Error: " + err.Error()}
 	} else {
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In VerifyDataSignature. starting data hash %s %s\n")
@@ -273,8 +274,9 @@ func VerifyDataSignature(data io.Reader, publicKey string, signature string) Syn
 			trace.Debug("In VerifyDataSignature. dataHash is done. Starting copy data reader to dataHash %s %s\n")
 		}
 
+		dataReader = io.TeeReader(data, dataHash)
 		if _, err = io.Copy(dataHash, data); err != nil {
-			return &InvalidRequest{Message: "Failed to hash object data, Error: " + err.Error()}
+			return nil, &InvalidRequest{Message: "Failed to hash object data, Error: " + err.Error()}
 		}
 		dataHashSum := dataHash.Sum(nil)
 		if trace.IsLogging(logger.DEBUG) {
@@ -282,16 +284,16 @@ func VerifyDataSignature(data io.Reader, publicKey string, signature string) Syn
 		}
 
 		if pubKey, err := x509.ParsePKIXPublicKey(publicKeyBytes); err != nil {
-			return &InvalidRequest{Message: "Failed to parse public key, Error: " + err.Error()}
+			return nil, &InvalidRequest{Message: "Failed to parse public key, Error: " + err.Error()}
 		} else {
 			pubKeyToUse := pubKey.(*rsa.PublicKey)
 			if err = rsa.VerifyPSS(pubKeyToUse, crypto.SHA256, dataHashSum, signatureBytes, nil); err != nil {
-				return &InvalidRequest{Message: "Failed to verify data with public key and data signature, Error: " + err.Error()}
+				return nil, &InvalidRequest{Message: "Failed to verify data with public key and data signature, Error: " + err.Error()}
 			}
 		}
 	}
 
-	return nil
+	return dataReader, nil
 }
 
 // MetaData is the metadata that identifies and defines the sync service object.
