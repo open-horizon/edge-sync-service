@@ -2,6 +2,10 @@ package base
 
 import (
 	"bytes"
+	"crypto"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -592,10 +596,51 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 			if trace.IsLogging(logger.DEBUG) {
 				trace.Debug("In PutObjectData. Pass tmp file reader to VerifyDataSignature func for object %s %s\n", objectType, objectID)
 			}*/
-		dr, err := common.VerifyDataSignature(dataReader, metaData.PublicKey, metaData.Signature)
-		if err != nil {
-			common.ObjectLocks.Unlock(lockIndex)
-			return false, err
+		// dr, err := common.VerifyDataSignature(dataReader, metaData.PublicKey, metaData.Signature)
+		// if err != nil {
+		// 	common.ObjectLocks.Unlock(lockIndex)
+		// 	return false, err
+		// }
+
+		if publicKeyBytes, err := base64.StdEncoding.DecodeString(metaData.PublicKey); err != nil {
+			return false, &common.InvalidRequest{Message: "PublicKey is not base64 encoded. Error: " + err.Error()}
+		} else if signatureBytes, err := base64.StdEncoding.DecodeString(metaData.Signature); err != nil {
+			return false, &common.InvalidRequest{Message: "Signature is not base64 encoded. Error: " + err.Error()}
+		} else {
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("In VerifyDataSignature. starting data hash %s %s\n")
+			}
+			dataHash := sha256.New()
+
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("In VerifyDataSignature. dataHash is done. Starting copy data reader to dataHash %s %s\n")
+			}
+
+			dr := io.TeeReader(dataReader, dataHash)
+
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("In PutObjectData. storing data for object %s %s\n", objectType, objectID)
+			}
+
+			if exists, err := store.StoreObjectData(orgID, objectType, objectID, dr); err != nil || !exists {
+				common.ObjectLocks.Unlock(lockIndex)
+				return false, err
+			}
+
+			dataHashSum := dataHash.Sum(nil)
+
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("In VerifyDataSignature. data hash done\n")
+			}
+
+			if pubKey, err := x509.ParsePKIXPublicKey(publicKeyBytes); err != nil {
+				return false, &common.InvalidRequest{Message: "Failed to parse public key, Error: " + err.Error()}
+			} else {
+				pubKeyToUse := pubKey.(*rsa.PublicKey)
+				if err = rsa.VerifyPSS(pubKeyToUse, crypto.SHA256, dataHashSum, signatureBytes, nil); err != nil {
+					return false, &common.InvalidRequest{Message: "Failed to verify data with public key and data signature, Error: " + err.Error()}
+				}
+			}
 		}
 
 		if trace.IsLogging(logger.DEBUG) {
@@ -605,14 +650,6 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 
 		//dataReader = bytes.NewReader(dataBytes)
 
-		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("In PutObjectData. storing data for object %s %s\n", objectType, objectID)
-		}
-
-		if exists, err := store.StoreObjectData(orgID, objectType, objectID, dr); err != nil || !exists {
-			common.ObjectLocks.Unlock(lockIndex)
-			return false, err
-		}
 	} else {
 
 		// if trace.IsLogging(logger.DEBUG) {
