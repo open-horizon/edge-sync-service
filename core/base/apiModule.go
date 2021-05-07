@@ -537,10 +537,60 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 		dr := io.TeeReader(dataReader, &buf)
 
 		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("In PutObjectData. read data to buffer done for object %s %s\n", objectType, objectID)
+			trace.Debug("In PutObjectData. dup data reader for object %s %s\n", objectType, objectID)
 		}
 
-		if err := common.VerifyDataSignature(dr, metaData.PublicKey, metaData.Signature); err != nil {
+		tmpFile := fmt.Sprintf("%s_%s_%s", orgID, objectType, objectID)
+		if _, err := os.Stat(tmpFile); err != nil && !os.IsNotExist(err) {
+			return false, &common.InvalidRequest{Message: fmt.Sprintf("Failed to check tmp file: %s. Error: %s", tmpFile, err.Error())}
+		} else if err == nil {
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("In PutObjectData. removing existing tmp file with data for object %s %s\n", objectType, objectID)
+			}
+
+			// file exists, remove and create it
+			if err = os.Remove(tmpFile); err != nil {
+				return false, &common.InvalidRequest{Message: fmt.Sprintf("Can't remove tmp file: %s", tmpFile)}
+			}
+
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("In PutObjectData. Done removing existing tmp file with data for object %s %s\n", objectType, objectID)
+			}
+		}
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectData. Creating new tmp file with data for object %s %s\n", objectType, objectID)
+		}
+
+		// file doesn't exist, create
+		f, err := os.Create(tmpFile)
+		if err != nil {
+			return false, &common.InvalidRequest{Message: fmt.Sprintf("Failed to create tmp file: %s, Error: %s", tmpFile, err.Error())}
+		}
+		defer f.Close()
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectData. Writing content to the tmp file with data for object %s %s\n", objectType, objectID)
+		}
+
+		if _, err = io.Copy(f, dr); err != nil {
+			return false, &common.InvalidRequest{Message: fmt.Sprintf("Failed to write to tmp file: %s, Error: %s", tmpFile, err.Error())}
+		}
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectData. Open tmp file for object %s %s\n", objectType, objectID)
+		}
+
+		fileToVerify, err := os.Open(tmpFile)
+		if err != nil {
+			return false, &common.InvalidRequest{Message: fmt.Sprintf("Failed to read tmp file: %s, Error: %s", tmpFile, err.Error())}
+		}
+		defer fileToVerify.Close()
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectData. Pass tmp file reader to VerifyDataSignature func for object %s %s\n", objectType, objectID)
+		}
+		if err := common.VerifyDataSignature(fileToVerify, metaData.PublicKey, metaData.Signature); err != nil {
 			common.ObjectLocks.Unlock(lockIndex)
 			return false, err
 		}
