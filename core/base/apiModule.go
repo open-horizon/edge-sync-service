@@ -592,7 +592,8 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 			if trace.IsLogging(logger.DEBUG) {
 				trace.Debug("In PutObjectData. Pass tmp file reader to VerifyDataSignature func for object %s %s\n", objectType, objectID)
 			}*/
-		if dataReader, err = common.VerifyDataSignature(dataReader, metaData.PublicKey, metaData.Signature); err != nil {
+		dr, err := common.VerifyDataSignature(dataReader, metaData.PublicKey, metaData.Signature)
+		if err != nil {
 			common.ObjectLocks.Unlock(lockIndex)
 			return false, err
 		}
@@ -600,18 +601,29 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In PutObjectData. data verification done, rewind dataReader\n")
 		}
-		//dataReader = &buf
+		//dataReader = dr
 
 		//dataReader = bytes.NewReader(dataBytes)
-	}
 
-	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("In PutObjectData. storing data for object %s %s\n", objectType, objectID)
-	}
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectData. storing data for object %s %s\n", objectType, objectID)
+		}
 
-	if exists, err := store.StoreObjectData(orgID, objectType, objectID, dataReader); err != nil || !exists {
-		common.ObjectLocks.Unlock(lockIndex)
-		return false, err
+		if exists, err := store.StoreObjectData(orgID, objectType, objectID, dr); err != nil || !exists {
+			common.ObjectLocks.Unlock(lockIndex)
+			return false, err
+		}
+	} else {
+
+		// if trace.IsLogging(logger.DEBUG) {
+		// 	trace.Debug("In PutObjectData. storing data for object %s %s\n", objectType, objectID)
+		// }
+
+		if exists, err := store.StoreObjectData(orgID, objectType, objectID, dataReader); err != nil || !exists {
+			common.ObjectLocks.Unlock(lockIndex)
+			return false, err
+		}
+
 	}
 
 	if metaData.SourceDataURI != "" {

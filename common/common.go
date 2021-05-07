@@ -1,6 +1,7 @@
 package common
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -275,10 +276,18 @@ func VerifyDataSignature(data io.Reader, publicKey string, signature string) (io
 		}
 
 		dataReader = io.TeeReader(data, dataHash)
-		if _, err = io.Copy(dataHash, data); err != nil {
-			return nil, &InvalidRequest{Message: "Failed to hash object data, Error: " + err.Error()}
-		}
+		buffer := new(bytes.Buffer)
+		buffer.ReadFrom(dataReader)
+		// dataBytes := buffer.Bytes()
+		// dataString := string(dataBytes)
+		// fmt.Printf("dataString: %s\n", dataString)
+		// dataReader = bytes.NewReader(dataBytes)
+
+		// if _, err = io.Copy(dataHash, data); err != nil {
+		// 	return nil, &InvalidRequest{Message: "Failed to hash object data, Error: " + err.Error()}
+		// }
 		dataHashSum := dataHash.Sum(nil)
+
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In VerifyDataSignature. data hash done\n")
 		}
@@ -290,6 +299,8 @@ func VerifyDataSignature(data io.Reader, publicKey string, signature string) (io
 			if err = rsa.VerifyPSS(pubKeyToUse, crypto.SHA256, dataHashSum, signatureBytes, nil); err != nil {
 				return nil, &InvalidRequest{Message: "Failed to verify data with public key and data signature, Error: " + err.Error()}
 			}
+			dataBytes := buffer.Bytes()
+			dataReader = bytes.NewReader(dataBytes)
 		}
 	}
 
