@@ -540,7 +540,7 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 			trace.Debug("In PutObjectData. dup data reader for object %s %s\n", objectType, objectID)
 		}
 
-		tmpFile := fmt.Sprintf("%s_%s_%s", orgID, objectType, objectID)
+		tmpFile := fmt.Sprintf("/tmp/%s_%s_%s", orgID, objectType, objectID)
 		if _, err := os.Stat(tmpFile); err != nil && !os.IsNotExist(err) {
 			return false, &common.InvalidRequest{Message: fmt.Sprintf("Failed to check tmp file: %s. Error: %s", tmpFile, err.Error())}
 		} else if err == nil {
