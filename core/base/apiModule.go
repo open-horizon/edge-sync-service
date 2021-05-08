@@ -12,6 +12,7 @@ import (
 	"math"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -610,6 +611,8 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 			if trace.IsLogging(logger.DEBUG) {
 				trace.Debug("In VerifyDataSignature. starting data hash %s %s\n")
 			}
+
+			fmt.Printf("stroconv int size: %d\n", strconv.IntSize)
 			dataHash := sha256.New()
 
 			if trace.IsLogging(logger.DEBUG) {
