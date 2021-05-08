@@ -369,6 +369,18 @@ func (store *BoltStorage) StoreObjectData(orgID string, objectType string, objec
 	return true, nil
 }
 
+func (store *BoltStorage) StoreObjectTempData(orgID string, objectType string, objectID string, dataReader io.Reader) (bool, common.SyncServiceError) {
+	return true, nil
+}
+
+func (store *BoltStorage) RemoveObjectTempData(orgID string, objectType string, objectID string) common.SyncServiceError {
+	return nil
+}
+
+func (store *BoltStorage) RetrieveTempObjectData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
+	return nil, nil
+}
+
 // RetrieveObject returns the object meta data with the specified parameters
 func (store *BoltStorage) RetrieveObject(orgID string, objectType string, objectID string) (*common.MetaData, common.SyncServiceError) {
 	var meta *common.MetaData

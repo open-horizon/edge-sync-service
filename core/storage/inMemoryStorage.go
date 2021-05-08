@@ -160,6 +160,18 @@ func (store *InMemoryStorage) StoreObjectData(orgID string, objectType string, o
 	return false, nil
 }
 
+func (store *InMemoryStorage) StoreObjectTempData(orgID string, objectType string, objectID string, dataReader io.Reader) (bool, common.SyncServiceError) {
+	return true, nil
+}
+
+func (store *InMemoryStorage) RemoveObjectTempData(orgID string, objectType string, objectID string) common.SyncServiceError {
+	return nil
+}
+
+func (store *InMemoryStorage) RetrieveTempObjectData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
+	return nil, nil
+}
+
 // AppendObjectData appends a chunk of data to the object's data
 func (store *InMemoryStorage) AppendObjectData(orgID string, objectType string, objectID string, dataReader io.Reader, dataLength uint32,
 	offset int64, total int64, isFirstChunk bool, isLastChunk bool) common.SyncServiceError {

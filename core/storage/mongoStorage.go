@@ -1021,6 +1021,41 @@ func (store *MongoStorage) StoreObjectData(orgID string, objectType string, obje
 	return true, nil
 }
 
+func (store *MongoStorage) StoreObjectTempData(orgID string, objectType string, objectID string, dataReader io.Reader) (bool, common.SyncServiceError) {
+	id := createTempObjectCollectionID(orgID, objectType, objectID)
+
+	_, _, err := store.copyDataToFile(id, dataReader, true, true)
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+func (store *MongoStorage) RemoveObjectTempData(orgID string, objectType string, objectID string) common.SyncServiceError {
+	id := createTempObjectCollectionID(orgID, objectType, objectID)
+	if err := store.removeFile(id); err != nil {
+		return err
+	}
+	return nil
+
+}
+
+func (store *MongoStorage) RetrieveTempObjectData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
+	id := createTempObjectCollectionID(orgID, objectType, objectID)
+	fileHandle, err := store.openFile(id)
+	if err != nil {
+		switch err {
+		case mgo.ErrNotFound:
+			return nil, nil
+		default:
+			return nil, &Error{fmt.Sprintf("Failed to open file to read the data. Error: %s.", err)}
+		}
+	}
+	store.putFileHandle(id, fileHandle)
+	return fileHandle.file, nil
+}
+
 // AppendObjectData appends a chunk of data to the object's data
 func (store *MongoStorage) AppendObjectData(orgID string, objectType string, objectID string, dataReader io.Reader,
 	dataLength uint32, offset int64, total int64, isFirstChunk bool, isLastChunk bool) common.SyncServiceError {

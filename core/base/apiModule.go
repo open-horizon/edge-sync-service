@@ -625,7 +625,7 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 				trace.Debug("In PutObjectData. storing data for object %s %s\n", objectType, objectID)
 			}
 
-			if exists, err := store.StoreObjectData(orgID, objectType, objectID, dr); err != nil || !exists {
+			if exists, err := store.StoreObjectTempData(orgID, objectType, objectID, dr); err != nil || !exists {
 				common.ObjectLocks.Unlock(lockIndex)
 				return false, err
 			}
@@ -637,34 +637,51 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 			}
 
 			if pubKey, err := x509.ParsePKIXPublicKey(publicKeyBytes); err != nil {
+				common.ObjectLocks.Unlock(lockIndex)
 				return false, &common.InvalidRequest{Message: "Failed to parse public key, Error: " + err.Error()}
 			} else {
 				pubKeyToUse := pubKey.(*rsa.PublicKey)
 				if err = rsa.VerifyPSS(pubKeyToUse, crypto.SHA256, dataHashSum, signatureBytes, nil); err != nil {
+					store.RemoveObjectTempData(orgID, objectType, objectID)
+					common.ObjectLocks.Unlock(lockIndex)
 					return false, &common.InvalidRequest{Message: "Failed to verify data with public key and data signature, Error: " + err.Error()}
 				}
 			}
 		}
 
 		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("In PutObjectData. data verification done, rewind dataReader\n")
+			trace.Debug("In PutObjectData. data verification done\n")
+			trace.Debug("In PutObjectData. retrieve temp data\n")
+		}
+
+		dataReader, err := store.RetrieveTempObjectData(orgID, objectType, objectID)
+		if err != nil {
+			common.ObjectLocks.Unlock(lockIndex)
+			return false, &common.InvalidRequest{Message: "Failed to read data from temp file, Error: " + err.Error()}
+		} else if dataReader == nil {
+			common.ObjectLocks.Unlock(lockIndex)
+			return false, &common.InvalidRequest{Message: "Read empty data from temp file, Error: " + err.Error()}
 		}
 		//dataReader = dr
 
 		//dataReader = bytes.NewReader(dataBytes)
 
-	} else {
-
-		// if trace.IsLogging(logger.DEBUG) {
-		// 	trace.Debug("In PutObjectData. storing data for object %s %s\n", objectType, objectID)
-		// }
-
-		if exists, err := store.StoreObjectData(orgID, objectType, objectID, dataReader); err != nil || !exists {
-			common.ObjectLocks.Unlock(lockIndex)
-			return false, err
-		}
-
 	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In PutObjectData. storing data for object %s %s\n", objectType, objectID)
+	}
+
+	if exists, err := store.StoreObjectData(orgID, objectType, objectID, dataReader); err != nil || !exists {
+		common.ObjectLocks.Unlock(lockIndex)
+		return false, err
+	}
+	store.CloseDataReader(dataReader)
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In PutObjectData. remove temp data for object %s %s\n", objectType, objectID)
+	}
+	store.RemoveObjectTempData(orgID, objectType, objectID)
 
 	if metaData.SourceDataURI != "" {
 		if err = store.UpdateObjectSourceDataURI(orgID, objectType, objectID, ""); err != nil {
