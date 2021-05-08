@@ -654,7 +654,7 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 			trace.Debug("In PutObjectData. retrieve temp data\n")
 		}
 
-		dataReader, err := store.RetrieveTempObjectData(orgID, objectType, objectID)
+		dataReader, err = store.RetrieveTempObjectData(orgID, objectType, objectID)
 		if err != nil {
 			common.ObjectLocks.Unlock(lockIndex)
 			return false, &common.InvalidRequest{Message: "Failed to read data from temp file, Error: " + err.Error()}
