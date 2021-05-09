@@ -274,7 +274,7 @@ func VerifyDataSignature(data io.Reader, orgID string, objectType string, object
 			trace.Debug("In VerifyDataSignature. dataHash object creation is done. Starting copy data reader to dataHash %s %s\n")
 		}
 
-		dr := io.TeeReader(dataReader, dataHash)
+		dr := io.TeeReader(data, dataHash)
 
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In VerifyDataSignature. Creating tmp file\n")
