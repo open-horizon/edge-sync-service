@@ -540,108 +540,82 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 		// var buf bytes.Buffer
 		// dr := io.TeeReader(dataReader, &buf)
 
+	}
+	// dr, err := common.VerifyDataSignature(dataReader, metaData.PublicKey, metaData.Signature)
+	// if err != nil {
+	// 	common.ObjectLocks.Unlock(lockIndex)
+	// 	return false, err
+	// }
+
+	if publicKeyBytes, err := base64.StdEncoding.DecodeString(metaData.PublicKey); err != nil {
+		return false, &common.InvalidRequest{Message: "PublicKey is not base64 encoded. Error: " + err.Error()}
+	} else if signatureBytes, err := base64.StdEncoding.DecodeString(metaData.Signature); err != nil {
+		return false, &common.InvalidRequest{Message: "Signature is not base64 encoded. Error: " + err.Error()}
+	} else {
 		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("In PutObjectData. data is read to buffer/bytes %s %s\n", objectType, objectID)
+			trace.Debug("In VerifyDataSignature. starting data hash %s %s\n")
 		}
 
-		/*
-				tmpFile := fmt.Sprintf("/tmp/%s_%s_%s", orgID, objectType, objectID)
-				if _, err := os.Stat(tmpFile); err != nil && !os.IsNotExist(err) {
-					return false, &common.InvalidRequest{Message: fmt.Sprintf("Failed to check tmp file: %s. Error: %s", tmpFile, err.Error())}
-				} else if err == nil {
-					if trace.IsLogging(logger.DEBUG) {
-						trace.Debug("In PutObjectData. removing existing tmp file with data for object %s %s\n", objectType, objectID)
-					}
+		dataHash := sha256.New()
 
-					// file exists, remove and create it
-					if err = os.Remove(tmpFile); err != nil {
-						return false, &common.InvalidRequest{Message: fmt.Sprintf("Can't remove tmp file: %s", tmpFile)}
-					}
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In VerifyDataSignature. dataHash object creation is done. Starting copy data reader to dataHash %s %s\n")
+		}
 
-					if trace.IsLogging(logger.DEBUG) {
-						trace.Debug("In PutObjectData. Done removing existing tmp file with data for object %s %s\n", objectType, objectID)
-					}
-				}
+		dr := io.TeeReader(dataReader, dataHash)
 
-				if trace.IsLogging(logger.DEBUG) {
-					trace.Debug("In PutObjectData. Creating new tmp file with data for object %s %s\n", objectType, objectID)
-				}
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In VerifyDataSignature. Creating tmp file\n")
+		}
 
-				// file doesn't exist, create
-				f, err := os.Create(tmpFile)
-				if err != nil {
-					return false, &common.InvalidRequest{Message: fmt.Sprintf("Failed to create tmp file: %s, Error: %s", tmpFile, err.Error())}
-				}
-				defer f.Close()
-
-				if trace.IsLogging(logger.DEBUG) {
-					trace.Debug("In PutObjectData. Writing content to the tmp file with data for object %s %s\n", objectType, objectID)
-				}
-
-				if _, err = io.Copy(f, dr); err != nil {
-					return false, &common.InvalidRequest{Message: fmt.Sprintf("Failed to write to tmp file: %s, Error: %s", tmpFile, err.Error())}
-				}
-
-				if trace.IsLogging(logger.DEBUG) {
-					trace.Debug("In PutObjectData. Open tmp file for object %s %s\n", objectType, objectID)
-				}
-
-				fileToVerify, err := os.Open(tmpFile)
-				if err != nil {
-					return false, &common.InvalidRequest{Message: fmt.Sprintf("Failed to read tmp file: %s, Error: %s", tmpFile, err.Error())}
-				}
-				defer fileToVerify.Close()
-
-
+		tmpFile := fmt.Sprintf("/tmp/%s_%s_%s", orgID, objectType, objectID)
+		if _, err := os.Stat(tmpFile); err != nil && !os.IsNotExist(err) {
+			return false, &common.InvalidRequest{Message: fmt.Sprintf("Failed to check tmp file: %s. Error: %s", tmpFile, err.Error())}
+		} else if err == nil {
 			if trace.IsLogging(logger.DEBUG) {
-				trace.Debug("In PutObjectData. Pass tmp file reader to VerifyDataSignature func for object %s %s\n", objectType, objectID)
-			}*/
-		// dr, err := common.VerifyDataSignature(dataReader, metaData.PublicKey, metaData.Signature)
-		// if err != nil {
-		// 	common.ObjectLocks.Unlock(lockIndex)
-		// 	return false, err
-		// }
-
-		if publicKeyBytes, err := base64.StdEncoding.DecodeString(metaData.PublicKey); err != nil {
-			return false, &common.InvalidRequest{Message: "PublicKey is not base64 encoded. Error: " + err.Error()}
-		} else if signatureBytes, err := base64.StdEncoding.DecodeString(metaData.Signature); err != nil {
-			return false, &common.InvalidRequest{Message: "Signature is not base64 encoded. Error: " + err.Error()}
-		} else {
-			if trace.IsLogging(logger.DEBUG) {
-				trace.Debug("In VerifyDataSignature. starting data hash %s %s\n")
+				trace.Debug("In PutObjectData. removing existing tmp file with data for object %s %s\n", objectType, objectID)
 			}
 
-			dataHash := sha256.New()
-
-			if trace.IsLogging(logger.DEBUG) {
-				trace.Debug("In VerifyDataSignature. dataHash object creation is done. Starting copy data reader to dataHash %s %s\n")
-			}
-
-			file, err := os.Open("/tmp/testfile.txt")
-			if err != nil {
-				common.ObjectLocks.Unlock(lockIndex)
-				return false, &common.InvalidRequest{Message: "Failed to open /tmp/e2e-data.txt. Error: " + err.Error()}
-			}
-
-			if _, err = io.Copy(dataHash, file); err != nil {
-				common.ObjectLocks.Unlock(lockIndex)
-				return false, &common.InvalidRequest{Message: "Failed to copy file to hash. Error: " + err.Error()}
+			// file exists, remove and create it
+			if err = os.Remove(tmpFile); err != nil {
+				return false, &common.InvalidRequest{Message: fmt.Sprintf("Can't remove tmp file: %s", tmpFile)}
 			}
 
 			if trace.IsLogging(logger.DEBUG) {
-				trace.Debug("In VerifyDataSignature. Successfully copy file to hash\n")
+				trace.Debug("In PutObjectData. Done removing existing tmp file with data for object %s %s\n", objectType, objectID)
 			}
+		}
 
-			dr := io.TeeReader(dataReader, dataHash)
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectData. Creating new tmp file with data for object %s %s\n", objectType, objectID)
+		}
 
-			if trace.IsLogging(logger.DEBUG) {
-				trace.Debug("In PutObjectData. storing data for object %s %s\n", objectType, objectID)
-			}
+		// file doesn't exist, create
+		f, err := os.Create(tmpFile)
+		if err != nil {
+			return false, &common.InvalidRequest{Message: fmt.Sprintf("Failed to create tmp file: %s, Error: %s", tmpFile, err.Error())}
+		}
+		defer f.Close()
 
-			if exists, err := store.StoreObjectTempData(orgID, objectType, objectID, dr); err != nil || !exists {
-				common.ObjectLocks.Unlock(lockIndex)
-				return false, err
-			}
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectData. Writing content to the tmp file with data for object %s %s\n", objectType, objectID)
+		}
+
+		if _, err = io.Copy(f, dr); err != nil {
+			return false, &common.InvalidRequest{Message: fmt.Sprintf("Failed to write to tmp file: %s, Error: %s", tmpFile, err.Error())}
+		}
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectData. Successfully copied data reader to tmp file for object %s %s\n", objectType, objectID)
+
+			// if trace.IsLogging(logger.DEBUG) {
+			// 	trace.Debug("In PutObjectData. storing data for object %s %s\n", objectType, objectID)
+			// }
+
+			// if exists, err := store.StoreObjectTempData(orgID, objectType, objectID, dr); err != nil || !exists {
+			// 	common.ObjectLocks.Unlock(lockIndex)
+			// 	return false, err
+			// }
 
 			dataHashSum := dataHash.Sum(nil)
 
@@ -667,17 +641,27 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 			trace.Debug("In PutObjectData. retrieve temp data\n")
 		}
 
-		dataReader, err = store.RetrieveTempObjectData(orgID, objectType, objectID)
-		if err != nil {
-			common.ObjectLocks.Unlock(lockIndex)
-			return false, &common.InvalidRequest{Message: "Failed to read data from temp file, Error: " + err.Error()}
-		} else if dataReader == nil {
-			common.ObjectLocks.Unlock(lockIndex)
-			return false, &common.InvalidRequest{Message: "Read empty data from temp file, Error: " + err.Error()}
-		}
+		/*
+			dataReader, err = store.RetrieveTempObjectData(orgID, objectType, objectID)
+			if err != nil {
+				common.ObjectLocks.Unlock(lockIndex)
+				return false, &common.InvalidRequest{Message: "Failed to read data from temp file, Error: " + err.Error()}
+			} else if dataReader == nil {
+				common.ObjectLocks.Unlock(lockIndex)
+				return false, &common.InvalidRequest{Message: "Read empty data from temp file, Error: " + err.Error()}
+			}*/
 		//dataReader = dr
 
 		//dataReader = bytes.NewReader(dataBytes)
+		if openFile, err := os.Open(tmpFile); err != nil {
+			common.ObjectLocks.Unlock(lockIndex)
+			return false, &common.InvalidRequest{Message: "Failed to open tmp file, Error: " + err.Error()}
+		} else {
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("In PutObjectData. Set dataReader to the file\n")
+			}
+			dataReader = openFile
+		}
 
 	}
 
