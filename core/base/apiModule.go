@@ -12,7 +12,6 @@ import (
 	"math"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -612,11 +611,25 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 				trace.Debug("In VerifyDataSignature. starting data hash %s %s\n")
 			}
 
-			fmt.Printf("stroconv int size: %d\n", strconv.IntSize)
 			dataHash := sha256.New()
 
 			if trace.IsLogging(logger.DEBUG) {
-				trace.Debug("In VerifyDataSignature. dataHash is done. Starting copy data reader to dataHash %s %s\n")
+				trace.Debug("In VerifyDataSignature. dataHash object creation is done. Starting copy data reader to dataHash %s %s\n")
+			}
+
+			file, err := os.Open("/tmp/testfile.txt")
+			if err != nil {
+				common.ObjectLocks.Unlock(lockIndex)
+				return false, &common.InvalidRequest{Message: "Failed to open /tmp/e2e-data.txt. Error: " + err.Error()}
+			}
+
+			if _, err = io.Copy(dataHash, file); err != nil {
+				common.ObjectLocks.Unlock(lockIndex)
+				return false, &common.InvalidRequest{Message: "Failed to copy file to hash. Error: " + err.Error()}
+			}
+
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("In VerifyDataSignature. Successfully copy file to hash\n")
 			}
 
 			dr := io.TeeReader(dataReader, dataHash)
