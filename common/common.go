@@ -1,7 +1,6 @@
 package common
 
 import (
-	"bytes"
 	"crypto"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -253,7 +252,7 @@ func StringListContains(stringList []string, str string) bool {
 	return false
 }
 
-func VerifyDataSignature(data io.Reader, publicKey string, signature string) (io.Reader, SyncServiceError) {
+func VerifyDataSignature(data io.Reader, orgID string, objectType string, objectID string, publicKey string, signature string) (io.Reader, SyncServiceError) {
 	if publicKey == "" || signature == "" {
 		message := fmt.Sprintf("public key or signature is empty")
 		return nil, &InvalidRequest{Message: message}
@@ -272,35 +271,83 @@ func VerifyDataSignature(data io.Reader, publicKey string, signature string) (io
 		dataHash := sha256.New()
 
 		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("In VerifyDataSignature. dataHash is done. Starting copy data reader to dataHash %s %s\n")
+			trace.Debug("In VerifyDataSignature. dataHash object creation is done. Starting copy data reader to dataHash %s %s\n")
 		}
 
-		dataReader = io.TeeReader(data, dataHash)
-		buffer := new(bytes.Buffer)
-		buffer.ReadFrom(dataReader)
-		// dataBytes := buffer.Bytes()
-		// dataString := string(dataBytes)
-		// fmt.Printf("dataString: %s\n", dataString)
-		// dataReader = bytes.NewReader(dataBytes)
-
-		// if _, err = io.Copy(dataHash, data); err != nil {
-		// 	return nil, &InvalidRequest{Message: "Failed to hash object data, Error: " + err.Error()}
-		// }
-		dataHashSum := dataHash.Sum(nil)
+		dr := io.TeeReader(dataReader, dataHash)
 
 		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("In VerifyDataSignature. data hash done\n")
+			trace.Debug("In VerifyDataSignature. Creating tmp file\n")
 		}
 
-		if pubKey, err := x509.ParsePKIXPublicKey(publicKeyBytes); err != nil {
-			return nil, &InvalidRequest{Message: "Failed to parse public key, Error: " + err.Error()}
-		} else {
-			pubKeyToUse := pubKey.(*rsa.PublicKey)
-			if err = rsa.VerifyPSS(pubKeyToUse, crypto.SHA256, dataHashSum, signatureBytes, nil); err != nil {
-				return nil, &InvalidRequest{Message: "Failed to verify data with public key and data signature, Error: " + err.Error()}
+		tmpFile := fmt.Sprintf("/tmp/%s_%s_%s", orgID, objectType, objectID)
+		if _, err := os.Stat(tmpFile); err != nil && !os.IsNotExist(err) {
+			return nil, &InvalidRequest{Message: fmt.Sprintf("Failed to check tmp file: %s. Error: %s", tmpFile, err.Error())}
+		} else if err == nil {
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("In VerifyDataSignature. removing existing tmp file with data for object %s %s\n", objectType, objectID)
 			}
-			dataBytes := buffer.Bytes()
-			dataReader = bytes.NewReader(dataBytes)
+
+			// file exists, remove and create it
+			if err = os.Remove(tmpFile); err != nil {
+				return nil, &InvalidRequest{Message: fmt.Sprintf("Can't remove tmp file: %s", tmpFile)}
+			}
+
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("In VerifyDataSignature. Done removing existing tmp file with data for object %s %s\n", objectType, objectID)
+			}
+		}
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In VerifyDataSignature. Creating new tmp file with data for object %s %s\n", objectType, objectID)
+		}
+
+		// file doesn't exist, create
+		f, err := os.Create(tmpFile)
+		if err != nil {
+			return nil, &InvalidRequest{Message: fmt.Sprintf("Failed to create tmp file: %s, Error: %s", tmpFile, err.Error())}
+		}
+		defer f.Close()
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In VerifyDataSignature. Writing content to the tmp file with data for object %s %s\n", objectType, objectID)
+		}
+
+		if _, err = io.Copy(f, dr); err != nil {
+			return nil, &InvalidRequest{Message: fmt.Sprintf("Failed to write to tmp file: %s, Error: %s", tmpFile, err.Error())}
+		}
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In VerifyDataSignature. Successfully copied data reader to tmp file for object %s %s\n", objectType, objectID)
+
+			dataHashSum := dataHash.Sum(nil)
+
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("In VerifyDataSignature. data hash done\n")
+			}
+
+			if pubKey, err := x509.ParsePKIXPublicKey(publicKeyBytes); err != nil {
+				return nil, &InvalidRequest{Message: "Failed to parse public key, Error: " + err.Error()}
+			} else {
+				pubKeyToUse := pubKey.(*rsa.PublicKey)
+				if err = rsa.VerifyPSS(pubKeyToUse, crypto.SHA256, dataHashSum, signatureBytes, nil); err != nil {
+					return nil, &InvalidRequest{Message: "Failed to verify data with public key and data signature, Error: " + err.Error()}
+				}
+			}
+		}
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In VerifyDataSignature. data verification done\n")
+			trace.Debug("In VerifyDataSignature. retrieve temp data\n")
+		}
+
+		if openFile, err := os.Open(tmpFile); err != nil {
+			return nil, &InvalidRequest{Message: "Failed to open tmp file, Error: " + err.Error()}
+		} else {
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("In VerifyDataSignature. Set dataReader to the file\n")
+			}
+			dataReader = openFile
 		}
 	}
 
