@@ -314,6 +314,7 @@ func VerifyDataSignature(data io.Reader, orgID string, objectType string, object
 		}
 
 		if _, err = io.Copy(f, dr); err != nil {
+			os.Remove(tmpFile)
 			return nil, &InvalidRequest{Message: fmt.Sprintf("Failed to write to tmp file: %s, Error: %s", tmpFile, err.Error())}
 		}
 
@@ -327,10 +328,12 @@ func VerifyDataSignature(data io.Reader, orgID string, objectType string, object
 			}
 
 			if pubKey, err := x509.ParsePKIXPublicKey(publicKeyBytes); err != nil {
+				os.Remove(tmpFile)
 				return nil, &InvalidRequest{Message: "Failed to parse public key, Error: " + err.Error()}
 			} else {
 				pubKeyToUse := pubKey.(*rsa.PublicKey)
 				if err = rsa.VerifyPSS(pubKeyToUse, crypto.SHA256, dataHashSum, signatureBytes, nil); err != nil {
+					os.Remove(tmpFile)
 					return nil, &InvalidRequest{Message: "Failed to verify data with public key and data signature, Error: " + err.Error()}
 				}
 			}
@@ -348,6 +351,12 @@ func VerifyDataSignature(data io.Reader, orgID string, objectType string, object
 				trace.Debug("In VerifyDataSignature. Set dataReader to the file\n")
 			}
 			dataReader = openFile
+		}
+
+		if err = os.Remove(tmpFile); err != nil {
+			if trace.IsLogging(logger.ERROR) {
+				trace.Error("Faled to remove tmp file: %s. Error: %s", tmpFile, err.Error())
+			}
 		}
 	}
 
