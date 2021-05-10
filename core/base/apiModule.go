@@ -2,6 +2,10 @@ package base
 
 import (
 	"bytes"
+	"crypto"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -236,6 +240,13 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 			store.CloseDataReader(reader)
 		}
 	}
+
+	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+	apiObjectLocks.Lock(lockIndex)
+	defer apiObjectLocks.Unlock(lockIndex)
+
+	common.ObjectLocks.Lock(lockIndex)
+
 	if metaData.NoData {
 		data = nil
 		metaData.Link = ""
@@ -247,7 +258,9 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 		// data is nil for metaOnly object. Meta-only object will not apply data verification
 		if metaData.PublicKey != "" && metaData.Signature != "" {
 			dataReader := bytes.NewReader(data)
-			if _, err := common.VerifyDataSignature(dataReader, orgID, objectType, objectID, metaData.PublicKey, metaData.Signature); err != nil {
+			// will no store data if object metadata not exist
+			if success, err := VerifyAndStoreData(dataReader, orgID, metaData.ObjectType, metaData.ObjectID, metaData.PublicKey, metaData.Signature); err != nil || !success {
+				common.ObjectLocks.Unlock(lockIndex)
 				return err
 			}
 		}
@@ -256,11 +269,6 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 	}
 	metaData.ChunkSize = common.Configuration.MaxDataChunkSize
 
-	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
-	apiObjectLocks.Lock(lockIndex)
-	defer apiObjectLocks.Unlock(lockIndex)
-
-	common.ObjectLocks.Lock(lockIndex)
 	deletedDestinations, err := store.StoreObject(metaData, data, status)
 	if err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
@@ -526,35 +534,19 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 	if metaData.PublicKey != "" && metaData.Signature != "" {
 		//start data verification
 		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("In PutObjectData. read data to buffer %s %s\n", objectType, objectID)
+			trace.Debug("In PutObjectData. Start data verification %s %s\n", objectType, objectID)
 		}
-		// buffer := new(bytes.Buffer)
-		// buffer.ReadFrom(dataReader)
-		// dataBytes := buffer.Bytes()
 
-		// dataReader1 := bytes.NewReader(dataBytes)
-		// var buf bytes.Buffer
-		// dr := io.TeeReader(dataReader, &buf)
-
-		dataReader, err = common.VerifyDataSignature(dataReader, orgID, objectType, objectID, metaData.PublicKey, metaData.Signature)
-		if err != nil {
+		if success, err := VerifyAndStoreData(dataReader, orgID, objectType, objectID, metaData.PublicKey, metaData.Signature); !success || err != nil {
+			common.ObjectLocks.Unlock(lockIndex)
+			return false, &common.InvalidRequest{Message: "Failed to verify and store data, Error: " + err.Error()}
+		}
+	} else {
+		if exists, err := store.StoreObjectData(orgID, objectType, objectID, dataReader); err != nil || !exists {
 			common.ObjectLocks.Unlock(lockIndex)
 			return false, err
 		}
 	}
-
-	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("In PutObjectData. storing data for object %s %s\n", objectType, objectID)
-	}
-
-	if exists, err := store.StoreObjectData(orgID, objectType, objectID, dataReader); err != nil || !exists {
-		common.ObjectLocks.Unlock(lockIndex)
-		return false, err
-	}
-
-	// if trace.IsLogging(logger.DEBUG) {
-	// 	trace.Debug("In PutObjectData. remove temp data for object %s %s\n", objectType, objectID)
-	// }
 
 	if metaData.SourceDataURI != "" {
 		if err = store.UpdateObjectSourceDataURI(orgID, objectType, objectID, ""); err != nil {
@@ -1274,4 +1266,87 @@ func RetrieveACLsInOrg(aclType string, orgID string) ([]string, common.SyncServi
 	apiLock.Lock()
 	defer apiLock.Unlock()
 	return store.RetrieveACLsInOrg(aclType, orgID)
+}
+
+func VerifyAndStoreData(data io.Reader, orgID string, objectType string, objectID string, publicKey string, signature string) (bool, common.SyncServiceError) {
+	if publicKey == "" || signature == "" {
+		message := fmt.Sprintf("public key or signature is empty")
+		return false, &common.InvalidRequest{Message: message}
+
+	}
+
+	var dataReader io.Reader
+	var err error
+	if publicKeyBytes, err := base64.StdEncoding.DecodeString(publicKey); err != nil {
+		return false, &common.InvalidRequest{Message: "PublicKey is not base64 encoded. Error: " + err.Error()}
+	} else if signatureBytes, err := base64.StdEncoding.DecodeString(signature); err != nil {
+		return false, &common.InvalidRequest{Message: "Signature is not base64 encoded. Error: " + err.Error()}
+	} else {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In VerifyDataSignature. starting data hash %s %s\n")
+		}
+		dataHash := sha256.New()
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In VerifyDataSignature. dataHash is done. Starting copy data reader to dataHash %s %s\n")
+		}
+
+		dr := io.TeeReader(data, dataHash)
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectData. storing data for object %s %s\n", objectType, objectID)
+		}
+
+		if exists, err := store.StoreObjectTempData(orgID, objectType, objectID, dr); err != nil || !exists {
+			return false, err
+		}
+
+		dataHashSum := dataHash.Sum(nil)
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In VerifyDataSignature. data hash done\n")
+		}
+
+		if pubKey, err := x509.ParsePKIXPublicKey(publicKeyBytes); err != nil {
+			return false, &common.InvalidRequest{Message: "Failed to parse public key, Error: " + err.Error()}
+		} else {
+			pubKeyToUse := pubKey.(*rsa.PublicKey)
+			if err = rsa.VerifyPSS(pubKeyToUse, crypto.SHA256, dataHashSum, signatureBytes, nil); err != nil {
+				store.RemoveObjectTempData(orgID, objectType, objectID)
+				return false, &common.InvalidRequest{Message: "Failed to verify data with public key and data signature, Error: " + err.Error()}
+			}
+		}
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In PutObjectData. data verification done\n")
+		trace.Debug("In PutObjectData. retrieve temp data\n")
+	}
+
+	dataReader, err = store.RetrieveTempObjectData(orgID, objectType, objectID)
+	if err != nil {
+		return false, &common.InvalidRequest{Message: "Failed to read temp data fro, Error: " + err.Error()}
+	} else if dataReader == nil {
+		return false, &common.InvalidRequest{Message: "Read empty temp data, Error: " + err.Error()}
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In PutObjectData. storing data for object %s %s\n", objectType, objectID)
+	}
+
+	if exists, err := store.StoreObjectData(orgID, objectType, objectID, dataReader); err != nil || !exists {
+		return false, err
+	}
+	store.CloseDataReader(dataReader)
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In PutObjectData. remove temp data for object %s %s\n", objectType, objectID)
+	}
+
+	if err = store.RemoveObjectTempData(orgID, objectType, objectID); err != nil {
+		if trace.IsLogging(logger.ERROR) {
+			trace.Error("In PutObjectData. Failed to remove temp data for object\n")
+		}
+	}
+	return true, nil
 }
