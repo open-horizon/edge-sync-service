@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"crypto"
 	"crypto/rsa"
-	"crypto/sha256"
+	"crypto/sha1"
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
@@ -1285,16 +1285,11 @@ func VerifyAndStoreData(data io.Reader, orgID string, objectType string, objectI
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In VerifyDataSignature. starting data hash %s %s\n")
 		}
-		dataHash := sha256.New()
-
-		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("In VerifyDataSignature. dataHash is done. Starting copy data reader to dataHash %s %s\n")
-		}
-
+		dataHash := sha1.New()
 		dr := io.TeeReader(data, dataHash)
 
 		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("In PutObjectData. storing data for object %s %s\n", objectType, objectID)
+			trace.Debug("In PutObjectData. storing temp data for object %s %s\n", objectType, objectID)
 		}
 
 		if exists, err := store.StoreObjectTempData(orgID, objectType, objectID, dr); err != nil || !exists {
@@ -1311,7 +1306,7 @@ func VerifyAndStoreData(data io.Reader, orgID string, objectType string, objectI
 			return false, &common.InvalidRequest{Message: "Failed to parse public key, Error: " + err.Error()}
 		} else {
 			pubKeyToUse := pubKey.(*rsa.PublicKey)
-			if err = rsa.VerifyPSS(pubKeyToUse, crypto.SHA256, dataHashSum, signatureBytes, nil); err != nil {
+			if err = rsa.VerifyPSS(pubKeyToUse, crypto.SHA1, dataHashSum, signatureBytes, nil); err != nil {
 				store.RemoveObjectTempData(orgID, objectType, objectID)
 				return false, &common.InvalidRequest{Message: "Failed to verify data with public key and data signature, Error: " + err.Error()}
 			}
