@@ -5,7 +5,7 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
+	"crypto/sha1"
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
@@ -45,14 +45,14 @@ func setupDataSignature(data []byte) (string, string, error) {
 	}
 	publicKeyString := base64.StdEncoding.EncodeToString(publicKeyBytes)
 
-	dataHash := sha256.New()
+	dataHash := sha1.New()
 	_, err = dataHash.Write(data)
 	if err != nil {
 		return "", "", err
 	}
 	dataHashSum := dataHash.Sum(nil)
 
-	signature, err := rsa.SignPSS(rand.Reader, privateKey, crypto.SHA256, dataHashSum, nil)
+	signature, err := rsa.SignPSS(rand.Reader, privateKey, crypto.SHA1, dataHashSum, nil)
 	if err != nil {
 		return "", "", err
 	}
