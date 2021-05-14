@@ -29,6 +29,7 @@ type InMemoryStorage struct {
 type inMemoryObject struct {
 	meta                             common.MetaData
 	data                             []byte
+	tmpData                          []byte
 	status                           string
 	remainingConsumers               int
 	remainingReceivers               int
@@ -158,6 +159,56 @@ func (store *InMemoryStorage) StoreObjectData(orgID string, objectType string, o
 	}
 
 	return false, nil
+}
+
+func (store *InMemoryStorage) StoreObjectTempData(orgID string, objectType string, objectID string, dataReader io.Reader) (bool, common.SyncServiceError) {
+	var data []byte
+	var err error
+	if data, err = ioutil.ReadAll(dataReader); err != nil {
+		return false, err
+	}
+
+	store.lock()
+	defer store.unLock()
+
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	if object, ok := store.objects[id]; ok {
+		object.tmpData = data
+		store.objects[id] = object
+		return true, nil
+	}
+
+	return false, nil
+
+}
+
+func (store *InMemoryStorage) RemoveObjectTempData(orgID string, objectType string, objectID string) common.SyncServiceError {
+	store.lock()
+	defer store.unLock()
+
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	if object, ok := store.objects[id]; ok {
+		object.tmpData = nil
+		store.objects[id] = object
+		return nil
+	}
+
+	return notFound
+}
+
+func (store *InMemoryStorage) RetrieveTempObjectData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
+	store.lock()
+	defer store.unLock()
+
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	if object, ok := store.objects[id]; ok {
+		if object.tmpData != nil && len(object.tmpData) > 0 {
+			return bytes.NewReader(object.tmpData), nil
+		}
+		return nil, nil
+	}
+
+	return nil, nil
 }
 
 // AppendObjectData appends a chunk of data to the object's data
