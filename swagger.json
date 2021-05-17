@@ -2524,6 +2524,11 @@
           "type": "string",
           "x-go-name": "Expiration"
         },
+        "hashAlgorithm": {
+          "description": "HashAlgorithm used for data signature sign/verification. \"SHA1\" and \"SHA256\" are supported hash algorithms.\nValid values are: \"SHA1\", \"SHA256\"\nOptional field, if omitted the data signature/verification will not be applied",
+          "type": "string",
+          "x-go-name": "HashAlgorithm"
+        },
         "inactive": {
           "description": "Inactive is a flag indicating that this object is inactive for now.\nAn object can be created as inactive which means it is not delivered to its destination. The object can be activated later.\nOptional field, default is false (object active).",
           "type": "boolean",

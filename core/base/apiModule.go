@@ -2,9 +2,7 @@ package base
 
 import (
 	"bytes"
-	"crypto"
 	"crypto/rsa"
-	"crypto/sha1"
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
@@ -65,6 +63,10 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 	}
 	if !common.IsValidName(objectType) {
 		return &common.InvalidRequest{Message: fmt.Sprintf("Object type (%s) contains invalid characters", objectType)}
+	}
+
+	if metaData.HashAlgorithm != "" && metaData.HashAlgorithm != common.Sha1 && metaData.HashAlgorithm != common.Sha256 {
+		return &common.InvalidRequest{Message: fmt.Sprintf("Hash Algorithm (%s) is not supported. Please use %s or %s if specify", metaData.HashAlgorithm, common.Sha1, common.Sha256)}
 	}
 
 	// verify publicKey and signature is base64 encoded
@@ -256,10 +258,10 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 	} else if data != nil {
 		// data signature verification if metadata has both publicKey and signature
 		// data is nil for metaOnly object. Meta-only object will not apply data verification
-		if metaData.PublicKey != "" && metaData.Signature != "" {
+		if metaData.HashAlgorithm != "" && metaData.PublicKey != "" && metaData.Signature != "" {
 			dataReader := bytes.NewReader(data)
 			// will no store data if object metadata not exist
-			if success, err := VerifyAndStoreData(dataReader, orgID, metaData.ObjectType, metaData.ObjectID, metaData.PublicKey, metaData.Signature, false); err != nil || !success {
+			if success, err := VerifyAndStoreData(dataReader, orgID, metaData.ObjectType, metaData.ObjectID, metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature, false); err != nil || !success {
 				common.ObjectLocks.Unlock(lockIndex)
 				return err
 			}
@@ -531,13 +533,13 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 		return false, &common.InvalidRequest{Message: "Can't update data, the NoData flag is set to true"}
 	}
 
-	if metaData.PublicKey != "" && metaData.Signature != "" {
+	if metaData.HashAlgorithm != "" && metaData.PublicKey != "" && metaData.Signature != "" {
 		//start data verification
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In PutObjectData. Start data verification %s %s\n", objectType, objectID)
 		}
 
-		if success, err := VerifyAndStoreData(dataReader, orgID, objectType, objectID, metaData.PublicKey, metaData.Signature, true); !success || err != nil {
+		if success, err := VerifyAndStoreData(dataReader, orgID, objectType, objectID, metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature, true); !success || err != nil {
 			common.ObjectLocks.Unlock(lockIndex)
 			return false, &common.InvalidRequest{Message: "Failed to verify and store data, Error: " + err.Error()}
 		}
@@ -1268,9 +1270,9 @@ func RetrieveACLsInOrg(aclType string, orgID string) ([]string, common.SyncServi
 	return store.RetrieveACLsInOrg(aclType, orgID)
 }
 
-func VerifyAndStoreData(data io.Reader, orgID string, objectType string, objectID string, publicKey string, signature string, storeData bool) (bool, common.SyncServiceError) {
-	if publicKey == "" || signature == "" {
-		message := fmt.Sprintf("public key or signature is empty")
+func VerifyAndStoreData(data io.Reader, orgID string, objectType string, objectID string, hashAlgo string, publicKey string, signature string, storeData bool) (bool, common.SyncServiceError) {
+	if hashAlgo == "" || publicKey == "" || signature == "" {
+		message := fmt.Sprintf("hash algorithm, public key or signature is empty")
 		return false, &common.InvalidRequest{Message: message}
 
 	}
@@ -1285,7 +1287,11 @@ func VerifyAndStoreData(data io.Reader, orgID string, objectType string, objectI
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In VerifyAndStoreData, starting data hash\n")
 		}
-		dataHash := sha1.New()
+		dataHash, cryptoHash, err := common.GetHash(hashAlgo)
+		if err != nil {
+			return false, &common.InvalidRequest{Message: "Failed to get hash. Error: " + err.Error()}
+		}
+
 		dr := io.TeeReader(data, dataHash)
 
 		if trace.IsLogging(logger.DEBUG) {
@@ -1302,7 +1308,7 @@ func VerifyAndStoreData(data io.Reader, orgID string, objectType string, objectI
 			return false, &common.InvalidRequest{Message: "Failed to parse public key, Error: " + err.Error()}
 		} else {
 			pubKeyToUse := pubKey.(*rsa.PublicKey)
-			if err = rsa.VerifyPSS(pubKeyToUse, crypto.SHA1, dataHashSum, signatureBytes, nil); err != nil {
+			if err = rsa.VerifyPSS(pubKeyToUse, cryptoHash, dataHashSum, signatureBytes, nil); err != nil {
 				store.RemoveObjectTempData(orgID, objectType, objectID)
 				return false, &common.InvalidRequest{Message: "Failed to verify data with public key and data signature, Error: " + err.Error()}
 			}
