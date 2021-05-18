@@ -1,7 +1,11 @@
 package common
 
 import (
+	"crypto"
+	"crypto/sha1"
+	"crypto/sha256"
 	"fmt"
+	"hash"
 	"os"
 	"regexp"
 	"strings"
@@ -243,6 +247,17 @@ func StringListContains(stringList []string, str string) bool {
 	return false
 }
 
+// GetHash returns the hash object and crypto hash algo name (used by rsa.VerifyPSS() func) of specified hash algorithm
+func GetHash(hashAlgo string) (hash.Hash, crypto.Hash, SyncServiceError) {
+	if hashAlgo == Sha1 {
+		return sha1.New(), crypto.SHA1, nil
+	} else if hashAlgo == Sha256 {
+		return sha256.New(), crypto.SHA256, nil
+	} else {
+		return nil, 0, &InternalError{Message: fmt.Sprintf("Hash algorithm %s is not supported", hashAlgo)}
+	}
+}
+
 // MetaData is the metadata that identifies and defines the sync service object.
 // Every object includes metadata (mandatory) and data (optional). The metadata and data can be updated independently.
 // Each sync service node (ESS) has an address that is composed of the node's ID, Type, and Organization.
@@ -370,6 +385,11 @@ type MetaData struct {
 	// ChunkSize is an internal field indicating the maximal message payload size.
 	// This field should not be set by users.
 	ChunkSize int `json:"chunkSize" bson:"chunk-size"`
+
+	// HashAlgorithm used for data signature sign/verification. "SHA1" and "SHA256" are supported hash algorithms.
+	// Valid values are: "SHA1", "SHA256"
+	// Optional field, if omitted the data signature/verification will not be applied
+	HashAlgorithm string `json:"hashAlgorithm" bson:"hash-algorithm"`
 
 	// PublicKey is a base64 encoded string. It is the publicKey to verify the data of the object
 	// Optional field, if omitted the data will not be verified with public key and signature
@@ -677,6 +697,12 @@ const (
 const (
 	fnv32Init  uint32 = 0x811c9dc5
 	fnv32Prime uint32 = 0x01000193
+)
+
+// Hash Algorithms supported for digital signature
+const (
+	Sha1   = "SHA1"
+	Sha256 = "SHA256"
 )
 
 func init() {

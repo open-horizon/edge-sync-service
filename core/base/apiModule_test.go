@@ -6,9 +6,11 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha1"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
+	"hash"
 	"math"
 	"os"
 	"testing"
@@ -33,7 +35,7 @@ func setupDB(dbType string) {
 	}
 }
 
-func setupDataSignature(data []byte) (string, string, error) {
+func setupDataSignature(data []byte, hashAlgo string) (string, string, error) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return "", "", err
@@ -45,18 +47,26 @@ func setupDataSignature(data []byte) (string, string, error) {
 	}
 	publicKeyString := base64.StdEncoding.EncodeToString(publicKeyBytes)
 
-	dataHash := sha1.New()
+	var dataHash hash.Hash
+	var cyrptoHash crypto.Hash
+	if hashAlgo == common.Sha1 {
+		dataHash = sha1.New()
+		cyrptoHash = crypto.SHA1
+	} else {
+		dataHash = sha256.New()
+		cyrptoHash = crypto.SHA256
+	}
+
 	_, err = dataHash.Write(data)
 	if err != nil {
 		return "", "", err
 	}
 	dataHashSum := dataHash.Sum(nil)
 
-	signature, err := rsa.SignPSS(rand.Reader, privateKey, crypto.SHA1, dataHashSum, nil)
+	signature, err := rsa.SignPSS(rand.Reader, privateKey, cyrptoHash, dataHashSum, nil)
 	if err != nil {
 		return "", "", err
 	}
-
 	signatureString := base64.StdEncoding.EncodeToString(signature)
 	return publicKeyString, signatureString, nil
 }
@@ -77,10 +87,14 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 
 	// set up data signature value
 	dataToSign := []byte("data to check signature")
-	var publicKey, signature string
+	var publicKeySha1, signatureSha1, publicKeySha256, signatureSha256 string
 	var err error
-	if publicKey, signature, err = setupDataSignature(dataToSign); err != nil {
-		t.Errorf("Failed to set up publicKey and signature for data. Error: %s\n", err.Error())
+	if publicKeySha1, signatureSha1, err = setupDataSignature(dataToSign, common.Sha1); err != nil {
+		t.Errorf("Failed to set up publicKey and signature with SHA1 for data. Error: %s\n", err.Error())
+	}
+
+	if publicKeySha256, signatureSha256, err = setupDataSignature(dataToSign, common.Sha256); err != nil {
+		t.Errorf("Failed to set up publicKey and signature with SHA256 for data. Error: %s\n", err.Error())
 	}
 
 	invalidObjects := []struct {
@@ -135,13 +149,32 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 			"updateObject didn't check that the publicKey is base64 encoded"},
 		{"myorg777", "type1", "123456", common.MetaData{ObjectID: "12345", ObjectType: "type1", DestOrgID: "myorg777", Signature: "123"}, []byte("data"),
 			"updateObject didn't check that the signature is base64 encoded"},
+		{"myorg777", "type1", "123456", common.MetaData{ObjectID: "12345", ObjectType: "type1", DestOrgID: "myorg777", HashAlgorithm: "123"}, []byte("data"),
+			"updateObject didn't check that the hashAlgorithm is SHA1 or SHA256"},
 		{"myorg777", "type1", "123456",
 			common.MetaData{ObjectID: "12345", ObjectType: "type1", DestOrgID: "myorg777",
-				PublicKey: publicKey,
-				Signature: signature,
+				HashAlgorithm: common.Sha1,
+				PublicKey:     publicKeySha1,
+				Signature:     signatureSha1,
 			},
 			[]byte("wrong data to check signature"),
 			"updateObject didn't verify the data with publicKey and signature"},
+		{"myorg777", "type1", "123456",
+			common.MetaData{ObjectID: "12345", ObjectType: "type1", DestOrgID: "myorg777",
+				HashAlgorithm: common.Sha256,
+				PublicKey:     publicKeySha256,
+				Signature:     signatureSha256,
+			},
+			[]byte("wrong data to check signature"),
+			"updateObject didn't verify the data with publicKey and signature"},
+		{"myorg777", "type1", "123456",
+			common.MetaData{ObjectID: "12345", ObjectType: "type1", DestOrgID: "myorg777",
+				HashAlgorithm: common.Sha256,
+				PublicKey:     publicKeySha1,
+				Signature:     signatureSha1,
+			},
+			dataToSign,
+			"updateObject didn't verify the data with specified hash algorithm"},
 		{"myorg777", "type1", "123456",
 			common.MetaData{ObjectID: "123456", ObjectType: "type1", DestOrgID: "myorg777",
 				DestinationPolicy: &common.Policy{
@@ -288,10 +321,17 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 			ExpectedConsumers: 1, DestType: "device3", DestID: "dev1", MetaOnly: true},
 			nil, common.ReadyToSend, 1, []byte("new"), 1, true},
 		{"myorg777", "type1", "7", common.MetaData{ObjectID: "7", ObjectType: "type1", DestOrgID: "myorg777",
-			ExpectedConsumers: 3, DestType: "device", DestID: "dev1", PublicKey: publicKey, Signature: signature},
+			ExpectedConsumers: 3, DestType: "device", DestID: "dev1", HashAlgorithm: common.Sha1, PublicKey: publicKeySha1, Signature: signatureSha1},
 			dataToSign, common.ReadyToSend, 3, nil, 1, false},
 		{"myorg777", "type1", "8", common.MetaData{ObjectID: "8", ObjectType: "type1", DestOrgID: "myorg777",
-			ExpectedConsumers: 3, DestType: "device", DestID: "dev1", PublicKey: publicKey, Signature: signature,
+			ExpectedConsumers: 3, DestType: "device", DestID: "dev1", HashAlgorithm: common.Sha1, PublicKey: publicKeySha1, Signature: signatureSha1,
+			NoData: true},
+			dataToSign, common.ReadyToSend, 3, nil, 1, false},
+		{"myorg777", "type1", "71", common.MetaData{ObjectID: "71", ObjectType: "type1", DestOrgID: "myorg777",
+			ExpectedConsumers: 3, DestType: "device", DestID: "dev1", HashAlgorithm: common.Sha256, PublicKey: publicKeySha256, Signature: signatureSha256},
+			dataToSign, common.ReadyToSend, 3, nil, 1, false},
+		{"myorg777", "type1", "81", common.MetaData{ObjectID: "81", ObjectType: "type1", DestOrgID: "myorg777",
+			ExpectedConsumers: 3, DestType: "device", DestID: "dev1", HashAlgorithm: common.Sha256, PublicKey: publicKeySha256, Signature: signatureSha256,
 			NoData: true},
 			dataToSign, common.ReadyToSend, 3, nil, 1, false},
 	}
