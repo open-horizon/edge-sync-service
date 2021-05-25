@@ -901,6 +901,13 @@ func BlockUntilNoRunningGoRoutines() {
 	waitingOnBlockChannel = false
 }
 
+func IsValidHashAlgorithm(hashAlgorithm string) bool {
+	if hashAlgorithm == Sha1 || hashAlgorithm == Sha256 {
+		return true
+	}
+	return false
+}
+
 // IsValidName checks if the string only contains letters, digits, and !@#%^*-_.~
 var IsValidName = regexp.MustCompile(`^[a-zA-Z0-9|!|@|#|$|^|*|\-|_|.|~|\pL|\pN]+$`).MatchString
 

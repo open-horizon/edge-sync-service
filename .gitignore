@@ -2,5 +2,7 @@ build/*
 core/base/persist
 core/communications/persist
 core/storage/persist
+core/dataVerifier/dataURITmp
+core/dataVerifier/persist
 .DS_STORE
 vendor/*/

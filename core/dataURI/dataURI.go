@@ -92,6 +92,56 @@ func StoreData(uri string, dataReader io.Reader, dataLength uint32) (int64, comm
 	return written, nil
 }
 
+// StoreTempData writes the data to the tmp file stored at the given URI
+func StoreTempData(uri string, dataReader io.Reader, dataLength uint32) (int64, common.SyncServiceError) {
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("Storing data at %s", uri)
+	}
+	dataURI, err := url.Parse(uri)
+	if err != nil || !strings.EqualFold(dataURI.Scheme, "file") {
+		return 0, &Error{"Invalid data URI"}
+	}
+
+	filePath := dataURI.Path + ".tmp"
+	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0600)
+	if err != nil {
+		return 0, common.CreateError(err, fmt.Sprintf("Failed to open file %s to write data. Error: ", dataURI.Path))
+	}
+	defer file.Close()
+
+	if _, err = file.Seek(0, io.SeekStart); err != nil {
+		return 0, &common.IOError{Message: "Failed to seek to the start of a file. Error: " + err.Error()}
+	}
+
+	written, err := io.Copy(file, dataReader)
+	if err != nil && err != io.EOF {
+		return 0, &common.IOError{Message: "Failed to write to file. Error: " + err.Error()}
+	}
+	if written != int64(dataLength) && dataLength != 0 {
+		return 0, &common.IOError{Message: "Failed to write all the data to file."}
+	}
+	return written, nil
+}
+
+// StoreDataFromTempData rename {dataURI.Path}.tmp to {dataURI.Path}
+func StoreDataFromTempData(uri string) common.SyncServiceError {
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("Storing data from temp data at %s", uri)
+	}
+	dataURI, err := url.Parse(uri)
+	if err != nil || !strings.EqualFold(dataURI.Scheme, "file") {
+		return &Error{"Invalid data URI"}
+	}
+
+	tmpFilePath := dataURI.Path + ".tmp"
+
+	if err := os.Rename(tmpFilePath, dataURI.Path); err != nil {
+		return &common.IOError{Message: "Failed to rename data file. Error: " + err.Error()}
+	}
+
+	return nil
+}
+
 // GetData retrieves the data stored at the given URI.
 // After reading, the reader has to be closed.
 func GetData(uri string) (io.Reader, common.SyncServiceError) {

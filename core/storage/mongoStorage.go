@@ -458,9 +458,7 @@ func (store *MongoStorage) UpdateObjectDeliveryStatus(status string, message str
 		allDeleted = true
 		for i, d := range result.Destinations {
 			if !found && d.Destination.DestType == destType && d.Destination.DestID == destID {
-				if message != "" || d.Status == common.Error {
-					d.Message = message
-				}
+				d.Message = message
 				if status != "" {
 					d.Status = status
 				}
@@ -1034,7 +1032,7 @@ func (store *MongoStorage) StoreObjectTempData(orgID string, objectType string, 
 
 func (store *MongoStorage) RemoveObjectTempData(orgID string, objectType string, objectID string) common.SyncServiceError {
 	id := createTempObjectCollectionID(orgID, objectType, objectID)
-	if err := store.removeFile(id); err != nil {
+	if err := store.removeFile(id); err != nil && err != mgo.ErrNotFound {
 		return err
 	}
 	return nil

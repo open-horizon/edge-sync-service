@@ -17,6 +17,7 @@ import (
 
 	"github.com/open-horizon/edge-sync-service/common"
 	"github.com/open-horizon/edge-sync-service/core/communications"
+	"github.com/open-horizon/edge-sync-service/core/dataVerifier"
 	"github.com/open-horizon/edge-sync-service/core/storage"
 )
 
@@ -81,6 +82,8 @@ func TestObjectAPI(t *testing.T) {
 
 func testObjectAPI(store storage.Storage, t *testing.T) {
 	communications.Store = store
+	dataVerifier.Store = store
+
 	common.InitObjectLocks()
 
 	dests := []string{"device:dev1", "device2:dev", "device2:dev1"}
@@ -654,6 +657,7 @@ func TestESSObjectDeletedAPI(t *testing.T) {
 
 func testESSObjectDeletedAPI(store storage.Storage, t *testing.T) {
 	communications.Store = store
+	dataVerifier.Store = store
 	common.InitObjectLocks()
 
 	if err := store.Init(); err != nil {

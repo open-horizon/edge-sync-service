@@ -382,6 +382,9 @@ func (store *BoltStorage) StoreObjectTempData(orgID string, objectType string, o
 func (store *BoltStorage) RemoveObjectTempData(orgID string, objectType string, objectID string) common.SyncServiceError {
 	tmpDataPath := createDataPathForTempData(store.localDataPath, orgID, objectType, objectID)
 	if err := dataURI.DeleteStoredData(tmpDataPath); err != nil {
+		if common.IsNotFound(err) {
+			return nil
+		}
 		return err
 	}
 	return nil
@@ -392,6 +395,9 @@ func (store *BoltStorage) RetrieveTempObjectData(orgID string, objectType string
 	tmpDataPath := createDataPathForTempData(store.localDataPath, orgID, objectType, objectID)
 	dataReader, err := dataURI.GetData(tmpDataPath)
 	if err != nil {
+		if common.IsNotFound(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return dataReader, nil

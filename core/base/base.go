@@ -9,6 +9,7 @@ import (
 
 	"github.com/open-horizon/edge-sync-service/common"
 	"github.com/open-horizon/edge-sync-service/core/communications"
+	"github.com/open-horizon/edge-sync-service/core/dataVerifier"
 	"github.com/open-horizon/edge-sync-service/core/leader"
 	"github.com/open-horizon/edge-sync-service/core/security"
 	"github.com/open-horizon/edge-sync-service/core/storage"
@@ -112,6 +113,7 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 	}
 	communications.Store = store
 	security.Store = store
+	dataVerifier.Store = store
 
 	leader.StartLeaderDetermination(store)
 
