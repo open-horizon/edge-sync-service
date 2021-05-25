@@ -278,17 +278,26 @@ func (communication *HTTP) SendNotificationMessage(notificationTopic string, des
 		}
 
 		request, err = http.NewRequest("PUT", url, bytes.NewReader(body))
+		if err != nil {
+			return &Error{"Failed to create HTTP request. Error: " + err.Error()}
+		}
 		request.ContentLength = int64(len(body))
 	} else {
 		request, err = http.NewRequest("PUT", url, nil)
+		if err != nil {
+			return &Error{"Failed to create HTTP request. Error: " + err.Error()}
+		}
 	}
 	security.AddIdentityToSPIRequest(request, url)
+	request.Close = true
 
 	response, err := communication.requestWrapper.do(request)
+	if response != nil && response.Body != nil {
+		defer response.Body.Close()
+	}
 	if err != nil {
 		return &Error{"Failed to send HTTP request. Error: " + err.Error()}
 	}
-	defer response.Body.Close()
 	if response.StatusCode == http.StatusNoContent {
 		switch notificationTopic {
 		case common.Update:
@@ -454,17 +463,24 @@ func (communication *HTTP) registerOrPing(url string) common.SyncServiceError {
 
 	requestURL := buildRegisterOrPingURL(url, common.Configuration.OrgID, common.Configuration.DestinationType, common.Configuration.DestinationID)
 	request, err := http.NewRequest("PUT", requestURL, nil)
+	if err != nil {
+		return &Error{"Failed to create HTTP request to register/ping. Error: " + err.Error()}
+	}
+
 	q := request.URL.Query() // Get a copy of the query values.
 	q.Add("persistent-storage", strconv.FormatBool(Store.IsPersistent()))
 	request.URL.RawQuery = q.Encode() // Encode and assign back to the original query.
 
 	security.AddIdentityToSPIRequest(request, requestURL)
+	request.Close = true
 
 	response, err := communication.requestWrapper.do(request)
+	if response != nil && response.Body != nil {
+		defer response.Body.Close()
+	}
 	if err != nil {
 		return &Error{"Failed to send HTTP request to register/ping. Error: " + err.Error()}
 	}
-	defer response.Body.Close()
 
 	if response.StatusCode == http.StatusNoContent {
 		if url == registerURL || url == registerNewURL {
@@ -498,14 +514,20 @@ func (communication *HTTP) unregister(url string) common.SyncServiceError {
 		trace.Debug("In unregister. request url: %s\n", requestURL)
 	}
 	request, err := http.NewRequest("PUT", requestURL, nil)
+	if err != nil {
+		return &Error{"Failed to create HTTP request to send request to unregister. Error: " + err.Error()}
+	}
 
 	security.AddIdentityToSPIRequest(request, requestURL)
+	request.Close = true
 
 	response, err := communication.requestWrapper.do(request)
+	if response != nil && response.Body != nil {
+		defer response.Body.Close()
+	}
 	if err != nil {
 		return &Error{"Failed to send HTTP request to unregister. Error: " + err.Error()}
 	}
-	defer response.Body.Close()
 
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In unregister. response.StatusCode: %d\n", response.StatusCode)
@@ -587,12 +609,15 @@ func (communication *HTTP) GetData(metaData common.MetaData, offset int64) commo
 		return &Error{"Failed to create data request. Error: " + err.Error()}
 	}
 	security.AddIdentityToSPIRequest(request, url)
+	request.Close = true
 
 	response, err := communication.requestWrapper.do(request)
+	if response != nil && response.Body != nil {
+		defer response.Body.Close()
+	}
 	if err != nil {
 		return &Error{"Error in GetData: failed to get data. Error: " + err.Error()}
 	}
-	defer response.Body.Close()
 	if response.StatusCode == http.StatusNotFound {
 		return &common.NotFound{}
 	}
@@ -661,6 +686,9 @@ func (communication *HTTP) Poll() bool {
 	request.Close = true
 
 	response, err := communication.requestWrapper.do(request)
+	if response != nil && response.Body != nil {
+		defer response.Body.Close()
+	}
 	if err != nil {
 		if log.IsLogging(logger.ERROR) {
 			log.Error("Failed to poll for updates. Error: %s\n", err)
@@ -990,8 +1018,12 @@ func (communication *HTTP) pushData(metaData *common.MetaData) common.SyncServic
 		return &Error{"Failed to read data. Error: " + err.Error()}
 	}
 	security.AddIdentityToSPIRequest(request, url)
+	request.Close = true
 
 	response, err := communication.requestWrapper.do(request)
+	if response != nil && response.Body != nil {
+		defer response.Body.Close()
+	}
 	if err != nil {
 		return &Error{"Failed to send HTTP request. Error: " + err.Error()}
 	}
@@ -1012,13 +1044,20 @@ func (communication *HTTP) ResendObjects() common.SyncServiceError {
 
 	url := buildResendURL(common.Configuration.OrgID)
 	request, err := http.NewRequest("PUT", url, nil)
+	if err != nil {
+		return &Error{"Failed to create HTTP request to resend objects. Error: " + err.Error()}
+	}
 	security.AddIdentityToSPIRequest(request, url)
+	request.Close = true
 
 	response, err := communication.requestWrapper.do(request)
+	if response != nil && response.Body != nil {
+		defer response.Body.Close()
+	}
+
 	if err != nil {
 		return &Error{"Failed to send HTTP request to resend objects. Error: " + err.Error()}
 	}
-	defer response.Body.Close()
 	if response.StatusCode == http.StatusNoContent {
 		handleAckResend()
 		return nil
@@ -1083,15 +1122,20 @@ func (communication *HTTP) SendFeedbackMessage(code int, retryInterval int32, re
 	}
 
 	request, err = http.NewRequest("PUT", url, bytes.NewReader(body))
+	if err != nil {
+		return &Error{"Failed to create HTTP request. Error: " + err.Error()}
+	}
 	request.ContentLength = int64(len(body))
 
 	security.AddIdentityToSPIRequest(request, url)
 
 	response, err := communication.requestWrapper.do(request)
+	if response != nil && response.Body != nil {
+		defer response.Body.Close()
+	}
 	if err != nil {
 		return &Error{"Failed to send HTTP request. Error: " + err.Error()}
 	}
-	defer response.Body.Close()
 	if response.StatusCode == http.StatusNoContent {
 		return nil
 	}
