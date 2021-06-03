@@ -16,6 +16,7 @@ import (
 
 	"github.com/open-horizon/edge-sync-service/common"
 	"github.com/open-horizon/edge-sync-service/core/dataURI"
+	"github.com/open-horizon/edge-sync-service/core/dataVerifier"
 	"github.com/open-horizon/edge-sync-service/core/security"
 	"github.com/open-horizon/edge-utilities/logger"
 	"github.com/open-horizon/edge-utilities/logger/log"
@@ -628,7 +629,26 @@ func (communication *HTTP) GetData(metaData common.MetaData, offset int64) commo
 	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 	common.ObjectLocks.Lock(lockIndex)
 
-	if metaData.DestinationDataURI != "" {
+	var dataVf *dataVerifier.DataVerifier
+	if common.IsValidHashAlgorithm(metaData.HashAlgorithm) && metaData.PublicKey != "" && metaData.Signature != "" {
+		dataVf = dataVerifier.NewDataVerifier(metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature)
+		if dataVerified, err := dataVf.VerifyDataSignature(response.Body, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI); !dataVerified || err != nil {
+			if trace.IsLogging(logger.ERROR) {
+				trace.Error("Failed to verify data for object %s %s, remove temp data\n", metaData.ObjectType, metaData.ObjectID)
+			}
+			dataVf.RemoveTempData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI)
+			common.ObjectLocks.Unlock(lockIndex)
+			return err
+		}
+	}
+
+	if dataVf != nil {
+		if err := dataVf.StoreVerifiedData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI); err != nil {
+			dataVf.RemoveTempData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI)
+			common.ObjectLocks.Unlock(lockIndex)
+			return err
+		}
+	} else if metaData.DestinationDataURI != "" {
 		if _, err := dataURI.StoreData(metaData.DestinationDataURI, response.Body, 0); err != nil {
 			common.ObjectLocks.Unlock(lockIndex)
 			return err
@@ -643,6 +663,7 @@ func (communication *HTTP) GetData(metaData common.MetaData, offset int64) commo
 			return &Error{"Failed to store object's data."}
 		}
 	}
+
 	if err := Store.UpdateObjectStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, common.CompletelyReceived); err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
 		return &Error{fmt.Sprintf("Error in GetData: %s\n", err)}
@@ -936,13 +957,44 @@ func (communication *HTTP) handlePutData(orgID string, objectType string, object
 	lockIndex := common.HashStrings(orgID, objectType, objectID)
 	common.ObjectLocks.Lock(lockIndex)
 
-	if found, err := Store.StoreObjectData(orgID, objectType, objectID, request.Body); err != nil {
+	// retrieve metadata and check if this data need to be verified
+	metaData, err := Store.RetrieveObject(orgID, objectType, objectID)
+	if metaData == nil {
+		common.ObjectLocks.Unlock(lockIndex)
+		return &common.InvalidRequest{Message: "Failed to find object to set data"}
+	}
+	if err != nil {
+		common.ObjectLocks.Unlock(lockIndex)
+		return err
+	}
+
+	var dataVf *dataVerifier.DataVerifier
+	if common.IsValidHashAlgorithm(metaData.HashAlgorithm) && metaData.PublicKey != "" && metaData.Signature != "" {
+		dataVf = dataVerifier.NewDataVerifier(metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature)
+		if dataVerified, err := dataVf.VerifyDataSignature(request.Body, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI); !dataVerified || err != nil {
+			if trace.IsLogging(logger.ERROR) {
+				trace.Error("Failed to verify data for object %s %s, remove temp data\n", metaData.ObjectType, metaData.ObjectID)
+			}
+			dataVf.RemoveTempData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI)
+			common.ObjectLocks.Unlock(lockIndex)
+			return err
+		}
+	}
+
+	if dataVf != nil {
+		if err := dataVf.StoreVerifiedData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI); err != nil {
+			dataVf.RemoveTempData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI)
+			common.ObjectLocks.Unlock(lockIndex)
+			return err
+		}
+	} else if found, err := Store.StoreObjectData(orgID, objectType, objectID, request.Body); err != nil { // No data verification applied, then store data directly
 		common.ObjectLocks.Unlock(lockIndex)
 		return err
 	} else if !found {
 		common.ObjectLocks.Unlock(lockIndex)
 		return &common.InvalidRequest{Message: "Failed to find object to set data"}
 	}
+
 	if err := Store.UpdateObjectStatus(orgID, objectType, objectID, common.CompletelyReceived); err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
 		return err
