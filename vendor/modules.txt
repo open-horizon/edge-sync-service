@@ -1,0 +1,59 @@
+# github.com/eclipse/paho.mqtt.golang v1.1.1
+## explicit
+github.com/eclipse/paho.mqtt.golang
+github.com/eclipse/paho.mqtt.golang/packets
+# github.com/globalsign/mgo v0.0.0-20180615134936-113d3961e731
+## explicit
+github.com/globalsign/mgo
+github.com/globalsign/mgo/bson
+github.com/globalsign/mgo/internal/json
+github.com/globalsign/mgo/internal/sasl
+github.com/globalsign/mgo/internal/scram
+# github.com/go-kivik/couchdb v2.0.0+incompatible
+## explicit
+github.com/go-kivik/couchdb
+github.com/go-kivik/couchdb/chttp
+# github.com/go-kivik/couchdb/v3 v3.2.1
+## explicit
+github.com/go-kivik/couchdb/v3
+github.com/go-kivik/couchdb/v3/chttp
+# github.com/go-kivik/kivik v2.0.0+incompatible
+## explicit
+github.com/go-kivik/kivik
+github.com/go-kivik/kivik/driver
+# github.com/go-kivik/kivik/v3 v3.2.0
+## explicit
+github.com/go-kivik/kivik/v3
+github.com/go-kivik/kivik/v3/driver
+github.com/go-kivik/kivik/v3/internal/registry
+# github.com/go-stack/stack v1.8.0
+## explicit
+# github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
+## explicit
+github.com/golang/glog
+# github.com/google/uuid v1.1.0
+## explicit
+github.com/google/uuid
+# github.com/open-horizon/edge-sync-service-client v0.0.0-20190711093406-dc3a19905da2
+## explicit
+github.com/open-horizon/edge-sync-service-client/client
+github.com/open-horizon/edge-sync-service-client/embedded/client
+# github.com/open-horizon/edge-utilities v0.0.0-20190711093331-0908b45a7152
+## explicit
+github.com/open-horizon/edge-utilities/logger
+github.com/open-horizon/edge-utilities/logger/log
+github.com/open-horizon/edge-utilities/logger/trace
+github.com/open-horizon/edge-utilities/properties
+# go.etcd.io/bbolt v1.3.4
+## explicit
+go.etcd.io/bbolt
+# golang.org/x/net v0.0.0-20200202094626-16171245cfb2
+golang.org/x/net/internal/socks
+golang.org/x/net/proxy
+golang.org/x/net/publicsuffix
+golang.org/x/net/websocket
+# golang.org/x/sys v0.0.0-20200202164722-d101bd2416d5
+golang.org/x/sys/unix
+# golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543
+golang.org/x/xerrors
+golang.org/x/xerrors/internal

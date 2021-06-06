@@ -91,6 +91,8 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 		var cssStore storage.Storage
 		if common.Configuration.StorageProvider == common.Mongo {
 			cssStore = &storage.MongoStorage{}
+		} else if common.Configuration.StorageProvider == common.Couch {
+			cssStore = &storage.CouchStorage{}
 		} else {
 			cssStore = &storage.BoltStorage{}
 		}
