@@ -261,6 +261,20 @@ func (store *Cache) UpdateObjectDestinations(orgID string, objectType string, ob
 	return store.Store.UpdateObjectDestinations(orgID, objectType, objectID, destinationsList)
 }
 
+// AddObjectdestinations adds the destinations to object's destination list
+// Returns the metadata, object's status, an array of added destinations after removing the overlapped destinations
+func (store *Cache) AddObjectDestinations(orgID string, objectType string, objectID string, destinationsList []string) (*common.MetaData, string,
+	[]common.StoreDestinationStatus, common.SyncServiceError) {
+	return store.Store.AddObjectDestinations(orgID, objectType, objectID, destinationsList)
+}
+
+// DeleteObjectdestinations deletes the destinations from object's destination list
+// Returns the metadata, objects' status, an array of destinations that removed from the current destination list
+func (store *Cache) DeleteObjectDestinations(orgID string, objectType string, objectID string, destinationsList []string) (*common.MetaData, string,
+	[]common.StoreDestinationStatus, common.SyncServiceError) {
+	return store.Store.DeleteObjectDestinations(orgID, objectType, objectID, destinationsList)
+}
+
 // GetNumberOfStoredObjects returns the number of objects received from the application that are
 // currently stored in this node's storage
 func (store *Cache) GetNumberOfStoredObjects() (uint32, common.SyncServiceError) {

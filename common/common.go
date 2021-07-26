@@ -678,6 +678,14 @@ const (
 	ObjectsACLType      = "objects"
 )
 
+// API payload actions
+const (
+	AddAction      = "add"
+	RemoveAction   = "remove"
+	RegisterAction = "register"
+	DeleteAction   = "delete"
+)
+
 // Resend flag options
 const (
 	ResendAll = iota

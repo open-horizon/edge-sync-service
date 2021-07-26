@@ -1062,6 +1062,72 @@ func (store *BoltStorage) UpdateObjectDestinations(orgID string, objectType stri
 	return &metaData, status, deletedDests, addedDests, nil
 }
 
+// AddObjectdestinations adds the destinations to object's destination list
+// Returns the metadata, object's status, an array of added destinations after removing the overlapped destinations
+func (store *BoltStorage) AddObjectDestinations(orgID string, objectType string, objectID string, destinationsList []string) (*common.MetaData, string, []common.StoreDestinationStatus, common.SyncServiceError) {
+	if common.Configuration.NodeType == common.ESS {
+		return nil, "", nil, nil
+	}
+
+	var addedDests []common.StoreDestinationStatus
+	var metaData common.MetaData
+	var status string
+	function := func(object boltObject) (boltObject, common.SyncServiceError) {
+		var updatedDests []common.StoreDestinationStatus
+		var err error
+
+		updatedDests, addedDests, err = getDestinationsForAdd(orgID, store, object.Destinations, destinationsList)
+		if err != nil {
+			return object, err
+		}
+
+		object.Destinations = updatedDests
+		metaData = object.Meta
+		status = object.Status
+		return object, nil
+	}
+
+	err := store.updateObjectHelper(orgID, objectType, objectID, function)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	return &metaData, status, addedDests, nil
+}
+
+// DeleteObjectdestinations deletes the destinations from object's destination list
+// Returns the metadata, objects' status, an array of destinations that removed from the current destination list
+func (store *BoltStorage) DeleteObjectDestinations(orgID string, objectType string, objectID string, destinationsList []string) (*common.MetaData, string, []common.StoreDestinationStatus, common.SyncServiceError) {
+	if common.Configuration.NodeType == common.ESS {
+		return nil, "", nil, nil
+	}
+
+	var deletedDests []common.StoreDestinationStatus
+	var metaData common.MetaData
+	var status string
+	function := func(object boltObject) (boltObject, common.SyncServiceError) {
+		var updatedDests []common.StoreDestinationStatus
+		var err error
+
+		updatedDests, deletedDests, err = getDestinationsForDelete(orgID, store, object.Destinations, destinationsList)
+		if err != nil {
+			return object, err
+		}
+
+		object.Destinations = updatedDests
+		metaData = object.Meta
+		status = object.Status
+		return object, nil
+	}
+
+	err := store.updateObjectHelper(orgID, objectType, objectID, function)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	return &metaData, status, deletedDests, nil
+}
+
 // UpdateObjectDeliveryStatus changes the object's delivery status for the destination
 // Returns true if the status is Deleted and all the destinations are in status Deleted
 func (store *BoltStorage) UpdateObjectDeliveryStatus(status string, message string, orgID string, objectType string, objectID string,
