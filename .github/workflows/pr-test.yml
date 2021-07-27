@@ -1,0 +1,55 @@
+# This pipeline is to build edge sync service
+
+name: pr-test
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      IMPORT_PEFIX: github.com/open-horizon
+      EDGE_COMPONENT_NAME: edge-sync-service
+      BUILD_FLAGS: -i -tags "netgo"
+      LD_FLAGS: -linkmode external -extldflags -static -s -w
+      BUILD_OUTPUT: build
+      GOOS: linux
+      GOARCH: amd64
+      CGO_BUILD: 0
+      GOPATH: /home/runner/work/edge-sync-service/edge-sync-service/go
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with: 
+          path: go/src/github.com/open-horizon/edge-sync-service
+
+      # prepare the environment
+      - name: Set up golang 1.14.1
+        uses: actions/setup-go@v2
+        with:
+           go-version: '1.14.1'
+
+      # build 
+      - name: Build
+        shell: bash {0}
+        run: |
+          pwd
+          cd ${GOPATH}/src/github.com/open-horizon/edge-sync-service
+          mkdir -p build
+          ./get_dependencies.sh
+          go build ${BUILD_FLAGS} -ldflags "${LD_FLAGS}" -o ${BUILD_OUTPUT}/${EDGE_COMPONENT_NAME} ${GOPATH}/src/github.com/open-horizon/edge-sync-service/cmd/${EDGE_COMPONENT_NAME}
+          ls -al ./${BUILD_OUTPUT}
+
+          # run coverage
+          ./runCoverage.sh
+
+          go build ${BUILD_FLAGS} -ldflags "${LD_FLAGS}" -o ${BUILD_OUTPUT}/edge-sync-service-mgmt ${GOPATH}/src/github.com/open-horizon/edge-sync-service/cmd/edge-sync-service-mgmt
+          go build ${BUILD_FLAGS} -ldflags "${LD_FLAGS}" -o ${BUILD_OUTPUT}/receive-file ${GOPATH}/src/github.com/open-horizon/edge-sync-service/cmd/receive-file
+          go build ${BUILD_FLAGS} -ldflags "${LD_FLAGS}" -o ${BUILD_OUTPUT}/send-file ${GOPATH}/src/github.com/open-horizon/edge-sync-service/cmd/send-file
+
+          ls -al ./${BUILD_OUTPUT}
+
