@@ -1,9 +1,8 @@
 # This pipeline is to build edge sync service
-
 name: pr-test
 
 on:
-  push:
+  pull_request:
     branches:
       - master
 
