@@ -105,6 +105,8 @@ type aclObject struct {
 
 const maxUpdateTries = 5
 
+var sleepInSec int
+
 // Init initializes the MongoStorage store
 func (store *MongoStorage) Init() common.SyncServiceError {
 	store.lockChannel = make(chan int, 1)
@@ -246,6 +248,8 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 	}
 
 	store.openFiles = make(map[string]*fileHandle)
+
+	sleepInSec = common.Configuration.MongoSleepTimeBetweenRetry
 
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Successfully initialized mongo driver")
@@ -427,6 +431,7 @@ func (store *MongoStorage) UpdateObjectDestinations(orgID string, objectType str
 		}
 		if err := store.update(objects, bson.M{"_id": id, "last-update": result.LastUpdate}, query); err != nil {
 			if err == mgo.ErrNotFound {
+				time.Sleep(time.Duration(sleepInSec) * time.Second)
 				continue
 			}
 			return nil, "", nil, nil, &Error{fmt.Sprintf("Failed to update object's destinations. Error: %s.", err)}
@@ -434,6 +439,71 @@ func (store *MongoStorage) UpdateObjectDestinations(orgID string, objectType str
 		return &result.MetaData, result.Status, deletedDests, addedDests, nil
 	}
 	return nil, "", nil, nil, &Error{"Failed to update object's destinations."}
+}
+
+// AddObjectdestinations adds the destinations to object's destination list
+// Returns the metadata, object's status, an array of added destinations after removing the overlapped destinations
+func (store *MongoStorage) AddObjectDestinations(orgID string, objectType string, objectID string, destinationsList []string) (*common.MetaData, string, []common.StoreDestinationStatus, common.SyncServiceError) {
+	result := object{}
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	selector := bson.M{"metadata": bson.ElementDocument, "destinations": bson.ElementArray, "last-update": bson.ElementTimestamp, "status": bson.ElementString}
+	for i := 0; i < maxUpdateTries; i++ {
+		if err := store.fetchOne(objects, bson.M{"_id": id}, selector, &result); err != nil {
+			return nil, "", nil, &Error{fmt.Sprintf("Failed to retrieve object's destinations. Error: %s.", err)}
+		}
+
+		updatedDests, addedDests, err := getDestinationsForAdd(orgID, store, result.Destinations, destinationsList)
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		query := bson.M{
+			"$set":         bson.M{"destinations": updatedDests},
+			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+		}
+		if err := store.update(objects, bson.M{"_id": id, "last-update": result.LastUpdate}, query); err != nil {
+			if err == mgo.ErrNotFound {
+				time.Sleep(time.Duration(sleepInSec) * time.Second)
+				continue
+			}
+			return nil, "", nil, &Error{fmt.Sprintf("Failed to add destinations to object's destinations list. Error: %s.", err)}
+		}
+		return &result.MetaData, result.Status, addedDests, nil
+	}
+	return nil, "", nil, &Error{"Failed to add destinations to object's destination list."}
+}
+
+// DeleteObjectdestinations deletes the destinations from object's destination list
+// Returns the metadata, objects' status, an array of destinations that removed from the current destination list
+func (store *MongoStorage) DeleteObjectDestinations(orgID string, objectType string, objectID string, destinationsList []string) (*common.MetaData, string, []common.StoreDestinationStatus, common.SyncServiceError) {
+	result := object{}
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	selector := bson.M{"metadata": bson.ElementDocument, "destinations": bson.ElementArray, "last-update": bson.ElementTimestamp, "status": bson.ElementString}
+	for i := 0; i < maxUpdateTries; i++ {
+		if err := store.fetchOne(objects, bson.M{"_id": id}, selector, &result); err != nil {
+			return nil, "", nil, &Error{fmt.Sprintf("Failed to retrieve object's destinations. Error: %s.", err)}
+		}
+
+		updatedDests, deletedDests, err := getDestinationsForDelete(orgID, store, result.Destinations, destinationsList)
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		query := bson.M{
+			"$set":         bson.M{"destinations": updatedDests},
+			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+		}
+		if err := store.update(objects, bson.M{"_id": id, "last-update": result.LastUpdate}, query); err != nil {
+			if err == mgo.ErrNotFound {
+				time.Sleep(time.Duration(sleepInSec) * time.Second)
+				continue
+			}
+			return nil, "", nil, &Error{fmt.Sprintf("Failed to delete destinations from object's destinations list. Error: %s.", err)}
+		}
+		return &result.MetaData, result.Status, deletedDests, nil
+
+	}
+	return nil, "", nil, &Error{"Failed to delete destinations from object's destination list."}
 }
 
 // UpdateObjectDeliveryStatus changes the object's delivery status and message for the destination
@@ -491,6 +561,7 @@ func (store *MongoStorage) UpdateObjectDeliveryStatus(status string, message str
 		}
 		if err := store.update(objects, bson.M{"_id": id, "last-update": result.LastUpdate}, query); err != nil {
 			if err == mgo.ErrNotFound {
+				time.Sleep(time.Duration(sleepInSec) * time.Second)
 				continue
 			}
 			return false, &Error{fmt.Sprintf("Failed to update object's destinations. Error: %s.", err)}
@@ -520,6 +591,7 @@ func (store *MongoStorage) UpdateObjectDelivering(orgID string, objectType strin
 				"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
 			}); err != nil {
 			if err == mgo.ErrNotFound {
+				time.Sleep(time.Duration(sleepInSec) * time.Second)
 				continue
 			}
 			return &Error{fmt.Sprintf("Failed to update object's destinations. Error: %s.", err)}
@@ -853,6 +925,7 @@ OUTER:
 								"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
 							}); err != nil {
 							if err == mgo.ErrNotFound {
+								time.Sleep(time.Duration(sleepInSec) * time.Second)
 								continue OUTER
 							}
 							return nil, &Error{fmt.Sprintf("Failed to update object's destinations. Error: %s.", err)}
@@ -1252,6 +1325,7 @@ func (store *MongoStorage) AddWebhook(orgID string, objectType string, url strin
 				result.ID = id
 				if err = store.insert(webhooks, result); err != nil {
 					if mgo.IsDup(err) {
+						time.Sleep(time.Duration(sleepInSec) * time.Second)
 						continue
 					}
 					return &Error{fmt.Sprintf("Failed to insert a webhook. Error: %s.", err)}
@@ -1274,6 +1348,7 @@ func (store *MongoStorage) AddWebhook(orgID string, objectType string, url strin
 				"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
 			}); err != nil {
 			if err == mgo.ErrNotFound {
+				time.Sleep(time.Duration(sleepInSec) * time.Second)
 				continue
 			}
 			return &Error{fmt.Sprintf("Failed to add a webhook. Error: %s.", err)}
@@ -1312,6 +1387,7 @@ func (store *MongoStorage) DeleteWebhook(orgID string, objectType string, url st
 				"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
 			}); err != nil {
 			if err == mgo.ErrNotFound {
+				time.Sleep(time.Duration(sleepInSec) * time.Second)
 				continue
 			}
 			return &Error{fmt.Sprintf("Failed to delete a webhook. Error: %s.", err)}

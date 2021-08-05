@@ -1396,6 +1396,66 @@
             }
           }
         }
+      },
+      "post": {
+        "description": "Add or delete the list of sync service (ESS) nodes to/from be the destinations of the object of the specified object type and object ID.\nThis is a CSS only API.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "text/plain"
+        ],
+        "tags": [
+          "CSS"
+        ],
+        "summary": "Add/Delete the destinations of an object.",
+        "operationId": "handleObjectDestinationsUpdate",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the object whose destinations will be updated",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object type of the object whose destinations will be updated",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object whose destinations will be updated",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "description": "The object's destination list to add or remove",
+            "name": "payload",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/bulkDestUpdate"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Object destinations updated",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to update the object's destinations",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
       }
     },
     "/api/v1/objects/{orgID}/{objectType}/{objectID}/policyreceived": {
@@ -2846,6 +2906,25 @@
             "$ref": "#/definitions/ACLentry"
           },
           "x-go-name": "Users"
+        }
+      },
+      "x-go-package": "github.com/open-horizon/edge-sync-service/core/base"
+    },
+    "bulkDestUpdate": {
+      "description": "bulkDestUpdate is the payload used when need to add or remove destinations for an object",
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "x-go-name": "Action"
+        },
+        "destinations": {
+          "description": "Destinations is an array of destinations, each entry is an string in form of \"\u003cdestinationType\u003e:\u003cdestinationID\u003e\"",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Destinations"
         }
       },
       "x-go-package": "github.com/open-horizon/edge-sync-service/core/base"

@@ -80,6 +80,15 @@ type bulkACLUpdate struct {
 	Users []common.ACLentry `json:"users"`
 }
 
+// bulkDestUpdate is the payload used when need to add or remove destinations for an object
+// swagger:model
+type bulkDestUpdate struct {
+	Action string `json:"action"`
+
+	// Destinations is an array of destinations, each entry is an string in form of "<destinationType>:<destinationID>"
+	Destinations []string `json:"destinations"`
+}
+
 func setupAPIServer() {
 	if common.Configuration.NodeType == common.CSS {
 		http.Handle(destinationsURL+"/", http.StripPrefix(destinationsURL+"/", http.HandlerFunc(handleDestinations)))
@@ -494,7 +503,7 @@ func handleObjects(writer http.ResponseWriter, request *http.Request) {
 			// PUT     /api/v1/objects/orgID/type/id/activate
 			// GET     /api/v1/objects/orgID/type/id/status
 			// GET/PUT /api/v1/objects/orgID/type/id/data
-			// GET/PUT /api/v1/objects/orgID/type/id/destinations
+			// GET/PUT/POST /api/v1/objects/orgID/type/id/destinations
 			operation := strings.ToLower(parts[2])
 			handleObjectOperation(operation, orgID, parts[0], parts[1], writer, request)
 
@@ -1794,6 +1803,87 @@ func handleObjectDestinations(orgID string, objectType string, objectID string, 
 			}
 		}
 
+	} else if request.Method == http.MethodPost {
+		// swagger:operation POST /api/v1/objects/{orgID}/{objectType}/{objectID}/destinations handleObjectDestinationsUpdate
+		//
+		// Add/Delete the destinations of an object.
+		//
+		// Add or delete the list of sync service (ESS) nodes to/from be the destinations of the object of the specified object type and object ID.
+		// This is a CSS only API.
+		//
+		// ---
+		//
+		// tags:
+		// - CSS
+		//
+		// consumes:
+		// - application/json
+		//
+		// produces:
+		// - text/plain
+		//
+		// parameters:
+		// - name: orgID
+		//   in: path
+		//   description: The orgID of the object whose destinations will be updated
+		//   required: true
+		//   type: string
+		// - name: objectType
+		//   in: path
+		//   description: The object type of the object whose destinations will be updated
+		//   required: true
+		//   type: string
+		// - name: objectID
+		//   in: path
+		//   description: The object ID of the object whose destinations will be updated
+		//   required: true
+		//   type: string
+		// - name: payload
+		//   in: body
+		//   description: The object's destination list to add or remove
+		//   required: true
+		//   schema:
+		//      "$ref": "#/definitions/bulkDestUpdate"
+		//
+		// responses:
+		//   '204':
+		//     description: Object destinations updated
+		//     schema:
+		//       type: string
+		//   '500':
+		//     description: Failed to update the object's destinations
+		//     schema:
+		//       type: string
+		var payload bulkDestUpdate
+		err := json.NewDecoder(request.Body).Decode(&payload)
+		if err == nil {
+			var updateErr error
+			dests := payload.Destinations
+			if strings.EqualFold(payload.Action, common.RemoveAction) {
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Debug("In handleObjectDestinations. Bulk remove destinations for %s, %s, %s \n", orgID, objectType, objectID)
+				}
+				updateErr = DeleteObjectDestinations(orgID, objectType, objectID, dests)
+			} else if strings.EqualFold(payload.Action, common.AddAction) {
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Debug("In handleObjectDestinations. Bulk add destinations for %s, %s, %s \n", orgID, objectType, objectID)
+				}
+				updateErr = AddObjectDestinations(orgID, objectType, objectID, dests)
+			} else {
+				communications.SendErrorResponse(writer, nil, fmt.Sprintf("Invalid action (%s) in payload.", payload.Action), http.StatusBadRequest)
+				return
+			}
+
+			if updateErr == nil {
+				writer.WriteHeader(http.StatusNoContent)
+			} else {
+				communications.SendErrorResponse(writer, updateErr, "", 0)
+			}
+
+		} else {
+			communications.SendErrorResponse(writer, err, "Invalid JSON for add/remove destinations. Error: ", http.StatusBadRequest)
+		}
+
 	} else {
 		writer.WriteHeader(http.StatusMethodNotAllowed)
 	}
@@ -2734,12 +2824,12 @@ func handleWebhook(orgID string, objectType string, writer http.ResponseWriter, 
 	var payload webhookUpdate
 	err := json.NewDecoder(request.Body).Decode(&payload)
 	if err == nil {
-		if strings.EqualFold(payload.Action, "delete") {
+		if strings.EqualFold(payload.Action, common.DeleteAction) {
 			if trace.IsLogging(logger.DEBUG) {
 				trace.Debug("In handleObjects. Delete webhook %s\n", objectType)
 			}
 			hookErr = DeleteWebhook(orgID, objectType, payload.URL)
-		} else if strings.EqualFold(payload.Action, "register") {
+		} else if strings.EqualFold(payload.Action, common.RegisterAction) {
 			if trace.IsLogging(logger.DEBUG) {
 				trace.Debug("In handleObjects. Register webhook %s\n", objectType)
 			}
@@ -3418,7 +3508,7 @@ func handleACLUpdate(request *http.Request, aclType string, orgID string, parts 
 
 			var updateErr error
 			var updatedPayload *[]common.ACLentry
-			if strings.EqualFold(payload.Action, "remove") {
+			if strings.EqualFold(payload.Action, common.RemoveAction) {
 				if trace.IsLogging(logger.DEBUG) {
 					trace.Debug("In handleSecurity. Bulk remove usernames %s\n", parts[0])
 				}
@@ -3428,7 +3518,7 @@ func handleACLUpdate(request *http.Request, aclType string, orgID string, parts 
 				} else {
 					updateErr = RemoveUsersFromACL(aclType, orgID, parts[0], payload.Users)
 				}
-			} else if strings.EqualFold(payload.Action, "add") {
+			} else if strings.EqualFold(payload.Action, common.AddAction) {
 				if trace.IsLogging(logger.DEBUG) {
 					trace.Debug("In handleSecurity. Bulk add usernames %s\n", parts[0])
 				}
@@ -3512,7 +3602,7 @@ func handleACLUpdate(request *http.Request, aclType string, orgID string, parts 
 
 			var updateErr error
 			var updatedPayload *[]common.ACLentry
-			if strings.EqualFold(payload.Action, "remove") {
+			if strings.EqualFold(payload.Action, common.RemoveAction) {
 				if trace.IsLogging(logger.DEBUG) {
 					trace.Debug("In handleSecurity. Bulk remove usernames for all %s types\n", aclType)
 				}
@@ -3522,7 +3612,7 @@ func handleACLUpdate(request *http.Request, aclType string, orgID string, parts 
 				} else {
 					updateErr = RemoveUsersFromACL(aclType, orgID, "", payload.Users)
 				}
-			} else if strings.EqualFold(payload.Action, "add") {
+			} else if strings.EqualFold(payload.Action, common.AddAction) {
 				if trace.IsLogging(logger.DEBUG) {
 					trace.Debug("In handleSecurity. Bulk add usernames for all %s types\n", aclType)
 				}

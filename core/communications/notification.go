@@ -52,6 +52,7 @@ func PrepareNotificationsForDestinations(metaData common.MetaData, destinations 
 	common.SyncServiceError) {
 	dests := make([]common.Destination, 0)
 	for _, dest := range destinations {
+		// If topic is delete (delete destination), and destination status is pending => notification will NOT be prepared for this destination
 		if topic != common.Delete || (dest.Status == common.Delivering || dest.Status == common.Delivered || dest.Status == common.Consumed ||
 			dest.Status == common.Error) {
 			dests = append(dests, dest.Destination)

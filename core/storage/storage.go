@@ -157,6 +157,16 @@ type Storage interface {
 	UpdateObjectDestinations(orgID string, objectType string, objectID string, destinationsList []string) (*common.MetaData, string,
 		[]common.StoreDestinationStatus, []common.StoreDestinationStatus, common.SyncServiceError)
 
+	// AddObjectdestinations adds the destinations to object's destination list
+	// Returns the metadata, object's status, an array of added destinations after removing the overlapped destinations
+	AddObjectDestinations(orgID string, objectType string, objectID string, destinationsList []string) (*common.MetaData, string,
+		[]common.StoreDestinationStatus, common.SyncServiceError)
+
+	// DeleteObjectdestinations deletes the destinations from object's destination list
+	// Returns the metadata, objects' status, an array of destinations that removed from the current destination list
+	DeleteObjectDestinations(orgID string, objectType string, objectID string, destinationsList []string) (*common.MetaData, string,
+		[]common.StoreDestinationStatus, common.SyncServiceError)
+
 	// GetNumberOfStoredObjects returns the number of objects received from the application that are
 	// currently stored in this node's storage
 	GetNumberOfStoredObjects() (uint32, common.SyncServiceError)
@@ -508,6 +518,79 @@ func compareDestinations(oldList []common.StoreDestinationStatus, newList []comm
 		}
 	}
 	return newList, deletedDests, addedDests
+}
+
+func getDestinationsForAdd(orgID string, store Storage, currentDestinationList []common.StoreDestinationStatus, destinationsListToAdd []string) ([]common.StoreDestinationStatus, []common.StoreDestinationStatus, common.SyncServiceError) {
+	destsToAdd, err := createDestinationFromList(orgID, store, destinationsListToAdd)
+	if err != nil {
+		return nil, nil, err
+	}
+	updatedDests, addedDests := compareDestinationsForAdd(currentDestinationList, destsToAdd)
+	return updatedDests, addedDests, nil
+}
+
+func getDestinationsForDelete(orgID string, store Storage, currentDestinationList []common.StoreDestinationStatus, destinationsListToDelete []string) ([]common.StoreDestinationStatus, []common.StoreDestinationStatus, common.SyncServiceError) {
+	destsToDelete, err := createDestinationFromList(orgID, store, destinationsListToDelete)
+	if err != nil {
+		return nil, nil, err
+	}
+	updatedDests, deletedDests := compareDestinationsForDelete(currentDestinationList, destsToDelete)
+	return updatedDests, deletedDests, nil
+}
+
+func compareDestinationsForAdd(currDests []common.StoreDestinationStatus, destToAdd []common.StoreDestinationStatus) ([]common.StoreDestinationStatus, []common.StoreDestinationStatus) {
+	// ADD:
+	// 1. get the list of destinations need to add (remove form list if destination is already in currentDests)
+	// 2. return addedDests => need to send notification
+	// 3. get the new list of dests, set it in db
+	addedDests := make([]common.StoreDestinationStatus, 0)
+	for _, dest := range destToAdd {
+		found := false
+		for _, currDest := range currDests {
+			if dest.Destination == currDest.Destination {
+				// update destToAdd because destination status is initially "pending", need to use the existing destination status
+				found = true
+				break
+			}
+		}
+		if !found {
+			addedDests = append(addedDests, dest)
+		}
+	}
+
+	updatedDests := append(currDests, addedDests...)
+
+	return updatedDests, addedDests
+}
+
+func compareDestinationsForDelete(currDests []common.StoreDestinationStatus, destToDelete []common.StoreDestinationStatus) ([]common.StoreDestinationStatus, []common.StoreDestinationStatus) {
+	// REMOVE:
+	// 1. get the list of destinations need to remove (remove from list if destination is not in currentDests)
+	// 2. return deletedDests => need to send notification
+	// 3. get the new list of dests, set it in db
+	deletedDests := make([]common.StoreDestinationStatus, 0)
+	updatedDests := make([]common.StoreDestinationStatus, 0)
+	indexesToRmFromCurr := make(map[int]struct{}, 0)
+	for _, dest := range destToDelete {
+		for idx, currDest := range currDests {
+			if dest.Destination == currDest.Destination {
+				// dest to delete is found in current dests, then add it to deletedDests
+				deletedDests = append(deletedDests, currDest)
+				indexesToRmFromCurr[idx] = struct{}{}
+				break
+			}
+		}
+	}
+
+	// remove deletedDests from currentDests
+	for currIdx, currDest := range currDests {
+		if _, ok := indexesToRmFromCurr[currIdx]; !ok {
+			// only add dest to updatedDests if the dest is not in deletedDests
+			updatedDests = append(updatedDests, currDest)
+		}
+	}
+
+	return updatedDests, deletedDests
 }
 
 func createDestinationsFromMeta(store Storage, metaData common.MetaData) ([]common.StoreDestinationStatus, []common.StoreDestinationStatus, common.SyncServiceError) {

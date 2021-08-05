@@ -1232,6 +1232,89 @@ func UpdateObjectDestinations(orgID string, objectType string, objectID string, 
 	return nil
 }
 
+// AddObjectDestinations adds destinations to object's destination list
+func AddObjectDestinations(orgID string, objectType string, objectID string, destinationsList []string) common.SyncServiceError {
+	common.HealthStatus.ClientRequestReceived()
+
+	if common.Configuration.NodeType != common.CSS {
+		return &common.InvalidRequest{Message: "ESS doesn't support destinations update"}
+	}
+
+	lockIndex := common.HashStrings(orgID, objectType, objectID)
+	apiObjectLocks.Lock(lockIndex)
+
+	metaData, status, addedDestinations, err := store.AddObjectDestinations(orgID, objectType, objectID, destinationsList)
+	if err != nil {
+		apiObjectLocks.Unlock(lockIndex)
+		return err
+	}
+
+	var updateNotificationsInfo []common.NotificationInfo
+	if len(addedDestinations) != 0 && status == common.ReadyToSend {
+		updateNotificationsInfo, err = communications.PrepareNotificationsForDestinations(*metaData, addedDestinations, common.Update)
+		if err != nil {
+			apiObjectLocks.Unlock(lockIndex)
+			return err
+		}
+	}
+	apiObjectLocks.Unlock(lockIndex)
+
+	if len(updateNotificationsInfo) != 0 {
+		if err := communications.SendNotifications(updateNotificationsInfo); err != nil {
+			return err
+		}
+	}
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In add destinations, added destination for object %s %s: \n", objectType, objectID)
+		for _, added := range addedDestinations {
+			trace.Debug("%s: %s", added.Destination.DestType, added.Destination.DestID)
+		}
+	}
+	return nil
+}
+
+// DeleteObjectDestinations deletes destinations from object's destination list
+func DeleteObjectDestinations(orgID string, objectType string, objectID string, destinationsList []string) common.SyncServiceError {
+	common.HealthStatus.ClientRequestReceived()
+
+	if common.Configuration.NodeType != common.CSS {
+		return &common.InvalidRequest{Message: "ESS doesn't support destinations update"}
+	}
+
+	lockIndex := common.HashStrings(orgID, objectType, objectID)
+	apiObjectLocks.Lock(lockIndex)
+
+	metaData, _, deletedDestinations, err := store.DeleteObjectDestinations(orgID, objectType, objectID, destinationsList)
+	if err != nil {
+		apiObjectLocks.Unlock(lockIndex)
+		return err
+	}
+
+	var deleteNotificationsInfo []common.NotificationInfo
+	if len(deletedDestinations) != 0 {
+		deleteNotificationsInfo, err = communications.PrepareNotificationsForDestinations(*metaData, deletedDestinations, common.Delete)
+		if err != nil {
+			apiObjectLocks.Unlock(lockIndex)
+			return err
+		}
+	}
+	apiObjectLocks.Unlock(lockIndex)
+
+	if len(deleteNotificationsInfo) != 0 {
+		if err := communications.SendNotifications(deleteNotificationsInfo); err != nil {
+			return err
+		}
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In delete destinations. removed destination for object %s %s: \n", objectType, objectID)
+		for _, deleted := range deletedDestinations {
+			trace.Debug("%s: %s", deleted.Destination.DestType, deleted.Destination.DestID)
+		}
+	}
+	return nil
+}
+
 // DeleteWebhook deletes a WebHook
 func DeleteWebhook(orgID string, objectType string, url string) common.SyncServiceError {
 	common.HealthStatus.ClientRequestReceived()

@@ -13,6 +13,7 @@ import (
 	"hash"
 	"math"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/open-horizon/edge-sync-service/common"
@@ -762,6 +763,14 @@ func testObjectDestinationsAPI(store storage.Storage, t *testing.T) {
 
 	dests1 := []string{"device:dev1", "device2:dev", "device2:dev1"}
 	dests2 := []string{"device3:dev1"}
+	destsToAdd := append(dests1, dests2...)
+	destsToDelete := []string{"device:dev1"}
+	destsToDeleteToFail := []string{"noType:noID"}
+	destsRemain := make(map[string][]string)
+	destsRemain["1"] = make([]string, 0)
+	destsRemain["2"] = []string{"device2:dev", "device2:dev1"}
+	destsRemain["3"] = []string{"device2:dev", "device2:dev1", "device3:dev1"}
+	destsRemain["4"] = []string{"device2:dev", "device2:dev1", "device3:dev1"}
 
 	tests := []struct {
 		metaData           common.MetaData
@@ -904,6 +913,139 @@ func testObjectDestinationsAPI(store storage.Storage, t *testing.T) {
 				}
 			}
 		}
+
+		t.Logf("Start testing add object destinations")
+		err = store.DeleteNotificationRecords(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID, "", "")
+		if err != nil {
+			t.Errorf("DeleteNotificationRecords failed (objectID = %s). Error: %s", test.metaData.ObjectID, err.Error())
+		}
+		err = AddObjectDestinations(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID, destsToAdd)
+		if err != nil {
+			t.Errorf("AddObjectDestinations failed (objectID = %s). Error: %s", test.metaData.ObjectID, err.Error())
+		} else {
+			// The destinations should be: device3:dev1, device:dev1, device2:dev, device2:dev1
+			dests, err := GetObjectDestinationsStatus(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID)
+			if err != nil {
+				t.Errorf("GetObjectDestinationsStatus failed (objectID = %s). Error: %s", test.metaData.ObjectID, err.Error())
+			} else if len(dests) != len(destsToAdd) {
+				t.Errorf("GetObjectDestinationsStatus returned wrong number of destinations: %d instead of %d (objectID = %s)",
+					len(dests), len(destsToAdd), test.metaData.ObjectID)
+			} else if !destsEquals(dests, destsToAdd) {
+				t.Errorf("GetObjectDestinationsStatus returned list of destinations: %s, expect %s (objectID = %s)",
+					printDestinationsStatus(dests), destsToAdd, test.metaData.ObjectID)
+			} else {
+				// check notification record
+				// Look for update notification for device:dev1, device2:dev, device2:dev1
+				// destination4 is already existed, should not receive update notification
+				for _, destToAdd := range destsToAdd {
+					parts := strings.Split(destToAdd, ":")
+					destToAddDestType := parts[0]
+					destToAddDestID := parts[1]
+
+					notification, err := store.RetrieveNotificationRecord(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID,
+						destToAddDestType, destToAddDestID)
+					if err != nil {
+						t.Errorf("An error occurred in notification fetch (objectID = %s, destinationType = %s, destinationID = %s). Error: %s", test.metaData.ObjectID, destToAddDestType, destToAddDestID, err.Error())
+					} else {
+						if notification == nil {
+							if destToAddDestType == destination4.DestType && destToAddDestID == destination4.DestID || !test.metaData.NoData {
+								// It is expected
+							} else {
+								t.Errorf("No notification record (objectID = %s, destinationType = %s, destinationID = %s)", test.metaData.ObjectID, destToAddDestType, destToAddDestID)
+							}
+						} else if test.metaData.NoData == false {
+							t.Errorf("Notification record created for not ready to send object (objectID = %s, destinationType = %s, destinationID = %s)", test.metaData.ObjectID, destToAddDestType, destToAddDestID)
+						} else {
+							// destination4 is already existed, should not receive update notification
+							if destToAddDestType == destination4.DestType && destToAddDestID == destination4.DestID && test.expectedDestNumber == 4 && test.metaData.NoData == true {
+								t.Errorf("Notification record created for already existing destination (objectID = %s, destinationType = %s, destinationID = %s)", test.metaData.ObjectID, destToAddDestType, destToAddDestID)
+							} else if notification.Status != common.Update {
+								t.Errorf("Wrong notification status: %s instead of update (objectID = %s, destinationType = %s, destinationID = %s)", notification.Status, test.metaData.ObjectID, destToAddDestType, destToAddDestID)
+							}
+						}
+					}
+				}
+			}
+		}
+
+		t.Logf("Start testing delete object destinations")
+		err = UpdateObject(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID, test.metaData, nil)
+		if err != nil {
+			t.Errorf("UpdateObject failed to update (objectID = %s). Error: %s", test.metaData.ObjectID, err.Error())
+		}
+
+		dests, err = GetObjectDestinationsStatus(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID)
+		if err != nil {
+			t.Errorf("GetObjectDestinationsStatus failed (objectID = %s). Error: %s", test.metaData.ObjectID, err.Error())
+		} else if len(dests) != test.expectedDestNumber {
+			t.Errorf("GetObjectDestinationsStatus returned wrong number of destinations: %d instead of %d (objectID = %s)",
+				len(dests), test.expectedDestNumber, test.metaData.ObjectID)
+		}
+		t.Logf("Destination status before deleting: %s", printDestinationsStatus(dests))
+
+		t.Logf("Delete existing notification first")
+		err = store.DeleteNotificationRecords(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID, "", "")
+		if err != nil {
+			t.Errorf("DeleteNotificationRecords failed (objectID = %s). Error: %s", test.metaData.ObjectID, err.Error())
+		}
+
+		// Invalid case
+		err = DeleteObjectDestinations(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID, destsToDeleteToFail)
+		if err == nil {
+			t.Errorf("Expect to see error when destinations to delete contains invalid destination")
+		}
+		// notification should not have record for noType:noID
+		parts := strings.Split(destsToDeleteToFail[0], ":")
+		notification, err := store.RetrieveNotificationRecord(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID, parts[0], parts[1])
+		if err != nil {
+			t.Errorf("An error occurred fetch notification for deleted destination (objectID = %s, destinationType = %s, destinationID = %s). Error: %s", test.metaData.ObjectID, parts[0], parts[1], err.Error())
+		} else if notification != nil {
+			t.Errorf("Notification delete record should not be created for non-exist destination (objectID = %s, destinationType = %s, destinationID = %s)", test.metaData.ObjectID, parts[0], parts[1])
+		}
+
+		// Valid case
+		// NoData == true ----> should have delete notification
+		// NoData == false ----> should NOT have delete notification
+		// both cases, the destination should be deleted
+		err = DeleteObjectDestinations(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID, destsToDelete)
+		if err != nil {
+			t.Errorf("DeleteObjectDestinations failed (objectID = %s). Error: %s", test.metaData.ObjectID, err.Error())
+		} else {
+			// The destinations after deletion is: (destsRemain) "device2:dev", "device2:dev1", "device3:dev1"
+			// delete (destsToDelete) "device:dev1"
+			dests, err := GetObjectDestinationsStatus(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID)
+			if err != nil {
+				t.Errorf("GetObjectDestinationsStatus after deleting destinations failed (objectID = %s). Error: %s", test.metaData.ObjectID, err.Error())
+			} else if len(dests) != len(destsRemain[test.metaData.ObjectID]) {
+				t.Errorf("GetObjectDestinationsStatus returned wrong number of destinations: %d instead of %d (objectID = %s)",
+					len(dests), len(destsRemain[test.metaData.ObjectID]), test.metaData.ObjectID)
+			} else if !destsEquals(dests, destsRemain[test.metaData.ObjectID]) {
+				t.Errorf("GetObjectDestinationsStatus returned list of destinations: %s, expect %s (objectID = %s)",
+					printDestinationsStatus(dests), destsRemain[test.metaData.ObjectID], test.metaData.ObjectID)
+			} else {
+				// check notification record
+				// Look for delete notification for device:dev1(destination1)
+				notification, err := store.RetrieveNotificationRecord(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID, destination1.DestType, destination1.DestID)
+				if err != nil {
+					t.Errorf("An error occurred fetch notification for deleted destination (objectID = %s, destinationType = %s, destinationID = %s). Error: %s", test.metaData.ObjectID, destination1.DestType, destination1.DestID, err.Error())
+				} else {
+					if notification == nil {
+						if test.metaData.NoData == true {
+							t.Errorf("No delete notification record (objectID = %s, destinationType = %s, destinationID = %s)", test.metaData.ObjectID, destination1.DestType, destination1.DestID)
+						}
+					} else if test.metaData.NoData == false {
+						t.Errorf("Notification record created for not ready to send object (objectID = %s, destinationType = %s, destinationID = %s)", test.metaData.ObjectID, destination1.DestType, destination1.DestID)
+					} else {
+						if notification.Status != common.Delete {
+							t.Errorf("Wrong notification status: %s instead of delete (objectID = %s, destinationType = %s, destinationID = %s)", notification.Status, test.metaData.ObjectID, destination1.DestType, destination1.DestID)
+						}
+					}
+				}
+
+			}
+
+		}
+
 	}
 
 }
@@ -1168,4 +1310,42 @@ func testObjectWithPolicyAPI(store storage.Storage, t *testing.T) {
 		t.Errorf("Received %d objects with a destination policy. Expected %d.\n",
 			len(policyInfo), 1)
 	}
+}
+
+func destsEquals(dests1 []common.DestinationsStatus, dests2 []string) bool {
+	if len(dests1) != len(dests2) {
+		return false
+	}
+
+	var dest2Type string
+	var dest2Id string
+	found := false
+	for _, dest2 := range dests2 {
+		parts := strings.Split(dest2, ":")
+		dest2Type = parts[0]
+		dest2Id = parts[1]
+		found = false
+		for _, dest1 := range dests1 {
+			if dest1.DestType == dest2Type && dest1.DestID == dest2Id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+
+	return true
+}
+
+func printDestinationsStatus(dests []common.DestinationsStatus) string {
+	result := "["
+	record := ""
+	for _, dest := range dests {
+		record = fmt.Sprintf("{%s:%s:%s},", dest.DestType, dest.DestID, dest.Status)
+		result = result + record
+	}
+	res := fmt.Sprintf("%s]", result)
+	return res
 }
