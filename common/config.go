@@ -278,7 +278,7 @@ type Config struct {
 	// MongoSessionCacheSize specifies the number of MongoDB session copies to use
 	MongoSessionCacheSize int `env:"MONGO_SESSION_CACHE_SIZE"`
 
-	// MongoSleepTimeBetweenRetry specifies the time in seconds between each retry of updating data in mongodb
+	// MongoSleepTimeBetweenRetry specifies the time in milliseconds between each retry of updating data in mongodb
 	MongoSleepTimeBetweenRetry int `env:"MONGO_SLEEP_TIME_BETWEEN_RETRY"`
 
 	// DatabaseConnectTimeout specifies that the timeout in seconds of database connection attempts on startup
@@ -698,7 +698,7 @@ func SetDefaultConfig(config *Config) {
 	config.MongoCACertificate = ""
 	config.MongoAllowInvalidCertificates = false
 	config.MongoSessionCacheSize = 1
-	config.MongoSleepTimeBetweenRetry = 2
+	config.MongoSleepTimeBetweenRetry = 2000
 	config.DatabaseConnectTimeout = 300
 	config.StorageMaintenanceInterval = 30
 	config.ObjectActivationInterval = 30
