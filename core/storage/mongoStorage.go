@@ -105,7 +105,7 @@ type aclObject struct {
 
 const maxUpdateTries = 5
 
-var sleepInSec int
+var sleepInMS int
 
 // Init initializes the MongoStorage store
 func (store *MongoStorage) Init() common.SyncServiceError {
@@ -249,7 +249,7 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 
 	store.openFiles = make(map[string]*fileHandle)
 
-	sleepInSec = common.Configuration.MongoSleepTimeBetweenRetry
+	sleepInMS = common.Configuration.MongoSleepTimeBetweenRetry
 
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Successfully initialized mongo driver")
@@ -431,7 +431,7 @@ func (store *MongoStorage) UpdateObjectDestinations(orgID string, objectType str
 		}
 		if err := store.update(objects, bson.M{"_id": id, "last-update": result.LastUpdate}, query); err != nil {
 			if err == mgo.ErrNotFound {
-				time.Sleep(time.Duration(sleepInSec) * time.Second)
+				time.Sleep(time.Duration(sleepInMS) * time.Millisecond)
 				continue
 			}
 			return nil, "", nil, nil, &Error{fmt.Sprintf("Failed to update object's destinations. Error: %s.", err)}
@@ -463,7 +463,7 @@ func (store *MongoStorage) AddObjectDestinations(orgID string, objectType string
 		}
 		if err := store.update(objects, bson.M{"_id": id, "last-update": result.LastUpdate}, query); err != nil {
 			if err == mgo.ErrNotFound {
-				time.Sleep(time.Duration(sleepInSec) * time.Second)
+				time.Sleep(time.Duration(sleepInMS) * time.Millisecond)
 				continue
 			}
 			return nil, "", nil, &Error{fmt.Sprintf("Failed to add destinations to object's destinations list. Error: %s.", err)}
@@ -495,7 +495,7 @@ func (store *MongoStorage) DeleteObjectDestinations(orgID string, objectType str
 		}
 		if err := store.update(objects, bson.M{"_id": id, "last-update": result.LastUpdate}, query); err != nil {
 			if err == mgo.ErrNotFound {
-				time.Sleep(time.Duration(sleepInSec) * time.Second)
+				time.Sleep(time.Duration(sleepInMS) * time.Millisecond)
 				continue
 			}
 			return nil, "", nil, &Error{fmt.Sprintf("Failed to delete destinations from object's destinations list. Error: %s.", err)}
@@ -561,7 +561,7 @@ func (store *MongoStorage) UpdateObjectDeliveryStatus(status string, message str
 		}
 		if err := store.update(objects, bson.M{"_id": id, "last-update": result.LastUpdate}, query); err != nil {
 			if err == mgo.ErrNotFound {
-				time.Sleep(time.Duration(sleepInSec) * time.Second)
+				time.Sleep(time.Duration(sleepInMS) * time.Millisecond)
 				continue
 			}
 			return false, &Error{fmt.Sprintf("Failed to update object's destinations. Error: %s.", err)}
@@ -591,7 +591,7 @@ func (store *MongoStorage) UpdateObjectDelivering(orgID string, objectType strin
 				"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
 			}); err != nil {
 			if err == mgo.ErrNotFound {
-				time.Sleep(time.Duration(sleepInSec) * time.Second)
+				time.Sleep(time.Duration(sleepInMS) * time.Millisecond)
 				continue
 			}
 			return &Error{fmt.Sprintf("Failed to update object's destinations. Error: %s.", err)}
@@ -925,7 +925,7 @@ OUTER:
 								"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
 							}); err != nil {
 							if err == mgo.ErrNotFound {
-								time.Sleep(time.Duration(sleepInSec) * time.Second)
+								time.Sleep(time.Duration(sleepInMS) * time.Millisecond)
 								continue OUTER
 							}
 							return nil, &Error{fmt.Sprintf("Failed to update object's destinations. Error: %s.", err)}
@@ -1325,7 +1325,7 @@ func (store *MongoStorage) AddWebhook(orgID string, objectType string, url strin
 				result.ID = id
 				if err = store.insert(webhooks, result); err != nil {
 					if mgo.IsDup(err) {
-						time.Sleep(time.Duration(sleepInSec) * time.Second)
+						time.Sleep(time.Duration(sleepInMS) * time.Millisecond)
 						continue
 					}
 					return &Error{fmt.Sprintf("Failed to insert a webhook. Error: %s.", err)}
@@ -1348,7 +1348,7 @@ func (store *MongoStorage) AddWebhook(orgID string, objectType string, url strin
 				"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
 			}); err != nil {
 			if err == mgo.ErrNotFound {
-				time.Sleep(time.Duration(sleepInSec) * time.Second)
+				time.Sleep(time.Duration(sleepInMS) * time.Millisecond)
 				continue
 			}
 			return &Error{fmt.Sprintf("Failed to add a webhook. Error: %s.", err)}
@@ -1387,7 +1387,7 @@ func (store *MongoStorage) DeleteWebhook(orgID string, objectType string, url st
 				"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
 			}); err != nil {
 			if err == mgo.ErrNotFound {
-				time.Sleep(time.Duration(sleepInSec) * time.Second)
+				time.Sleep(time.Duration(sleepInMS) * time.Millisecond)
 				continue
 			}
 			return &Error{fmt.Sprintf("Failed to delete a webhook. Error: %s.", err)}
