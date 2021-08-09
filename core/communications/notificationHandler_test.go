@@ -43,6 +43,10 @@ func TestNotificationHandler(t *testing.T) {
 	}
 
 	common.Configuration.NodeType = common.CSS
+
+	DestReqQueue = NewDestinationRequestQueue(40)
+	defer DestReqQueue.Close()
+
 	if err := Store.StoreDestination(dest); err != nil {
 		t.Errorf("Failed to store destination. Error: %s", err.Error())
 	}

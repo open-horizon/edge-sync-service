@@ -421,7 +421,7 @@ func createDestinationCollectionID(orgID string, destType string, destID string)
 
 func resendNotification(notification common.Notification, retrieveReceived bool) bool {
 	s := notification.Status
-	return (s == common.Update || s == common.Consumed || s == common.Getdata || s == common.Delete || s == common.Deleted || s == common.Received ||
+	return (s == common.Update || s == common.Consumed || s == common.Getdata || s == common.Delete || s == common.Deleted || s == common.Received || s == common.Error ||
 		(retrieveReceived && (s == common.Data || s == common.ReceivedByDestination)))
 }
 

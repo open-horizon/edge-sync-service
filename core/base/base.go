@@ -43,6 +43,9 @@ var started bool
 
 var waitersForStartChannel chan chan int
 
+var objectQueue *communications.ObjectWorkQueue
+var destReqQueue *communications.DestinationRequestQueue
+
 func init() {
 	blockChannel = make(chan int, 1)
 	waitersForStartChannel = make(chan chan int, 40)
@@ -150,6 +153,19 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 	common.ResendAcked = true
 
 	common.InitObjectLocks()
+
+	// storage, lock should be setup before initialize objectQueue
+	queueBufferSize := common.Configuration.ObjectQueueBufferSize
+	objectQueue = communications.NewObjectWorkQueue(queueBufferSize)
+	if trace.IsLogging(logger.INFO) {
+		trace.Info("ObjectQueue initialzed with buffer size %d", queueBufferSize)
+	}
+
+	destReqQueue = communications.NewDestinationRequestQueue(queueBufferSize)
+	if trace.IsLogging(logger.INFO) {
+		trace.Info("DestinationRequestQueue initialzed with buffer size %d", queueBufferSize)
+	}
+	communications.DestReqQueue = destReqQueue
 
 	go func() {
 		common.GoRoutineStarted()
@@ -319,6 +335,26 @@ func Stop(quiesceTime int, unregisterSelf bool) {
 		}
 
 		stopHTTPServing()
+
+		if objectQueue != nil {
+			if trace.IsLogging(logger.INFO) {
+				trace.Info("Closing objectQueue...")
+			}
+			objectQueue.Close()
+			if trace.IsLogging(logger.INFO) {
+				trace.Info("ObjectQueue closed")
+			}
+		}
+
+		if destReqQueue != nil {
+			if trace.IsLogging(logger.INFO) {
+				trace.Info("Closing destReqQueue...")
+			}
+			destReqQueue.Close()
+			if trace.IsLogging(logger.INFO) {
+				trace.Info("DestReqQueue closed")
+			}
+		}
 
 		communication.StopCommunication()
 

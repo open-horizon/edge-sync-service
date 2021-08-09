@@ -112,6 +112,11 @@ type Config struct {
 	//     dummy - for the dummyAuthenticate Authentication handler
 	AuthenticationHandler string `env:"AUTHENTICATION_HANDLER"`
 
+	// Buffer size of Object Queue to send objects for notification handling
+	//  For the CSS, default value is 1000
+	//  For the ESS, default value is 2
+	ObjectQueueBufferSize uint64 `env:"OBJECT_QUEUE_BUFFER_SIZE"`
+
 	// CommunicationProtocol is a comma separated list of protocols to be used for communication between CSS and ESS
 	//  The elements of the list can be 'http', 'mqtt', and 'wiotp'
 	//  wiotp indicates MQTT communication via the Watson IoT Platform and mqtt indicates direct MQTT communication to a broker
@@ -195,6 +200,10 @@ type Config struct {
 	// Default value: none
 	HTTPCSSCACertificate string `env:"HTTP_CSS_CA_CERTIFICATE"`
 
+	// HTTPESSClientTimeout is to specify the http client timeout in seconds for ESS
+	// default is 120s
+	HTTPESSClientTimeout int `env:"HTTPESSClientTimeout"`
+
 	// LogLevel specifies the logging level in string format
 	LogLevel string `env:"LOG_LEVEL"`
 
@@ -231,6 +240,13 @@ type Config struct {
 	// ESS resends register notification with this interval
 	// Other notifications are resent with frequency equal to ResendInterval*6
 	ResendInterval int16 `env:"RESEND_INTERVAL"`
+
+	// ESSCallSPIRetryInterval specifies the frequence in seconds of resend failed updated notifications.
+	// Default is 2s
+	ESSCallSPIRetryInterval int32 `env:"ESS_CALL_SPI_RETRY_INTERVAL"`
+
+	// ESSSPIMaxRetry specifies the number of retry if ESS receives notification transparent error
+	ESSSPIMaxRetry int `env:"ESSSPIMaxRetry"`
 
 	// ESSPingInterval specifies the frequency in hours of ping messages that ESS sends to CSS
 	ESSPingInterval int16 `env:"ESS_PING_INTERVAL"`
@@ -651,6 +667,14 @@ func ValidateConfig() error {
 		}
 	}
 
+	if Configuration.ObjectQueueBufferSize == 0 {
+		if Configuration.NodeType == CSS {
+			Configuration.ObjectQueueBufferSize = 1000
+		} else {
+			Configuration.ObjectQueueBufferSize = 2
+		}
+	}
+
 	return nil
 }
 
@@ -684,7 +708,9 @@ func SetDefaultConfig(config *Config) {
 	config.MaxCompressedlLogTraceFilesNumber = 50
 	config.LogTraceDestination = "file"
 	config.LogTraceMaintenanceInterval = 60
-	config.ResendInterval = 5
+	config.ResendInterval = 10
+	config.ESSSPIMaxRetry = 1000
+	config.ESSCallSPIRetryInterval = 2
 	config.ESSPingInterval = 1
 	config.RemoveESSRegistrationTime = 30
 	config.MaxDataChunkSize = 120 * 1024
@@ -698,7 +724,7 @@ func SetDefaultConfig(config *Config) {
 	config.MongoCACertificate = ""
 	config.MongoAllowInvalidCertificates = false
 	config.MongoSessionCacheSize = 1
-	config.MongoSleepTimeBetweenRetry = 2000
+	config.MongoSleepTimeBetweenRetry = 4000
 	config.DatabaseConnectTimeout = 300
 	config.StorageMaintenanceInterval = 30
 	config.ObjectActivationInterval = 30
@@ -706,6 +732,7 @@ func SetDefaultConfig(config *Config) {
 	config.HTTPPollingInterval = 10
 	config.HTTPCSSUseSSL = false
 	config.HTTPCSSCACertificate = ""
+	config.HTTPESSClientTimeout = 120
 	config.MessagingGroupCacheExpiration = 60
 	config.ShutdownQuiesceTime = 60
 	config.ESSConsumedObjectsKept = 1000

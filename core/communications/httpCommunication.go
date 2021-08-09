@@ -60,7 +60,10 @@ func (communication *HTTP) StartCommunication() common.SyncServiceError {
 		http.Handle(pingURL, http.StripPrefix(pingURL, http.HandlerFunc(communication.handlePing)))
 		http.Handle(objectRequestURL, http.StripPrefix(objectRequestURL, http.HandlerFunc(communication.handleObjects)))
 	} else {
-		communication.httpClient = http.Client{Transport: &http.Transport{}}
+		communication.httpClient = http.Client{
+			Transport: &http.Transport{},
+			Timeout:   time.Second * time.Duration(common.Configuration.HTTPESSClientTimeout),
+		}
 		if common.Configuration.HTTPCSSUseSSL && len(common.Configuration.HTTPCSSCACertificate) > 0 {
 			var caFile string
 			if strings.HasPrefix(common.Configuration.HTTPCSSCACertificate, "/") {
@@ -146,10 +149,16 @@ func (communication *HTTP) HandleRegAck() {
 }
 
 func (communication *HTTP) createError(response *http.Response, action string) common.SyncServiceError {
-	message := fmt.Sprintf("Failed to %s. Received code: %d %s.", action, response.StatusCode, response.Status)
-	contents, err := ioutil.ReadAll(response.Body)
-	if err == nil {
-		message += " Error: " + string(contents)
+	message := ""
+	if response == nil {
+		message = fmt.Sprintf("Failed to %s. Received nil response.", action)
+	} else {
+		message = fmt.Sprintf("Failed to %s. Received code: %d %s.", action, response.StatusCode, response.Status)
+		contents, err := ioutil.ReadAll(response.Body)
+		if err == nil {
+			message += " Error: " + string(contents)
+		}
+
 	}
 	if log.IsLogging(logger.ERROR) {
 		log.Error(message)
@@ -239,6 +248,7 @@ func (communication *HTTP) SendNotificationMessage(notificationTopic string, des
 		trace.Debug("In SendNotificationMessage for %s. notificationTopic: %s destType: %s destID: %s\n", common.Configuration.NodeType, notificationTopic, destType, destID)
 	}
 
+	// CSS
 	if common.Configuration.NodeType == common.CSS {
 		// Create pending notification to be sent as a response to a GET request
 		var status string
@@ -265,83 +275,111 @@ func (communication *HTTP) SendNotificationMessage(notificationTopic string, des
 		return Store.UpdateNotificationRecord(notification)
 	}
 
+	// ESS
 	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, instanceID, dataID, notificationTopic)
 
 	var request *http.Request
+	var response *http.Response
 	var err error
-	if notificationTopic == common.Update || notificationTopic == common.Delete || notificationTopic == common.Deleted {
-		if metaData == nil {
-			return &Error{"No meta data"}
+
+	for i := 0; i < common.Configuration.ESSSPIMaxRetry; i++ {
+		if notificationTopic == common.Update || notificationTopic == common.Delete || notificationTopic == common.Deleted {
+			if metaData == nil {
+				return &Error{"No meta data"}
+			}
+			body, err := json.MarshalIndent(metaData, "", "  ")
+			if err != nil {
+				return &Error{"Failed to marshal payload. Error: " + err.Error()}
+			}
+
+			request, err = http.NewRequest("PUT", url, bytes.NewReader(body))
+			if err != nil {
+				return &Error{"Failed to create HTTP request. Error: " + err.Error()}
+			}
+			request.ContentLength = int64(len(body))
+		} else {
+			request, err = http.NewRequest("PUT", url, nil)
+			if err != nil {
+				return &Error{"Failed to create HTTP request. Error: " + err.Error()}
+			}
 		}
-		body, err := json.MarshalIndent(metaData, "", "  ")
-		if err != nil {
-			return &Error{"Failed to marshal payload. Error: " + err.Error()}
+		security.AddIdentityToSPIRequest(request, url)
+		request.Close = true
+
+		response, err = communication.requestWrapper.do(request)
+		if response != nil && response.Body != nil {
+			defer response.Body.Close()
 		}
 
-		request, err = http.NewRequest("PUT", url, bytes.NewReader(body))
-		if err != nil {
-			return &Error{"Failed to create HTTP request. Error: " + err.Error()}
-		}
-		request.ContentLength = int64(len(body))
-	} else {
-		request, err = http.NewRequest("PUT", url, nil)
-		if err != nil {
-			return &Error{"Failed to create HTTP request. Error: " + err.Error()}
-		}
-	}
-	security.AddIdentityToSPIRequest(request, url)
-	request.Close = true
+		if IsTransportError(response, err) {
+			respCode := 0
+			errMsg := ""
+			if response != nil {
+				respCode = response.StatusCode
+			}
+			if err != nil {
+				errMsg = err.Error()
+			}
 
-	response, err := communication.requestWrapper.do(request)
-	if response != nil && response.Body != nil {
-		defer response.Body.Close()
-	}
-	if err != nil {
-		return &Error{"Failed to send HTTP request. Error: " + err.Error()}
-	}
-	if response.StatusCode == http.StatusNoContent {
-		switch notificationTopic {
-		case common.Update:
-			// Push the data
-			if metaData.Link == "" && !metaData.NoData && !metaData.MetaOnly {
-				if err = communication.pushData(metaData); err != nil {
-					return err
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("In SendNotificationMessage, receive transport error %s from topic: (%d) %s, response code is %d, maxRetry: %d, retry...", errMsg, i, notificationTopic, respCode, common.Configuration.ESSSPIMaxRetry)
+			}
+
+			time.Sleep(time.Duration(common.Configuration.ESSCallSPIRetryInterval) * time.Second)
+			continue
+		} else if err != nil {
+			return &Error{"Failed to send HTTP request. Error: " + err.Error()}
+		} else if response == nil {
+			return &Error{"Received nil response from HTTP request. Error: " + err.Error()}
+		} else {
+			if response.StatusCode == http.StatusNoContent {
+				switch notificationTopic {
+				case common.Update:
+					// Push the data
+					if metaData.Link == "" && !metaData.NoData && !metaData.MetaOnly {
+						if err = communication.pushData(metaData); err != nil {
+							return err
+						}
+					}
+					// Mark updated
+					if err = handleObjectUpdated(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID,
+						destType, destID, instanceID, dataID); err != nil {
+						return err
+					}
+				case common.Delete:
+					return handleAckDelete(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID,
+						destType, destID, instanceID, dataID)
+				case common.Deleted:
+					return handleAckObjectDeleted(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID,
+						destType, destID, instanceID)
+				case common.Consumed:
+					return handleAckConsumed(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID, dataID)
+				case common.Received:
+					return handleAckObjectReceived(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID, dataID)
 				}
+				return nil
+			} else if response.StatusCode == http.StatusConflict {
+				if trace.IsLogging(logger.TRACE) {
+					trace.Trace("A notification of type %s was ignored by the other side (object %s:%s, instance id = %d)\n", notificationTopic,
+						metaData.ObjectType, metaData.ObjectID, instanceID)
+				}
+				// We don't resend ignored notifications
+				switch notificationTopic {
+				case common.Deleted:
+					return handleAckObjectDeleted(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID)
+				case common.Consumed:
+					return handleAckConsumed(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID, dataID)
+				case common.Received:
+					return handleAckObjectReceived(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID, dataID)
+				}
+				return nil
 			}
-			// Mark updated
-			if err = handleObjectUpdated(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID,
-				destType, destID, instanceID, dataID); err != nil {
-				return err
-			}
-		case common.Delete:
-			return handleAckDelete(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID,
-				destType, destID, instanceID, dataID)
-		case common.Deleted:
-			return handleAckObjectDeleted(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID,
-				destType, destID, instanceID)
-		case common.Consumed:
-			return handleAckConsumed(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID, dataID)
-		case common.Received:
-			return handleAckObjectReceived(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID, dataID)
 		}
-		return nil
-	} else if response.StatusCode == http.StatusConflict {
-		if trace.IsLogging(logger.TRACE) {
-			trace.Trace("A notification of type %s was ignored by the other side (object %s:%s, instance id = %d)\n", notificationTopic,
-				metaData.ObjectType, metaData.ObjectID, instanceID)
-		}
-		// We don't resend ignored notifications
-		switch notificationTopic {
-		case common.Deleted:
-			return handleAckObjectDeleted(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID)
-		case common.Consumed:
-			return handleAckConsumed(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID, dataID)
-		case common.Received:
-			return handleAckObjectReceived(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID, instanceID, dataID)
-		}
-		return nil
 	}
-
+	// reach here if still see 504 timeout
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In SendNotificationMessage, out of retry for %s %s %s", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+	}
 	return communication.createError(response, "send notification "+notificationTopic)
 }
 
@@ -600,8 +638,34 @@ func (communication *HTTP) GetData(metaData common.MetaData, offset int64) commo
 		trace.Trace("In http.GetData %s %s", metaData.ObjectType, metaData.ObjectID)
 	}
 
+	// For debugging
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In http.GetData, retrieve notification %s, %s. %s, %s, %s", metaData.DestID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID)
+
+		if n, err := Store.RetrieveNotificationRecord(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID); err != nil {
+			trace.Debug("Error when retrieve notification record, %s", err.Error())
+		} else if n == nil {
+			trace.Debug("In GetData: nil notifications")
+		} else {
+			trace.Debug("In GetData: notification status %s", n.Status)
+		}
+		trace.Debug("In http.GetData, updating notification %s, %s. %s, %s, %s to getdata status", metaData.DestID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID)
+	}
+
 	if err := updateGetDataNotification(metaData, metaData.OriginType, metaData.OriginID, offset); err != nil {
 		return err
+	}
+
+	// now the ESS notification status is "getdata"
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("Checking notifications after updating notification status")
+		if n, err := Store.RetrieveNotificationRecord(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID); err != nil {
+			trace.Debug("Error when retrieve notification record, %s\n", err.Error())
+		} else if n == nil {
+			trace.Debug("Nil notifications")
+		} else {
+			trace.Debug("Notification status is %s after updating", n.Status)
+		}
 	}
 
 	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, metaData.DataID, common.Data)
@@ -623,7 +687,8 @@ func (communication *HTTP) GetData(metaData common.MetaData, offset int64) commo
 		return &common.NotFound{}
 	}
 	if response.StatusCode != http.StatusOK {
-		return &notificationHandlerError{"Error in GetData: failed to receive data from the other side"}
+		msg := fmt.Sprintf("Error in GetData: failed to receive data from the other side. Error code: %d, ", response.StatusCode)
+		return &notificationHandlerError{msg}
 	}
 
 	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
@@ -633,8 +698,8 @@ func (communication *HTTP) GetData(metaData common.MetaData, offset int64) commo
 	if common.IsValidHashAlgorithm(metaData.HashAlgorithm) && metaData.PublicKey != "" && metaData.Signature != "" {
 		dataVf = dataVerifier.NewDataVerifier(metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature)
 		if dataVerified, err := dataVf.VerifyDataSignature(response.Body, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI); !dataVerified || err != nil {
-			if trace.IsLogging(logger.ERROR) {
-				trace.Error("Failed to verify data for object %s %s, remove temp data\n", metaData.ObjectType, metaData.ObjectID)
+			if log.IsLogging(logger.ERROR) {
+				log.Error("Failed to verify data for object %s %s, remove temp data\n", metaData.ObjectType, metaData.ObjectID)
 			}
 			dataVf.RemoveTempData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI)
 			common.ObjectLocks.Unlock(lockIndex)
@@ -664,18 +729,27 @@ func (communication *HTTP) GetData(metaData common.MetaData, offset int64) commo
 		}
 	}
 
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("Updating ESS object status to completelyReceived for %s %s %s", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+	}
 	if err := Store.UpdateObjectStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, common.CompletelyReceived); err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
 		return &Error{fmt.Sprintf("Error in GetData: %s\n", err)}
 	}
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("ESS object status updated to completelyReceived for %s %s %s", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+	}
 
 	handleDataReceived(metaData)
 
-	notificationsInfo, err := PrepareObjectStatusNotification(metaData, common.Received)
 	common.ObjectLocks.Unlock(lockIndex)
+
+	notificationsInfo, err := PrepareObjectStatusNotification(metaData, common.Received)
 	if err != nil {
 		return err
 	}
+
+	// Send "received" notification
 	if err := SendNotifications(notificationsInfo); err != nil {
 		return err
 	}
@@ -743,18 +817,28 @@ func (communication *HTTP) Poll() bool {
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Polled the CSS, received %d objects.\n", len(payload))
 	}
+
 	for _, message := range payload {
 		switch message.Type {
 		case common.Update:
-			if err = handleUpdate(message.MetaData, 1); err != nil && !isIgnoredByHandler(err) {
-				if log.IsLogging(logger.ERROR) {
-					log.Error("Failed to handle update. Error: %s\n", err)
-				}
-				if common.IsNotFound(err) {
-					deleteObjectInfo("", "", "", message.MetaData.OriginType, message.MetaData.OriginID,
-						&message.MetaData, true)
-				} else if err = communication.SendErrorMessage(err, &message.MetaData, true); err != nil && log.IsLogging(logger.ERROR) {
-					log.Error("Failed to send error message. Error: %s\n", err)
+			if err = handleUpdate(message.MetaData, 1); err != nil {
+				if isIgnoredByHandler(err) {
+					if log.IsLogging(logger.DEBUG) {
+						log.Error("Ignore handler error, ignore for %s %s %s %d", message.MetaData.DestOrgID, message.MetaData.ObjectType, message.MetaData.ObjectID, message.MetaData.InstanceID)
+					}
+				} else {
+					if log.IsLogging(logger.ERROR) {
+						log.Error("Failed to handle update for %s %s %s %d. Error: %s\n", message.MetaData.DestOrgID, message.MetaData.ObjectType, message.MetaData.ObjectID, message.MetaData.InstanceID, err)
+					}
+					if common.IsNotFound(err) {
+						if log.IsLogging(logger.DEBUG) {
+							log.Error("Not found error, delete object info for %s %s %s %d", message.MetaData.DestOrgID, message.MetaData.ObjectType, message.MetaData.ObjectID, message.MetaData.InstanceID)
+						}
+						deleteObjectInfo("", "", "", message.MetaData.OriginType, message.MetaData.OriginID,
+							&message.MetaData, true)
+					} else if err = communication.SendErrorMessage(err, &message.MetaData, true); err != nil && log.IsLogging(logger.ERROR) {
+						log.Error("Failed to send error message. Error: %s\n", err)
+					}
 				}
 			}
 		case common.Consumed:
@@ -892,7 +976,6 @@ func (communication *HTTP) handleObjects(writer http.ResponseWriter, request *ht
 		case common.Received:
 			err = handleObjectReceived(orgID, objectType, objectID, destType, destID, instanceID, dataID)
 		case common.Feedback:
-
 			payload := feedbackMessage{}
 			if err = json.NewDecoder(request.Body).Decode(&payload); err == nil {
 				err = handleFeedback(orgID, objectType, objectID, destType, destID, instanceID, dataID, payload.Code, payload.RetryInterval, payload.Reason)
@@ -946,6 +1029,9 @@ func (communication *HTTP) handleObjects(writer http.ResponseWriter, request *ht
 			writer.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In handleObjects: GET request: %s", action)
+		}
 		communication.handleGetData(orgID, objectType, objectID, destType, destID, instanceID, dataID, writer, request)
 	} else {
 		writer.WriteHeader(http.StatusMethodNotAllowed)
@@ -972,8 +1058,8 @@ func (communication *HTTP) handlePutData(orgID string, objectType string, object
 	if common.IsValidHashAlgorithm(metaData.HashAlgorithm) && metaData.PublicKey != "" && metaData.Signature != "" {
 		dataVf = dataVerifier.NewDataVerifier(metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature)
 		if dataVerified, err := dataVf.VerifyDataSignature(request.Body, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI); !dataVerified || err != nil {
-			if trace.IsLogging(logger.ERROR) {
-				trace.Error("Failed to verify data for object %s %s, remove temp data\n", metaData.ObjectType, metaData.ObjectID)
+			if log.IsLogging(logger.ERROR) {
+				log.Error("Failed to verify data for object %s %s, remove temp data\n", metaData.ObjectType, metaData.ObjectID)
 			}
 			dataVf.RemoveTempData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI)
 			common.ObjectLocks.Unlock(lockIndex)
@@ -1002,8 +1088,9 @@ func (communication *HTTP) handlePutData(orgID string, objectType string, object
 
 	if metaData, err := Store.RetrieveObject(orgID, objectType, objectID); err == nil && metaData != nil {
 		handleDataReceived(*metaData)
-		notificationsInfo, err := PrepareObjectStatusNotification(*metaData, common.Received)
 		common.ObjectLocks.Unlock(lockIndex)
+		notificationsInfo, err := PrepareObjectStatusNotification(*metaData, common.Received)
+
 		if err != nil {
 			return err
 		}
@@ -1021,9 +1108,47 @@ func (communication *HTTP) handlePutData(orgID string, objectType string, object
 
 func (communication *HTTP) handleGetData(orgID string, objectType string, objectID string,
 	destType string, destID string, instanceID int64, dataID int64, writer http.ResponseWriter, request *http.Request) {
+
+	updateNotificationRecord := false
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("Handling object get data of %s %s %s %s \n", objectType, objectID, destType, destID)
+	}
 	lockIndex := common.HashStrings(orgID, objectType, objectID)
 	common.ObjectLocks.Lock(lockIndex)
 	defer common.ObjectLocks.Unlock(lockIndex)
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Trace("Handling object get data, retrieve notification record for %s %s %s %s %s\n", orgID, objectType, objectID, destType, destID)
+	}
+	notification, err := Store.RetrieveNotificationRecord(orgID, objectType, objectID, destType, destID)
+	if err != nil {
+		SendErrorResponse(writer, err, "", 0)
+	} else if notification == nil {
+		err = &Error{"Error in handleGetData: no notification to update."}
+		SendErrorResponse(writer, err, "", 0)
+	} else if notification.InstanceID != instanceID {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("Handling object get data, notification.InstanceID(%d) != metaData,InstanceID(%d), notification status(%s) for %s %s %s %s %s\n", notification.InstanceID, instanceID, notification.Status, orgID, objectType, objectID, destType, destID)
+		}
+
+		err = &ignoredByHandler{"Error in handleGetData: notification.InstanceID != instanceID or notification status is not updated."}
+		SendErrorResponse(writer, err, "", 0)
+	} else if notification.Status == common.Updated || notification.Status == common.Update || notification.Status == common.UpdatePending {
+		//  notification.InstanceID == instanceID
+		updateNotificationRecord = true
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In handleGetData: notification (status: %s) is updated status,  for %s %s %s %s %s, set updateNotificationRecord to %t \n", notification.Status, orgID, objectType, objectID, destType, destID, updateNotificationRecord)
+		}
+	} else {
+		// notification status "error" cannot update notification status to "data"
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In handleGetData: notification (status: %s) is not in updated status,  for %s %s %s %s %s, set updateNotificationRecord to %t \n", notification.Status, orgID, objectType, objectID, destType, destID, updateNotificationRecord)
+		}
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Trace("Handling object get data, retrieve object data for %s %s\n", objectType, objectID)
+	}
 
 	if dataReader, err := Store.RetrieveObjectData(orgID, objectType, objectID); err != nil {
 		SendErrorResponse(writer, err, "", 0)
@@ -1039,9 +1164,30 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 			if err := Store.CloseDataReader(dataReader); err != nil {
 				SendErrorResponse(writer, err, "", 0)
 			}
-			notification := common.Notification{ObjectID: objectID, ObjectType: objectType,
-				DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.Data, InstanceID: instanceID, DataID: dataID}
-			Store.UpdateNotificationRecord(notification)
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("Handling object get data, update notification for %s %s %s %s, status: %s\n", objectType, objectID, destType, destID, common.Data)
+			}
+			// update notification only if current notification.InstanceID == metadata.InstanceID && current notification.status == "updated"
+			if updateNotificationRecord {
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Debug("Handling object get data, update notification status to data for %s %s %s %s %s\n", orgID, objectType, objectID, destType, destID)
+				}
+				notification := common.Notification{ObjectID: objectID, ObjectType: objectType,
+					DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.Data, InstanceID: instanceID, DataID: dataID}
+				if err = Store.UpdateNotificationRecord(notification); err != nil {
+					if log.IsLogging(logger.ERROR) {
+						log.Error("Handling object get data, failed to update notification for %s %s %s %s with status: %s\n", objectType, objectID, destType, destID, common.Data)
+					}
+				} else {
+					if trace.IsLogging(logger.DEBUG) {
+						log.Debug("Handling object get data, update notification for %s %s %s %s with status %s is done\n", objectType, objectID, destType, destID, common.Data)
+					}
+				}
+			} else {
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Debug("Handling object get data, return without update notification status to data for %s %s %s %s %s, set updateNotificationRecord to %t \n", orgID, objectType, objectID, destType, destID, updateNotificationRecord)
+				}
+			}
 		}
 	}
 }
@@ -1164,39 +1310,123 @@ func (communication *HTTP) SendFeedbackMessage(code int, retryInterval int32, re
 		return nil
 	}
 
+	// code: 500, retry interval: 0, reason: "Error in GetData: failed to receive data from the other side"
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Trace("SendFeedbackMessage: update notification record status to %s for object %s %s %s\n", common.ReceiverError, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+	}
+
+	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+	common.ObjectLocks.Lock(lockIndex)
+	notification := common.Notification{ObjectID: metaData.ObjectID, ObjectType: metaData.ObjectType,
+		DestOrgID: metaData.DestOrgID, DestID: metaData.OriginID, DestType: metaData.OriginType,
+		Status: common.ReceiverError, InstanceID: metaData.InstanceID, DataID: metaData.DataID}
+
+	// Store the notification records in storage as part of the object
+	if err := Store.UpdateNotificationRecord(notification); err != nil {
+		common.ObjectLocks.Unlock(lockIndex)
+		if log.IsLogging(logger.ERROR) {
+			log.Error("In SendFeedbackMessage, failed to update notification record status to %s\n", common.ReceiverError)
+		}
+		return err
+	}
+
+	common.ObjectLocks.Unlock(lockIndex)
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("SendFeedbackMessage: call feedback SPI %s %s %s instanceID: %d, dataID: %d\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, metaData.DataID)
+	}
 	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, metaData.DataID, common.Feedback)
 
 	var request *http.Request
+	var response *http.Response
+	var err error
 
 	body, err := json.MarshalIndent(feedbackMessage{code, retryInterval, reason}, "", "  ")
 	if err != nil {
 		return &Error{"Failed to marshal payload. Error: " + err.Error()}
 	}
 
-	request, err = http.NewRequest("PUT", url, bytes.NewReader(body))
+	for i := 0; i < common.Configuration.ESSSPIMaxRetry; i++ {
+		request, err = http.NewRequest("PUT", url, bytes.NewReader(body))
+		if err != nil {
+			return &Error{"Failed to create HTTP request. Error: " + err.Error()}
+		}
+		request.ContentLength = int64(len(body))
+
+		security.AddIdentityToSPIRequest(request, url)
+		response, err = communication.requestWrapper.do(request)
+		if response != nil && response.Body != nil {
+			defer response.Body.Close()
+		}
+
+		if IsTransportError(response, err) {
+			respCode := 0
+			errMsg := ""
+			if response != nil {
+				respCode = response.StatusCode
+			}
+			if err != nil {
+				errMsg = err.Error()
+			}
+
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("In SendFeedbackMessage: i: %d, receive %d from feedback spi, error: %s \n", i, respCode, errMsg)
+			}
+			if n, _ := Store.RetrieveNotificationRecord(notification.DestOrgID, notification.ObjectType, notification.ObjectID,
+				notification.DestType, notification.DestID); n != nil && n.Status == common.ReceiverError {
+				// retry /feedback when ESS doesn't receive new changes,
+				err = communication.createError(response, "send feedback")
+				time.Sleep(time.Duration(common.Configuration.ESSCallSPIRetryInterval) * time.Second)
+				continue
+			} else {
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Debug("In SendFeedbackMessage: receive %d from feedback spi for %s %s %s, but notification is nil or status is not receiverError \n", response.StatusCode, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+					if n == nil {
+						trace.Debug("notification is nil\n")
+					} else if n.Status != common.ReceiverError {
+						trace.Debug("notification status (%s) is not receiverError\n", n.Status)
+					}
+				}
+
+				err = communication.createError(response, "send feedback")
+				return err
+			}
+		} else if err != nil {
+			return &Error{"Failed to send HTTP request. Error: " + err.Error()}
+		} else if response == nil {
+			return &Error{"Received nil response from feedback HTTP request. Error: " + err.Error()}
+		} else if response.StatusCode == http.StatusNoContent {
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("In SendFeedbackMessage, i: %d, received %d from feedback spi \n", i, response.StatusCode)
+			}
+			return nil
+		} else {
+			// receive 409, ...
+			err = communication.createError(response, "send feedback")
+			return err
+		}
+	}
+
 	if err != nil {
-		return &Error{"Failed to create HTTP request. Error: " + err.Error()}
-	}
-	request.ContentLength = int64(len(body))
-
-	security.AddIdentityToSPIRequest(request, url)
-
-	response, err := communication.requestWrapper.do(request)
-	if response != nil && response.Body != nil {
-		defer response.Body.Close()
-	}
-	if err != nil {
-		return &Error{"Failed to send HTTP request. Error: " + err.Error()}
-	}
-	if response.StatusCode == http.StatusNoContent {
-		return nil
+		// reach here if still receive 504 and out of retry
+		if log.IsLogging(logger.ERROR) {
+			log.Error("SendFeedbackMessage out of retry for %s %s %s\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+		}
+		return err
 	}
 
-	return communication.createError(response, "send feedback")
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("SendFeedbackMessage return with no error %s %s %s\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+	}
+	return nil
 }
 
 // SendErrorMessage sends an error message from the ESS to the CSS or from the CSS to the ESS
 func (communication *HTTP) SendErrorMessage(err common.SyncServiceError, metaData *common.MetaData, sendToOrigin bool) common.SyncServiceError {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In SendErrorMessage for %s, %s, %s, %s, %s, error is: %s\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestType, metaData.DestID, err.Error())
+	}
+
 	if common.Configuration.NodeType != common.ESS {
 		// In HTTP the CSS sends error message in HTTP response
 		return nil

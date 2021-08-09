@@ -3,6 +3,7 @@ package communications
 import (
 	"bytes"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/open-horizon/edge-sync-service/common"
@@ -108,6 +109,8 @@ var Store storage.Storage
 // Comm is the selected communications struct
 var Comm Communicator
 
+var DestReqQueue *DestinationRequestQueue
+
 // SendErrorResponse common code to send HTTP error codes
 func SendErrorResponse(writer http.ResponseWriter, err error, message string, statusCode int) {
 	if statusCode == 0 {
@@ -140,6 +143,35 @@ func SendErrorResponse(writer http.ResponseWriter, err error, message string, st
 		buffer.WriteString("\n")
 		writer.Write(buffer.Bytes())
 	}
+}
+
+func IsTransportError(pResp *http.Response, err error) bool {
+	if err != nil {
+		if strings.Contains(err.Error(), ": EOF") {
+			return true
+		}
+
+		l_error_string := strings.ToLower(err.Error())
+		if strings.Contains(l_error_string, "time") && strings.Contains(l_error_string, "out") {
+			return true
+		} else if strings.Contains(l_error_string, "connection") && (strings.Contains(l_error_string, "refused") || strings.Contains(l_error_string, "reset")) {
+			return true
+		}
+	}
+
+	if pResp != nil {
+		if pResp.StatusCode == http.StatusBadGateway {
+			// 502: bad gateway error
+			return true
+		} else if pResp.StatusCode == http.StatusGatewayTimeout {
+			// 504: gateway timeout
+			return true
+		} else if pResp.StatusCode == http.StatusServiceUnavailable {
+			//503: service unavailable
+			return true
+		}
+	}
+	return false
 }
 
 func destinationExists(orgID string, destType string, destID string) bool {
