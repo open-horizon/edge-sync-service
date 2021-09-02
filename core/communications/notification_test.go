@@ -256,7 +256,7 @@ func TestActivateObjects(t *testing.T) {
 		t.Errorf("RetrieveObjects returned %d objects instead of 1\n", len(objects))
 	}
 
-	time.Sleep(4 * time.Second)
+	time.Sleep(3 * time.Second)
 
 	ActivateObjects()
 

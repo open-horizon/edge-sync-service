@@ -1414,6 +1414,7 @@ func testAPIServerSetup(nodeType string, storageType string) string {
 	}
 
 	common.Configuration.NodeType = nodeType
+	objectQueue = communications.NewObjectWorkQueue(40)
 	return ""
 }
 

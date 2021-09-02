@@ -561,6 +561,20 @@ type NotificationInfo struct {
 	MetaData          *MetaData
 }
 
+type ObjectInQueue struct {
+	NotificationAction string // Notification status and type
+	NotificationType   string
+	Object             MetaData
+	Destinations       []StoreDestinationStatus //use this list if NotificationType is common.TypeDestination
+}
+
+type DestinationRequestInQueue struct {
+	Action      string
+	Status      string
+	Object      MetaData
+	Destination Destination
+}
+
 // ACLentry contains ACL information about each user
 type ACLentry struct {
 	Username    string
@@ -611,6 +625,7 @@ const (
 	Feedback              = "feedback"
 	Error                 = "error"
 	Ping                  = "ping"
+	ReceiverError         = "receiverError"
 )
 
 // Indication whether the object has been delivered to the destination
@@ -684,6 +699,17 @@ const (
 	RemoveAction   = "remove"
 	RegisterAction = "register"
 	DeleteAction   = "delete"
+)
+
+// DestinationUpdateRequestInQueue Action
+const (
+// Update = "update"
+)
+
+// NotificationType of object sent to objectWorkQueue
+const (
+	TypeDestination = "destination"
+	TypeObject      = "object"
 )
 
 // Resend flag options

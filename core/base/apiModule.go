@@ -244,8 +244,6 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 
 	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 	apiObjectLocks.Lock(lockIndex)
-	defer apiObjectLocks.Unlock(lockIndex)
-
 	common.ObjectLocks.Lock(lockIndex)
 
 	if metaData.NoData {
@@ -268,6 +266,7 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 				dataVf.RemoveTempData(orgID, objectType, objectID, "")
 
 				common.ObjectLocks.Unlock(lockIndex)
+				apiObjectLocks.Unlock(lockIndex)
 				return err
 			}
 			dataVf.RemoveTempData(orgID, objectType, objectID, "")
@@ -278,9 +277,17 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 	}
 	metaData.ChunkSize = common.Configuration.MaxDataChunkSize
 
+	_, existingObjStatus, _ := store.RetrieveObjectAndStatus(orgID, objectType, objectID)
+	if existingObjStatus != "" && existingObjStatus != common.ReadyToSend && existingObjStatus != common.NotReadyToSend {
+		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
+		return &common.InvalidRequest{Message: "Can't update object of the receiving side"}
+	}
+
 	deletedDestinations, err := store.StoreObject(metaData, data, status)
 	if err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
 		return err
 	}
 
@@ -288,6 +295,7 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 
 	if status == common.NotReadyToSend || metaData.Inactive {
 		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
 		return nil
 	}
 
@@ -295,32 +303,40 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 	updatedMetaData, err := store.RetrieveObject(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 	if err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
 		return err
 	}
 
-	var deleteNotificationsInfo []common.NotificationInfo
-	if len(deletedDestinations) != 0 {
-		deleteNotificationsInfo, err = communications.PrepareNotificationsForDestinations(*updatedMetaData, deletedDestinations, common.Delete)
-		if err != nil {
-			common.ObjectLocks.Unlock(lockIndex)
-			return err
-		}
-	}
-
-	updateNotificationsInfo, err := communications.PrepareObjectNotifications(*updatedMetaData)
 	common.ObjectLocks.Unlock(lockIndex)
+	apiObjectLocks.Unlock(lockIndex)
+	//var deleteNotificationsInfo []common.NotificationInfo
+	if len(deletedDestinations) != 0 {
+		// Should be in antoher thread
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In UpdateObject. Send object to objectQueue for delete%s %s\n", objectType, objectID)
+		}
 
-	if err != nil {
-		return err
-	}
+		objectInQueue := common.ObjectInQueue{NotificationAction: common.Delete, NotificationType: common.TypeDestination, Object: *updatedMetaData, Destinations: deletedDestinations}
+		objectQueue.SendObjectToQueue(objectInQueue)
 
-	if deleteNotificationsInfo != nil {
-		if err := communications.SendNotifications(deleteNotificationsInfo); err != nil {
-			return err
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In UpdateObject. Continue to updateDestination %s %s\n", objectType, objectID)
 		}
 	}
 
-	return communications.SendNotifications(updateNotificationsInfo)
+	// Should be in antoher thread
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In UpdateObject. Send object to objectQueue for update%s %s\n", objectType, objectID)
+	}
+
+	objectInQueue := common.ObjectInQueue{NotificationAction: common.Update, NotificationType: common.TypeObject, Object: *updatedMetaData, Destinations: []common.StoreDestinationStatus{}}
+	objectQueue.SendObjectToQueue(objectInQueue)
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In UpdateObject. Return response for UpdateObject %s %s\n", objectType, objectID)
+	}
+
+	return nil
 }
 
 // GetObjectStatus sends the status of the object to the app
@@ -518,25 +534,27 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 
 	lockIndex := common.HashStrings(orgID, objectType, objectID)
 	apiObjectLocks.Lock(lockIndex)
-	defer apiObjectLocks.Unlock(lockIndex)
-
 	common.ObjectLocks.Lock(lockIndex)
 
 	metaData, status, err := store.RetrieveObjectAndStatus(orgID, objectType, objectID)
 	if err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
 		return false, err
 	}
 	if metaData == nil {
 		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
 		return false, nil
 	}
 	if status != common.ReadyToSend && status != common.NotReadyToSend {
 		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
 		return false, &common.InvalidRequest{Message: "Can't update data of the receiving side"}
 	}
 	if metaData.NoData {
 		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
 		return false, &common.InvalidRequest{Message: "Can't update data, the NoData flag is set to true"}
 	}
 
@@ -554,6 +572,7 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 			}
 			dataVf.RemoveTempData(orgID, objectType, objectID, "")
 			common.ObjectLocks.Unlock(lockIndex)
+			apiObjectLocks.Unlock(lockIndex)
 			return false, &common.InvalidRequest{Message: "Failed to verify and store data, Error: " + err.Error()}
 		}
 		if trace.IsLogging(logger.DEBUG) {
@@ -567,11 +586,13 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 		if err := dataVf.StoreVerifiedData(orgID, objectType, objectID, ""); err != nil {
 			dataVf.RemoveTempData(orgID, objectType, objectID, "")
 			common.ObjectLocks.Unlock(lockIndex)
+			apiObjectLocks.Unlock(lockIndex)
 			return false, err
 		}
 	} else {
 		if exists, err := store.StoreObjectData(orgID, objectType, objectID, dataReader); err != nil || !exists {
 			common.ObjectLocks.Unlock(lockIndex)
+			apiObjectLocks.Unlock(lockIndex)
 			return false, err
 		}
 	}
@@ -579,6 +600,7 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 	if metaData.SourceDataURI != "" {
 		if err = store.UpdateObjectSourceDataURI(orgID, objectType, objectID, ""); err != nil {
 			common.ObjectLocks.Unlock(lockIndex)
+			apiObjectLocks.Unlock(lockIndex)
 			return false, err
 		}
 	}
@@ -589,25 +611,31 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 	updatedMetaData, err = store.RetrieveObject(orgID, objectType, objectID)
 	if err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
 		return false, err
 	}
 
 	if updatedMetaData.Inactive {
 		// Don't send inactive objects to the other side
 		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
 		return true, nil
 	}
 
-	notificationsInfo, err := communications.PrepareObjectNotifications(*updatedMetaData)
-	common.ObjectLocks.Unlock(lockIndex)
-	if err != nil {
-		return true, err
+	// Should be in antoher thread
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In PutObjectData. Send object to objectQueue %s %s\n", objectType, objectID)
 	}
 
+	common.ObjectLocks.Unlock(lockIndex)
+	apiObjectLocks.Unlock(lockIndex)
+	objectInQueue := common.ObjectInQueue{NotificationAction: common.Update, NotificationType: common.TypeObject, Object: *updatedMetaData, Destinations: []common.StoreDestinationStatus{}}
+	objectQueue.SendObjectToQueue(objectInQueue)
+
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("In PutObjectData. done with storing data for object %s %s\n", objectType, objectID)
+		trace.Debug("In PutObjectData. Return response for PutObjectData %s %s\n", objectType, objectID)
 	}
-	return true, communications.SendNotifications(notificationsInfo)
+	return true, nil
 }
 
 // ObjectConsumed is used when an app indicates that it consumed the object
@@ -662,8 +690,9 @@ func ObjectConsumed(orgID string, objectType string, objectID string) common.Syn
 			return err
 		}
 
-		notificationsInfo, err := communications.PrepareObjectStatusNotification(*metaData, common.Consumed)
 		common.ObjectLocks.Unlock(lockIndex)
+		notificationsInfo, err := communications.PrepareObjectStatusNotification(*metaData, common.Consumed)
+
 		if err != nil {
 			return err
 		}
@@ -814,8 +843,8 @@ func ObjectDeleted(userID string, orgID string, objectType string, objectID stri
 			}
 			common.ObjectLocks.Unlock(lockIndex)
 		} else if c == 0 {
-			notificationsInfo, err := communications.PrepareObjectStatusNotification(*metaData, common.Deleted)
 			common.ObjectLocks.Unlock(lockIndex)
+			notificationsInfo, err := communications.PrepareObjectStatusNotification(*metaData, common.Deleted)
 			if err != nil {
 				return err
 			}
@@ -914,17 +943,17 @@ func DeleteObject(orgID string, objectType string, objectID string) common.SyncS
 
 	lockIndex := common.HashStrings(orgID, objectType, objectID)
 	apiObjectLocks.Lock(lockIndex)
-	defer apiObjectLocks.Unlock(lockIndex)
-
 	common.ObjectLocks.Lock(lockIndex)
 
 	metaData, status, err := store.RetrieveObjectAndStatus(orgID, objectType, objectID)
 	if err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
 		return err
 	}
 	if metaData == nil {
 		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
 		return &common.InvalidRequest{Message: "Object not found"}
 	}
 	if status != common.NotReadyToSend && status != common.ReadyToSend {
@@ -932,31 +961,43 @@ func DeleteObject(orgID string, objectType string, objectID string) common.SyncS
 		// ESS is not allowed to remove such objects
 		if common.Configuration.NodeType == common.ESS {
 			common.ObjectLocks.Unlock(lockIndex)
+			apiObjectLocks.Unlock(lockIndex)
 			return &common.InvalidRequest{Message: "Can't delete object on the receiving side for ESS"}
 		}
 		// CSS removes them without notifying the other side
 		err = storage.DeleteStoredObject(store, *metaData)
 		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
 		return err
 	}
 
 	if err := storage.DeleteStoredData(store, *metaData); err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
 		return err
 	}
 
 	if err := store.MarkObjectDeleted(orgID, objectType, objectID); err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
 		return err
 	}
+	common.ObjectLocks.Unlock(lockIndex)
+	apiObjectLocks.Unlock(lockIndex)
 
 	// Notify the receivers of the object that it was deleted
-	notificationsInfo, err := communications.PrepareDeleteNotifications(*metaData)
-	common.ObjectLocks.Unlock(lockIndex)
-	if err != nil {
-		return err
+	// Should be in antoher thread
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In DeleteObject. Send object to objectQueue %s %s\n", objectType, objectID)
 	}
-	return communications.SendNotifications(notificationsInfo)
+
+	objectInQueue := common.ObjectInQueue{NotificationAction: common.Delete, NotificationType: common.TypeObject, Object: *metaData, Destinations: []common.StoreDestinationStatus{}}
+	objectQueue.SendObjectToQueue(objectInQueue)
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In DeleteObject. Return response for DeleteObject %s %s\n", objectType, objectID)
+	}
+	return nil
 }
 
 // ActivateObject activates an inactive object
@@ -970,39 +1011,50 @@ func ActivateObject(orgID string, objectType string, objectID string) common.Syn
 
 	lockIndex := common.HashStrings(orgID, objectType, objectID)
 	apiObjectLocks.Lock(lockIndex)
-	defer apiObjectLocks.Unlock(lockIndex)
 
 	common.ObjectLocks.Lock(lockIndex)
 
 	metaData, status, err := store.RetrieveObjectAndStatus(orgID, objectType, objectID)
 	if err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
 		return err
 	}
 	if metaData == nil {
 		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
 		return &common.InvalidRequest{Message: "Object not found"}
 	}
 	if status != common.NotReadyToSend && status != common.ReadyToSend {
 		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
 		return &common.InvalidRequest{Message: "Can't activate object on the receiving side"}
 	}
 
 	if err := store.ActivateObject(orgID, objectType, objectID); err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
 		return err
 	}
 
 	if status == common.ReadyToSend {
-		notificationsInfo, err := communications.PrepareObjectNotifications(*metaData)
-		common.ObjectLocks.Unlock(lockIndex)
-		if err != nil {
-			return err
+		// Should be in antoher thread
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In ActivateObject. Send object to objectQueue %s %s\n", objectType, objectID)
 		}
-		return communications.SendNotifications(notificationsInfo)
+		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
+		objectInQueue := common.ObjectInQueue{NotificationAction: common.Update, NotificationType: common.TypeObject, Object: *metaData, Destinations: []common.StoreDestinationStatus{}}
+		objectQueue.SendObjectToQueue(objectInQueue)
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In ActivateObject. Return response for ActivateObject %s %s\n", objectType, objectID)
+		}
+		return nil
 	}
 
 	common.ObjectLocks.Unlock(lockIndex)
+	apiObjectLocks.Unlock(lockIndex)
 	return nil
 }
 
@@ -1189,32 +1241,33 @@ func UpdateObjectDestinations(orgID string, objectType string, objectID string, 
 		return err
 	}
 
-	var deleteNotificationsInfo, updateNotificationsInfo []common.NotificationInfo
+	apiObjectLocks.Unlock(lockIndex)
+
 	if len(deletedDestinations) != 0 {
-		deleteNotificationsInfo, err = communications.PrepareNotificationsForDestinations(*metaData, deletedDestinations, common.Delete)
-		if err != nil {
-			apiObjectLocks.Unlock(lockIndex)
-			return err
+		// Should be in antoher thread
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In UpdateObjectDestinations. Send object to objectQueue for delete%s %s\n", objectType, objectID)
+		}
+
+		objectInQueue := common.ObjectInQueue{NotificationAction: common.Delete, NotificationType: common.TypeDestination, Object: *metaData, Destinations: deletedDestinations}
+		objectQueue.SendObjectToQueue(objectInQueue)
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In UpdateObjectDestinations. Continue to add destinations\n")
 		}
 	}
 
 	if len(addedDestinations) != 0 && status == common.ReadyToSend {
-		updateNotificationsInfo, err = communications.PrepareNotificationsForDestinations(*metaData, addedDestinations, common.Update)
-		if err != nil {
-			apiObjectLocks.Unlock(lockIndex)
-			return err
+		// Should be in antoher thread
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In UpdateObjectDestinations. Send object to objectQueue for update%s %s\n", objectType, objectID)
 		}
-	}
 
-	apiObjectLocks.Unlock(lockIndex)
-	if len(deleteNotificationsInfo) != 0 {
-		if err := communications.SendNotifications(deleteNotificationsInfo); err != nil {
-			return err
-		}
-	}
-	if len(updateNotificationsInfo) != 0 {
-		if err := communications.SendNotifications(updateNotificationsInfo); err != nil {
-			return err
+		objectInQueue := common.ObjectInQueue{NotificationAction: common.Update, NotificationType: common.TypeDestination, Object: *metaData, Destinations: addedDestinations}
+		objectQueue.SendObjectToQueue(objectInQueue)
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In UpdateObjectDestinations. Continue to return response %s %s\n", objectType, objectID)
 		}
 	}
 
@@ -1249,21 +1302,21 @@ func AddObjectDestinations(orgID string, objectType string, objectID string, des
 		return err
 	}
 
-	var updateNotificationsInfo []common.NotificationInfo
-	if len(addedDestinations) != 0 && status == common.ReadyToSend {
-		updateNotificationsInfo, err = communications.PrepareNotificationsForDestinations(*metaData, addedDestinations, common.Update)
-		if err != nil {
-			apiObjectLocks.Unlock(lockIndex)
-			return err
-		}
-	}
 	apiObjectLocks.Unlock(lockIndex)
+	if len(addedDestinations) != 0 && status == common.ReadyToSend {
+		// Should be in antoher thread
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In AddObjectDestinations. Send object to objectQueue for update%s %s\n", objectType, objectID)
+		}
 
-	if len(updateNotificationsInfo) != 0 {
-		if err := communications.SendNotifications(updateNotificationsInfo); err != nil {
-			return err
+		objectInQueue := common.ObjectInQueue{NotificationAction: common.Update, NotificationType: common.TypeDestination, Object: *metaData, Destinations: addedDestinations}
+		objectQueue.SendObjectToQueue(objectInQueue)
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In AddObjectDestinations. Continue to return response %s %s\n", objectType, objectID)
 		}
 	}
+
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In add destinations, added destination for object %s %s: \n", objectType, objectID)
 		for _, added := range addedDestinations {
@@ -1290,19 +1343,19 @@ func DeleteObjectDestinations(orgID string, objectType string, objectID string, 
 		return err
 	}
 
-	var deleteNotificationsInfo []common.NotificationInfo
-	if len(deletedDestinations) != 0 {
-		deleteNotificationsInfo, err = communications.PrepareNotificationsForDestinations(*metaData, deletedDestinations, common.Delete)
-		if err != nil {
-			apiObjectLocks.Unlock(lockIndex)
-			return err
-		}
-	}
 	apiObjectLocks.Unlock(lockIndex)
 
-	if len(deleteNotificationsInfo) != 0 {
-		if err := communications.SendNotifications(deleteNotificationsInfo); err != nil {
-			return err
+	if len(deletedDestinations) != 0 {
+		// Should be in antoher thread
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In DeleteObjectDestinations. Send object to objectQueue for delete%s %s\n", objectType, objectID)
+		}
+
+		objectInQueue := common.ObjectInQueue{NotificationAction: common.Delete, NotificationType: common.TypeDestination, Object: *metaData, Destinations: deletedDestinations}
+		objectQueue.SendObjectToQueue(objectInQueue)
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In DeleteObjectDestinations. Continue to return response %s %s\n", objectType, objectID)
 		}
 	}
 

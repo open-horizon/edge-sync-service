@@ -32,6 +32,7 @@ func TestHTTPCommUpdatedObjects(t *testing.T) {
 	}
 	defer Store.Stop()
 	defer security.Stop()
+	defer DestReqQueue.Close()
 
 	destination := common.Destination{DestOrgID: "myorg000", DestID: "dev1", DestType: "httpDevice", Communication: common.HTTPProtocol}
 	if err := Store.StoreDestination(destination); err != nil {
@@ -130,6 +131,7 @@ func TestHttpCommCssMisc(t *testing.T) {
 	}
 	defer Store.Stop()
 	defer security.Stop()
+	defer DestReqQueue.Close()
 
 	destination := common.Destination{DestOrgID: common.Configuration.OrgID, DestType: "httpDevice", DestID: "dev1", Communication: common.HTTPProtocol}
 	if err := Store.StoreDestination(destination); err != nil {
@@ -200,6 +202,7 @@ func TestHTTPCommEssSendObjects(t *testing.T) {
 	}
 	defer Store.Stop()
 	defer security.Stop()
+	defer DestReqQueue.Close()
 
 	testObjects := []httpTestEssSendObjectInfo{
 		{common.MetaData{ObjectID: "1", ObjectType: "type2", DestOrgID: "myorg000", OriginID: "dev1", OriginType: "httpDevice"},
@@ -288,6 +291,7 @@ func TestEssHTTPComm(t *testing.T) {
 		t.Errorf(status)
 	}
 	defer Store.Stop()
+	defer DestReqQueue.Close()
 
 	ctx.subTest = "register"
 	err = httpComm.Register()
@@ -584,6 +588,9 @@ func testHTTPCommSetup(nodeType string) string {
 		return fmt.Sprintf("Failed to start HTTP communication. Error: %s", err.Error())
 	}
 	Comm = httpComm
+
+	DestReqQueue = NewDestinationRequestQueue(40)
+
 	return ""
 }
 

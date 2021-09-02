@@ -1739,7 +1739,8 @@ func (store *MongoStorage) RetrieveNotifications(orgID string, destType string, 
 					bson.M{"notification.status": common.Consumed},
 					bson.M{"notification.status": common.Getdata},
 					bson.M{"notification.status": common.Delete},
-					bson.M{"notification.status": common.Deleted}}}}}
+					bson.M{"notification.status": common.Deleted},
+					bson.M{"notification.status": common.Error}}}}}
 	} else {
 		if retrieveReceived {
 			query = bson.M{"$or": []bson.M{
