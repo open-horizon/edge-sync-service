@@ -545,7 +545,7 @@ func (store *BoltStorage) RetrieveObjectsWithDestinationPolicyUpdatedSince(orgID
 }
 
 // RetrieveObjectsWithFilters returns the list of all othe objects that meet the given conditions
-func (store *BoltStorage) RetrieveObjectsWithFilters(orgID string, destinationPolicy *bool, dpServiceOrgID string, dpServiceName string, dpPropertyName string, since int64, objectType string, objectID string, destinationType string, destinationID string, noData *bool, expirationTimeBefore string) ([]common.MetaData, common.SyncServiceError) {
+func (store *BoltStorage) RetrieveObjectsWithFilters(orgID string, destinationPolicy *bool, dpServiceOrgID string, dpServiceName string, dpPropertyName string, since int64, objectType string, objectID string, destinationType string, destinationID string, noData *bool, expirationTimeBefore string, deleted *bool) ([]common.MetaData, common.SyncServiceError) {
 	result := make([]common.MetaData, 0)
 	function := func(object boltObject) {
 		if orgID == object.Meta.DestOrgID {
@@ -654,6 +654,10 @@ func (store *BoltStorage) RetrieveObjectsWithFilters(orgID string, destinationPo
 				if err != nil || boltObjectExpirationTime.After(queryExpirationTimeBefore) {
 					return
 				}
+			}
+
+			if deleted != nil && *deleted != object.Meta.Deleted {
+				return
 			}
 
 			// if expirationTimeBefore is not satisfy, return

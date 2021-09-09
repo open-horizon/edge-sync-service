@@ -1824,8 +1824,8 @@
             "in": "query"
           },
           {
-            "type": "boolean",
-            "description": "Fetch the objects with noData marked to true",
+            "type": "string",
+            "description": "Specify true or false. Fetch the objects with noData marked to true/false. If not specified, object will not be filtered by \"noData\" field",
             "name": "noData",
             "in": "query"
           },
@@ -1833,6 +1833,12 @@
             "type": "string",
             "description": "Fetch the objects with expiration time before specified timestamp in RFC3339 format",
             "name": "expirationTimeBefore",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "Specify true or false. Fetch the object with deleted marked to true/false. If not specified, object will not be filtered by \"deleted\" field",
+            "name": "deleted",
             "in": "query"
           }
         ],
