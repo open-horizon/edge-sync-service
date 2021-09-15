@@ -766,7 +766,7 @@ func (store *MongoStorage) RetrieveObjectsWithDestinationPolicyUpdatedSince(orgI
 }
 
 // RetrieveObjectsWithFilters returns the list of all the objects that meet the given conditions
-func (store *MongoStorage) RetrieveObjectsWithFilters(orgID string, destinationPolicy *bool, dpServiceOrgID string, dpServiceName string, dpPropertyName string, since int64, objectType string, objectID string, destinationType string, destinationID string, noData *bool, expirationTimeBefore string) ([]common.MetaData, common.SyncServiceError) {
+func (store *MongoStorage) RetrieveObjectsWithFilters(orgID string, destinationPolicy *bool, dpServiceOrgID string, dpServiceName string, dpPropertyName string, since int64, objectType string, objectID string, destinationType string, destinationID string, noData *bool, expirationTimeBefore string, deleted *bool) ([]common.MetaData, common.SyncServiceError) {
 	result := []object{}
 
 	query := bson.M{
@@ -830,6 +830,10 @@ func (store *MongoStorage) RetrieveObjectsWithFilters(orgID string, destinationP
 			"$lte": expirationTimeBefore,
 		}
 		query["metadata.expiration"] = subquery
+	}
+
+	if deleted != nil {
+		query["metadata.deleted"] = *deleted
 	}
 
 	if err := store.fetchAll(objects, query, nil, &result); err != nil {

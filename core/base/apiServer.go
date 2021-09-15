@@ -857,12 +857,17 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 //   type: string
 // - name: noData
 //   in: query
-//   description: Fetch the objects with noData marked to true
+//   description: Specify true or false. Fetch the objects with noData marked to true/false. If not specified, object will not be filtered by "noData" field
 //   required: false
-//   type: boolean
+//   type: string
 // - name: expirationTimeBefore
 //   in: query
 //   description: Fetch the objects with expiration time before specified timestamp in RFC3339 format
+//   required: false
+//   type: string
+// - name: deleted
+//   in: query
+//   description: Specify true or false. Fetch the object with deleted marked to true/false. If not specified, object will not be filtered by "deleted" field
 //   required: false
 //   type: string
 //
@@ -993,14 +998,25 @@ func handleListObjectsWithFilters(orgID string, writer http.ResponseWriter, requ
 		}
 	}
 
+	var deleted *bool
+	deletedString := request.URL.Query().Get("deleted")
+	if deletedString != "" {
+		deletedValue, err := strconv.ParseBool(deletedString)
+		deleted = &deletedValue
+		if err != nil {
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+	}
+
 	var objects []common.MetaData
 	var err error
 
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("In handleListObjectsWithFilters, get objects with %s %s %s %s %s %d %s %s %s %s %s %s\n", orgID, destinationPolicyString, dpServiceOrgID, dpServiceName, dpPropertyName, since, objectType, objectID, destinationType, destinationID, noDataString, expirationTimeBeforeString)
+		trace.Debug("In handleListObjectsWithFilters, get objects with %s %s %s %s %s %d %s %s %s %s %s %s %s\n", orgID, destinationPolicyString, dpServiceOrgID, dpServiceName, dpPropertyName, since, objectType, objectID, destinationType, destinationID, noDataString, expirationTimeBeforeString, deletedString)
 	}
 
-	if objects, err = ListObjectsWithFilters(orgID, destinationPolicy, dpServiceOrgID, dpServiceName, dpPropertyName, since, objectType, objectID, destinationType, destinationID, noData, expirationTimeBeforeString); err != nil {
+	if objects, err = ListObjectsWithFilters(orgID, destinationPolicy, dpServiceOrgID, dpServiceName, dpPropertyName, since, objectType, objectID, destinationType, destinationID, noData, expirationTimeBeforeString, deleted); err != nil {
 		communications.SendErrorResponse(writer, err, "Failed to fetch the list of objects with given conditions. Error: ", 0)
 	} else {
 		if len(objects) == 0 {
