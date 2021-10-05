@@ -96,6 +96,7 @@ func (communication *HTTP) StartCommunication() common.SyncServiceError {
 
 func (communication *HTTP) startPolling() {
 	configuredInterval := int(common.Configuration.HTTPPollingInterval) * 1000
+	fmt.Println(fmt.Sprintf("doug interval %v", configuredInterval))
 	go func() {
 		common.GoRoutineStarted()
 		keepRunning := true
@@ -116,7 +117,8 @@ func (communication *HTTP) startPolling() {
 				} else if interval < configuredInterval {
 					interval += configuredInterval / 10
 				}
-				communication.httpPollTimer = time.NewTimer(time.Millisecond * time.Duration(interval))
+				communication.httpPollTimer = time.NewTimer(time.Millisecond * time.Duration(interval)) 
+				fmt.Println(fmt.Sprintf("doug new interval %v", communication.httpPollTimer))
 
 			case <-communication.httpPollStopChannel:
 				keepRunning = false
