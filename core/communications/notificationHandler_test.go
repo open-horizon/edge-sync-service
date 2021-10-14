@@ -12,6 +12,7 @@ import (
 func TestNotificationHandler(t *testing.T) {
 
 	common.InitObjectLocks()
+	common.InitObjectDownloadSemaphore()
 
 	if common.Registered {
 		t.Errorf("Registered flag is true")
@@ -41,6 +42,8 @@ func TestNotificationHandler(t *testing.T) {
 	if err := Comm.StartCommunication(); err != nil {
 		t.Errorf("Failed to start communication. Error: %s", err.Error())
 	}
+
+	common.Configuration.CommunicationProtocol = common.MQTTProtocol
 
 	common.Configuration.NodeType = common.CSS
 
@@ -235,7 +238,7 @@ func TestNotificationHandler(t *testing.T) {
 				t.Errorf("Wrong status: %s instead of completely received (objectID = %s)", storedStatus, row.metaData.ObjectID)
 			}
 			// Check data
-			storedDataReader, err := Store.RetrieveObjectData(row.metaData.DestOrgID, row.metaData.ObjectType, row.metaData.ObjectID)
+			storedDataReader, err := Store.RetrieveObjectData(row.metaData.DestOrgID, row.metaData.ObjectType, row.metaData.ObjectID, false)
 			if err != nil {
 				t.Errorf("Failed to fetch object's data (objectID = %s). Error: %s", row.metaData.ObjectID, err.Error())
 			} else {
@@ -304,7 +307,7 @@ func TestNotificationHandler(t *testing.T) {
 		}
 
 		// There should be no data
-		dataReader, _ := Store.RetrieveObjectData(row.metaData.DestOrgID, row.metaData.ObjectType, row.metaData.ObjectID)
+		dataReader, _ := Store.RetrieveObjectData(row.metaData.DestOrgID, row.metaData.ObjectType, row.metaData.ObjectID, false)
 		if dataReader != nil {
 			t.Errorf("Deleted object has data (objectID = %s)", row.metaData.ObjectID)
 		}

@@ -1403,6 +1403,7 @@ func testAPIServerSetup(nodeType string, storageType string) string {
 	}
 
 	common.InitObjectLocks()
+	common.InitObjectDownloadSemaphore()
 
 	security.SetAuthentication(&security.TestAuthenticate{})
 	security.Store = store

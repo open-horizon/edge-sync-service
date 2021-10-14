@@ -22,10 +22,10 @@ func TestDataURI(t *testing.T) {
 	}
 
 	for _, row := range tests {
-		if err := AppendData(row.uri, bytes.NewReader(row.data), row.dataLength, row.offset, 0, true, true); err != nil {
+		if _, err := AppendData(row.uri, bytes.NewReader(row.data), row.dataLength, row.offset, 0, true, true, false); err != nil {
 			t.Errorf("Failed to store in data uri. Error: %s", err.Error())
 		} else {
-			if dataReader, err := GetData(row.uri); err != nil {
+			if dataReader, err := GetData(row.uri, false); err != nil {
 				t.Errorf("Failed to read from data uri. Error: %s", err.Error())
 			} else {
 				storedData := make([]byte, 100)
@@ -56,7 +56,7 @@ func TestDataURI(t *testing.T) {
 		if written, err := StoreData(row.uri, bytes.NewReader(row.data), row.dataLength); err != nil {
 			t.Errorf("Failed to store in data uri. Error: %s", err.Error())
 		} else {
-			if dataReader, err := GetData(row.uri); err != nil {
+			if dataReader, err := GetData(row.uri, false); err != nil {
 				t.Errorf("Failed to read from data uri. Error: %s", err.Error())
 			} else {
 				if written != int64(row.dataLength) {
@@ -84,10 +84,10 @@ func TestDataURI(t *testing.T) {
 				}
 			}
 		}
-		if err = DeleteStoredData(row.uri); err != nil {
+		if err = DeleteStoredData(row.uri, false); err != nil {
 			t.Errorf("Failed to delete stored data. Error: %s", err.Error())
 		} else {
-			if dataReader, err := GetData(row.uri); err == nil && dataReader != nil {
+			if dataReader, err := GetData(row.uri, false); err == nil && dataReader != nil {
 				t.Errorf("Read from deleted data uri")
 			}
 		}
@@ -116,7 +116,7 @@ func TestDataURI(t *testing.T) {
 			isLastChunk = true
 		}
 		for i, chunk := range row.chunks {
-			if err := AppendData(row.uri, bytes.NewReader(chunk), row.lengths[i], row.offsets[i], int64(len(row.wholeData)), isFirstChunk, isLastChunk); err != nil {
+			if _, err := AppendData(row.uri, bytes.NewReader(chunk), row.lengths[i], row.offsets[i], int64(len(row.wholeData)), isFirstChunk, isLastChunk, false); err != nil {
 				t.Errorf("Failed to store in data uri. Error: %s", err.Error())
 			}
 			isFirstChunk = false
@@ -124,7 +124,7 @@ func TestDataURI(t *testing.T) {
 				isLastChunk = true
 			}
 		}
-		if dataReader, err := GetData(row.uri); err != nil {
+		if dataReader, err := GetData(row.uri, false); err != nil {
 			t.Errorf("Failed to read from data uri. Error: %s", err.Error())
 		} else {
 			storedData := make([]byte, 100)
@@ -174,7 +174,7 @@ func TestDataURI(t *testing.T) {
 			}
 		}
 
-		if err = DeleteStoredData(row.uri); err != nil {
+		if err = DeleteStoredData(row.uri, false); err != nil {
 			t.Errorf("Failed to delete %s. Error: %s", row.uri, err)
 		}
 	}

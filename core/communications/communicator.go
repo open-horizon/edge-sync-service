@@ -2,6 +2,7 @@ package communications
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -54,6 +55,9 @@ type Communicator interface {
 	// GetData requests data to be sent from the CSS to the ESS or from the ESS to the CSS
 	GetData(metaData common.MetaData, offset int64) common.SyncServiceError
 
+	// PushData uploade data to from ESS to CSS
+	PushData(metaData *common.MetaData, offset int64) common.SyncServiceError
+
 	// SendData sends data from the CSS to the ESS or from the ESS to the CSS
 	SendData(orgID string, destType string, destID string, message []byte, chunked bool) common.SyncServiceError
 
@@ -83,6 +87,22 @@ type Error struct {
 
 func (e *Error) Error() string {
 	return e.message
+}
+
+type dataTransportTimeOutError struct {
+	message string
+}
+
+func (e *dataTransportTimeOutError) Error() string {
+	if e.message == "" {
+		return "Download timeout"
+	}
+	return e.message
+}
+
+func isDataTransportTimeoutError(err error) bool {
+	_, ok := err.(*dataTransportTimeOutError)
+	return ok
 }
 
 // ignoredByHandler error is returned if a notification is ignored by the notification handler
@@ -115,6 +135,8 @@ var DestReqQueue *DestinationRequestQueue
 func SendErrorResponse(writer http.ResponseWriter, err error, message string, statusCode int) {
 	if statusCode == 0 {
 		switch err.(type) {
+		case *dataTransportTimeOutError:
+			statusCode = http.StatusGatewayTimeout
 		case *common.InvalidRequest:
 			statusCode = http.StatusBadRequest
 		case *storage.Error:
@@ -147,7 +169,11 @@ func SendErrorResponse(writer http.ResponseWriter, err error, message string, st
 
 func IsTransportError(pResp *http.Response, err error) bool {
 	if err != nil {
-		if strings.Contains(err.Error(), ": EOF") {
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			return true
+		}
+
+		if strings.Contains(err.Error(), " EOF") {
 			return true
 		}
 
@@ -167,7 +193,10 @@ func IsTransportError(pResp *http.Response, err error) bool {
 			// 504: gateway timeout
 			return true
 		} else if pResp.StatusCode == http.StatusServiceUnavailable {
-			//503: service unavailable
+			// 503: service unavailable
+			return true
+		} else if pResp.StatusCode == http.StatusTooManyRequests {
+			// 429: too many requests
 			return true
 		}
 	}

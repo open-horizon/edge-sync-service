@@ -847,7 +847,7 @@ func testStorageObjectData(storageType string, t *testing.T) {
 
 		// Check stored data
 		dataReader, err := store.RetrieveObjectData(test.metaData.DestOrgID,
-			test.metaData.ObjectType, test.metaData.ObjectID)
+			test.metaData.ObjectType, test.metaData.ObjectID, false)
 		if err != nil {
 			t.Errorf("Failed to retrieve object's data' (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
 		} else if dataReader == nil {
@@ -968,11 +968,11 @@ func testStorageObjectData(storageType string, t *testing.T) {
 
 		// Append data
 		if test.data != nil {
-			if err := store.AppendObjectData(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID,
-				bytes.NewReader(test.data), uint32(len(test.data)), 0, test.metaData.ObjectSize, true, false); err != nil {
+			if _, err := store.AppendObjectData(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID,
+				bytes.NewReader(test.data), uint32(len(test.data)), 0, test.metaData.ObjectSize, true, false, false); err != nil {
 				t.Errorf("AppendObjectData failed (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
-			} else if err := store.AppendObjectData(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID,
-				bytes.NewReader(test.newData), uint32(len(test.newData)), int64(len(test.data)), test.metaData.ObjectSize, false, true); err != nil {
+			} else if _, err := store.AppendObjectData(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID,
+				bytes.NewReader(test.newData), uint32(len(test.newData)), int64(len(test.data)), test.metaData.ObjectSize, false, true, false); err != nil {
 				t.Errorf("AppendObjectData failed (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
 			} else {
 				expectedData := append(test.data, test.newData...)

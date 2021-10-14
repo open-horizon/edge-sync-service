@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eclipse/paho.mqtt.golang"
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/eclipse/paho.mqtt.golang/packets"
 	"github.com/open-horizon/edge-sync-service/common"
 	"github.com/open-horizon/edge-sync-service/core/leader"
@@ -1134,8 +1134,16 @@ func (communication *MQTT) GetData(metaData common.MetaData, offset int64) commo
 		messageJSON, false); err != nil {
 		return err
 	}
+	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+	common.ObjectLocks.Lock(lockIndex)
 	err = updateGetDataNotification(metaData, metaData.OriginType, metaData.OriginID, offset)
+	common.ObjectLocks.Unlock(lockIndex)
 	return err
+}
+
+// PushData uploade data to from ESS to CSS
+func (communication *MQTT) PushData(metaData *common.MetaData, offset int64) common.SyncServiceError {
+	return nil
 }
 
 // SendData sends data from the CSS to the ESS or from the ESS to the CSS
