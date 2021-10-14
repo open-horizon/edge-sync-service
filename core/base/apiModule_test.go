@@ -32,7 +32,6 @@ func setupDB(dbType string) {
 	} else if dbType == common.Bolt {
 		dir, _ := os.Getwd()
 		common.Configuration.PersistenceRootPath = dir + "/persist"
-		fmt.Printf("common.Configuration.PersistenceRootPath: %s\n", common.Configuration.PersistenceRootPath)
 		boltStore := &storage.BoltStorage{}
 		boltStore.Cleanup(true)
 		store = boltStore
@@ -109,6 +108,7 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 	dataVerifier.Store = store
 
 	common.InitObjectLocks()
+	common.InitObjectDownloadSemaphore()
 
 	dests := []string{"device:dev1", "device2:dev", "device2:dev1"}
 
@@ -422,7 +422,7 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 		}
 
 		// Get data
-		dataReader, err := store.RetrieveObjectData(row.orgID, row.objectType, row.objectID)
+		dataReader, err := store.RetrieveObjectData(row.orgID, row.objectType, row.objectID, false)
 		if err != nil {
 			t.Errorf("An error occurred in data fetch (objectID = %s). Error: %s", row.objectID, err.Error())
 		}
@@ -619,7 +619,7 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 			key := fmt.Sprintf("%s/%s/%s", row.orgID, row.objectType, row.objectID)
 			metaInstanceIdMap[key] = instance
 
-			ok, err := PutObjectData(row.orgID, row.objectType, row.objectID, bytes.NewReader(row.newData))
+			ok, err := PutObjectAllData(row.orgID, row.objectType, row.objectID, bytes.NewReader(row.newData))
 			if err != nil {
 				if !row.metaData.NoData {
 					t.Errorf("Failed to update object's data (objectID = %s). Error: %s", row.objectID, err.Error())
@@ -697,7 +697,6 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 									}
 
 								}
-								//fmt.Printf("for object %s/%s/%s, notification.InstanceID: %d, instance: %d\n", row.orgID, row.objectType, row.objectID, notification.InstanceID, instance)
 								if row.expectedStatus == common.ReadyToSend && notification.InstanceID <= instance {
 									if i == MAX_RETRY-1 {
 										t.Errorf("Wrong instance ID in notification after data update: %d should be greater than %d (objectID = %s)",
@@ -807,6 +806,7 @@ func testESSObjectDeletedAPI(store storage.Storage, t *testing.T) {
 	communications.Store = store
 	dataVerifier.Store = store
 	common.InitObjectLocks()
+	common.InitObjectDownloadSemaphore()
 
 	if err := store.Init(); err != nil {
 		t.Errorf("Failed to initialize storage driver. Error: %s\n", err.Error())
@@ -902,6 +902,7 @@ func TestObjectDestinationsAPI(t *testing.T) {
 func testObjectDestinationsAPI(store storage.Storage, t *testing.T) {
 	communications.Store = store
 	common.InitObjectLocks()
+	common.InitObjectDownloadSemaphore()
 
 	if err := store.Init(); err != nil {
 		t.Errorf("Failed to initialize storage driver. Error: %s\n", err.Error())
@@ -1330,6 +1331,7 @@ func testObjectWithPolicyAPI(store storage.Storage, t *testing.T) {
 
 	communications.Store = store
 	common.InitObjectLocks()
+	common.InitObjectDownloadSemaphore()
 
 	if err := store.Init(); err != nil {
 		t.Errorf("Failed to initialize storage driver. Error: %s\n", err.Error())
@@ -1414,6 +1416,7 @@ func testObjectWithPolicyAPI(store storage.Storage, t *testing.T) {
 	}
 
 	common.InitObjectLocks()
+	common.InitObjectDownloadSemaphore()
 
 	for _, destination := range destinations {
 		if err := store.StoreDestination(destination); err != nil {
@@ -1426,7 +1429,6 @@ func testObjectWithPolicyAPI(store storage.Storage, t *testing.T) {
 		err := store.DeleteStoredObject(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID)
 		if err != nil {
 			t.Errorf("Failed to delete object (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
-			fmt.Printf("Error: %#v\n", err)
 		}
 		// Insert
 		if err := UpdateObject(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID,
@@ -1473,7 +1475,7 @@ func testObjectWithPolicyAPI(store storage.Storage, t *testing.T) {
 				}
 
 				if test.data != nil {
-					ok, err := PutObjectData(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID, bytes.NewReader(test.data))
+					ok, err := PutObjectAllData(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID, bytes.NewReader(test.data))
 					if !ok || err != nil {
 						t.Errorf("Failed to update object's data (objectID = %s). Error: %s", test.metaData.ObjectID, err.Error())
 					}

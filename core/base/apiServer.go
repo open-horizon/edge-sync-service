@@ -2154,7 +2154,26 @@ func handleObjectPutData(orgID string, objectType string, objectID string, write
 			writer.Write(unauthorizedBytes)
 			return
 		}
-		if found, err := PutObjectData(orgID, objectType, objectID, request.Body); err == nil {
+
+		totalSize, startOffset, endOffset, err := common.GetStartAndEndRangeFromContentRangeHeader(request)
+		if err != nil {
+			reqErr := &common.InvalidRequest{Message: fmt.Sprintf("Failed to parse Content-Range header, Error: %s", err.Error())}
+			communications.SendErrorResponse(writer, reqErr, "", 0)
+			return
+		}
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In handleObjectPutData. TotalSize: %d, startOffset: %d, endOffset: %d\n", totalSize, startOffset, endOffset)
+		}
+
+		var found bool
+		if totalSize == 0 && startOffset == -1 && endOffset == -1 {
+			found, err = PutObjectAllData(orgID, objectType, objectID, request.Body)
+		} else {
+			found, err = PutObjectChunkData(orgID, objectType, objectID, request.Body, startOffset, endOffset, totalSize)
+		}
+
+		if err == nil {
 			if !found {
 				writer.WriteHeader(http.StatusNotFound)
 			} else {

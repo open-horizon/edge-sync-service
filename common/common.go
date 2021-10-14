@@ -6,11 +6,16 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"hash"
+	"net/http"
 	"os"
 	"regexp"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/semaphore"
 )
 
 // SyncServiceError is a common error type used in the sync service
@@ -258,6 +263,79 @@ func GetHash(hashAlgo string) (hash.Hash, crypto.Hash, SyncServiceError) {
 	}
 }
 
+func GetStartAndEndRangeFromRangeHeader(request *http.Request) (int64, int64, SyncServiceError) {
+	// Get range from the "Range:bytes={startOffset}-{endOffset}"
+	requestRangeAll := request.Header.Get("Range")
+	if requestRangeAll == "" {
+		return -1, -1, nil
+	}
+	requestRange := requestRangeAll[6:]
+	ranges := strings.Split(requestRange, "-")
+
+	if len(ranges) != 2 {
+		return -1, -1, &InvalidRequest{Message: "Failed to parse Range header: " + requestRangeAll}
+	}
+
+	beginOffset, err := strconv.ParseInt(ranges[0], 10, 64)
+	if err != nil {
+		return -1, -1, &InvalidRequest{Message: "Failed to get begin offset from Range header: " + err.Error()}
+	}
+
+	endOffset, err := strconv.ParseInt(ranges[1], 10, 64)
+	if err != nil {
+		return -1, -1, &InvalidRequest{Message: "Failed to get end offset from Range header: " + err.Error()}
+	}
+
+	if beginOffset > endOffset {
+		return -1, -1, &InvalidRequest{Message: "Begin offset cannot be greater than end offset"}
+	}
+
+	return beginOffset, endOffset, nil
+}
+
+// Content-Range: bytes 1-2/*\
+// Returns totalsize, startOffset, endOffset, err
+func GetStartAndEndRangeFromContentRangeHeader(request *http.Request) (int64, int64, int64, SyncServiceError) {
+	// Get range from the "Range:bytes={startOffset}-{endOffset}"
+	requestContentRange := request.Header.Get("Content-Range")
+	if requestContentRange == "" {
+		return 0, -1, -1, nil
+	}
+	contentRange := strings.Replace(requestContentRange, "bytes ", "", -1)
+	// 1-2/30
+	ranges := strings.Split(contentRange, "/")
+
+	if len(ranges) != 2 {
+		return 0, -1, -1, &InvalidRequest{Message: "Failed to parse Content-Range header: " + requestContentRange}
+	}
+	// [1-2, 30]
+	totalSize, err := strconv.ParseInt(ranges[1], 10, 64)
+	if err != nil {
+		return 0, -1, -1, &InvalidRequest{Message: "Failed to get total size from Content-Range header: " + err.Error()}
+	}
+
+	offsets := strings.Split(ranges[0], "-")
+	if len(offsets) != 2 {
+		return 0, -1, -1, &InvalidRequest{Message: "Failed to get offsets from Content-Range header: " + requestContentRange}
+	}
+
+	startOffset, err := strconv.ParseInt(offsets[0], 10, 64)
+	if err != nil {
+		return 0, -1, -1, &InvalidRequest{Message: "Failed to get start offset from Content-Range header: " + err.Error()}
+	}
+
+	endOffset, err := strconv.ParseInt(offsets[1], 10, 64)
+	if err != nil {
+		return 0, -1, -1, &InvalidRequest{Message: "Failed to get end offset from Content-Range header: " + err.Error()}
+	}
+
+	if startOffset > endOffset {
+		return 0, -1, -1, &InvalidRequest{Message: "Begin offset cannot be greater than end offset"}
+	}
+
+	return totalSize, startOffset, endOffset, nil
+}
+
 // MetaData is the metadata that identifies and defines the sync service object.
 // Every object includes metadata (mandatory) and data (optional). The metadata and data can be updated independently.
 // Each sync service node (ESS) has an address that is composed of the node's ID, Type, and Organization.
@@ -402,6 +480,10 @@ type MetaData struct {
 	// Public is a flag indicate this object is visiable to all users in all orgs
 	// Optional field, default is false (not visiable to all users)
 	Public bool `json:"public" bson:"public"`
+
+	// DataVerified is an internal field set by ESS after ESS downloads data from CSS or by CSS after ESS uploads data
+	// Data can be obtained only when DataVerified field is true
+	DataVerified bool `json:"dataVerified" bson:"data-verified"`
 
 	// OwnerID is an internal field indicating who creates the object
 	// This field should not be set by users
@@ -598,6 +680,7 @@ const (
 const (
 	Update                = "update"
 	Updated               = "updated"
+	HandleUpdate          = "handleUpdate"
 	Consumed              = "consumed"
 	AckConsumed           = "ackconsumed"
 	ConsumedByDestination = "consumedByDest"
@@ -776,6 +859,15 @@ func NewLocks(name string) *Locks {
 	return &locks
 }
 
+// ObjectDownloadSemaphore sets the concurrent spi object download concurrency
+var ObjectDownloadSemaphore *semaphore.Weighted
+
+// InitObjectDownloadSemaphore initializes ObjectDownloadSemaphore
+func InitObjectDownloadSemaphore() {
+	maxWorkers := runtime.GOMAXPROCS(-1) * Configuration.HTTPCSSObjDownloadConcurrencyMultiplier
+	ObjectDownloadSemaphore = semaphore.NewWeighted(int64(maxWorkers))
+}
+
 // ObjectLocks are locks for object and notification changes
 var ObjectLocks Locks
 
@@ -937,6 +1029,13 @@ func BlockUntilNoRunningGoRoutines() {
 
 func IsValidHashAlgorithm(hashAlgorithm string) bool {
 	if hashAlgorithm == Sha1 || hashAlgorithm == Sha256 {
+		return true
+	}
+	return false
+}
+
+func NeedDataVerification(metaData MetaData) bool {
+	if IsValidHashAlgorithm(metaData.HashAlgorithm) && metaData.PublicKey != "" && metaData.Signature != "" {
 		return true
 	}
 	return false
