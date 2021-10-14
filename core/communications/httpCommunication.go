@@ -18,6 +18,8 @@ import (
 	"github.com/open-horizon/edge-sync-service/core/dataURI"
 	"github.com/open-horizon/edge-sync-service/core/dataVerifier"
 	"github.com/open-horizon/edge-sync-service/core/security"
+
+	//"github.com/open-horizon/edge-sync-service/core/storage"
 	"github.com/open-horizon/edge-utilities/logger"
 	"github.com/open-horizon/edge-utilities/logger/log"
 	"github.com/open-horizon/edge-utilities/logger/trace"
@@ -200,6 +202,9 @@ func (communication *HTTP) handleGetUpdates(writer http.ResponseWriter, request 
 	}
 
 	for _, n := range notifications {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("Get notification %s %s %s %s %s, status is %s\n", n.DestOrgID, n.ObjectType, n.ObjectID, n.DestType, n.DestID, n.Status)
+		}
 		metaData, err := Store.RetrieveObject(n.DestOrgID, n.ObjectType, n.ObjectID)
 		if err != nil {
 			message := fmt.Sprintf("Error in handleGetUpdates. Error: %s\n", err)
@@ -335,17 +340,19 @@ func (communication *HTTP) SendNotificationMessage(notificationTopic string, des
 			if response.StatusCode == http.StatusNoContent {
 				switch notificationTopic {
 				case common.Update:
+					// Mark updated
+					if err = handleObjectUpdated(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID,
+						destType, destID, instanceID, dataID); err != nil {
+						return err
+					}
+
 					// Push the data
 					if metaData.Link == "" && !metaData.NoData && !metaData.MetaOnly {
 						if err = communication.pushData(metaData); err != nil {
 							return err
 						}
 					}
-					// Mark updated
-					if err = handleObjectUpdated(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID,
-						destType, destID, instanceID, dataID); err != nil {
-						return err
-					}
+
 				case common.Delete:
 					return handleAckDelete(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID,
 						destType, destID, instanceID, dataID)
@@ -628,7 +635,6 @@ func (communication *HTTP) SendPing() common.SyncServiceError {
 	return communication.registerOrPing(pingURL)
 }
 
-// GetData requests data to be sent from the CSS to the ESS
 func (communication *HTTP) GetData(metaData common.MetaData, offset int64) common.SyncServiceError {
 	if common.Configuration.NodeType != common.ESS {
 		return nil
@@ -638,6 +644,48 @@ func (communication *HTTP) GetData(metaData common.MetaData, offset int64) commo
 		trace.Trace("In http.GetData %s %s", metaData.ObjectType, metaData.ObjectID)
 	}
 
+	if err := communication.GetAllData(metaData, offset); err != nil {
+		if isDataTransportTimeoutError(err) {
+			for i := 0; offset < metaData.ObjectSize; i++ {
+				fmt.Printf("Lily -- For (%s/%s/%s), Inside loop i=%d, offset: %d, metaData.ObjectSize: %d\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, i, offset, metaData.ObjectSize)
+				fmt.Printf("Lily -- protocol: %s\n", common.Configuration.CommunicationProtocol)
+				if err := communication.GetDataByChunk(metaData, offset); err != nil {
+					if trace.IsLogging(logger.DEBUG) {
+						trace.Debug("Receive error from GetData, retry with same offset %d, Error: %s\n", offset, err.Error())
+					}
+					if !isDataTransportTimeoutError(err) {
+						return err
+					}
+					continue
+				} else {
+					offset += int64(metaData.ChunkSize)
+					fmt.Printf("For (%s/%s/%s) updated offset: %d\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, offset)
+				}
+			}
+		} else {
+			return err
+		}
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("Updating ESS object status to completelyReceived for %s %s %s", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+	}
+
+	notificationsInfo, err := PrepareObjectStatusNotification(metaData, common.Received)
+	if err != nil {
+		return err
+	}
+
+	// Send "received" notification
+	if err := SendNotifications(notificationsInfo); err != nil {
+		return err
+	}
+
+	callWebhooks(&metaData)
+	return nil
+}
+
+func (communication *HTTP) GetAllData(metaData common.MetaData, offset int64) common.SyncServiceError {
 	// For debugging
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In http.GetData, retrieve notification %s, %s. %s, %s, %s", metaData.DestID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID)
@@ -680,6 +728,14 @@ func (communication *HTTP) GetData(metaData common.MetaData, offset int64) commo
 	if response != nil && response.Body != nil {
 		defer response.Body.Close()
 	}
+	if IsInterruptedNetworkError(response, err) {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("In interrupted network, will try to download data by chunk for %s %s\n", metaData.ObjectType, metaData.ObjectID)
+		}
+		msg := "Timeout in GetData: failed to receive data from the other side."
+		return &dataTransportTimeOutError{msg}
+	}
+
 	if err != nil {
 		return &Error{"Error in GetData: failed to get data. Error: " + err.Error()}
 	}
@@ -688,6 +744,7 @@ func (communication *HTTP) GetData(metaData common.MetaData, offset int64) commo
 	}
 	if response.StatusCode != http.StatusOK {
 		msg := fmt.Sprintf("Error in GetData: failed to receive data from the other side. Error code: %d, ", response.StatusCode)
+		// check the error. if it is 504
 		return &notificationHandlerError{msg}
 	}
 
@@ -695,42 +752,30 @@ func (communication *HTTP) GetData(metaData common.MetaData, offset int64) commo
 	common.ObjectLocks.Lock(lockIndex)
 
 	var dataVf *dataVerifier.DataVerifier
-	if common.IsValidHashAlgorithm(metaData.HashAlgorithm) && metaData.PublicKey != "" && metaData.Signature != "" {
+	if common.NeedDataVerification(metaData) {
 		dataVf = dataVerifier.NewDataVerifier(metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature)
 		if dataVerified, err := dataVf.VerifyDataSignature(response.Body, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI); !dataVerified || err != nil {
 			if log.IsLogging(logger.ERROR) {
 				log.Error("Failed to verify data for object %s %s, remove temp data\n", metaData.ObjectType, metaData.ObjectID)
 			}
-			dataVf.RemoveTempData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI)
+			dataVf.RemoveUnverifiedData(metaData)
 			common.ObjectLocks.Unlock(lockIndex)
 			return err
 		}
 	}
 
-	if dataVf != nil {
-		if err := dataVf.StoreVerifiedData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI); err != nil {
-			dataVf.RemoveTempData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI)
-			common.ObjectLocks.Unlock(lockIndex)
-			return err
+	// set metadata.DataVerified = true
+	if err = Store.UpdateObjectDataVerifiedStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, true); err != nil {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("Failed to update metadata.DataVerified to true for object %s %s\n", metaData.ObjectType, metaData.ObjectID)
 		}
-	} else if metaData.DestinationDataURI != "" {
-		if _, err := dataURI.StoreData(metaData.DestinationDataURI, response.Body, 0); err != nil {
-			common.ObjectLocks.Unlock(lockIndex)
-			return err
-		}
-	} else {
-		found, err := Store.StoreObjectData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, response.Body)
-		if err != nil {
-			common.ObjectLocks.Unlock(lockIndex)
-			return err
-		} else if !found {
-			common.ObjectLocks.Unlock(lockIndex)
-			return &Error{"Failed to store object's data."}
-		}
+		common.ObjectLocks.Unlock(lockIndex)
+		return err
 	}
 
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("Updating ESS object status to completelyReceived for %s %s %s", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+		trace.Debug("Updated object DataVerified to true for %s %s %s", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+		trace.Debug("Updating ESS object status to completelyReceived for %s %s %s...", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 	}
 	if err := Store.UpdateObjectStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, common.CompletelyReceived); err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
@@ -744,17 +789,256 @@ func (communication *HTTP) GetData(metaData common.MetaData, offset int64) commo
 
 	common.ObjectLocks.Unlock(lockIndex)
 
-	notificationsInfo, err := PrepareObjectStatusNotification(metaData, common.Received)
+	return nil
+
+}
+
+func (communication *HTTP) GetDataByChunk(metaData common.MetaData, offset int64) common.SyncServiceError {
+	// For debugging
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In http.GetData, retrieve notification %s, %s. %s, %s, %s", metaData.DestID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID)
+
+		if n, err := Store.RetrieveNotificationRecord(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID); err != nil {
+			trace.Debug("Error when retrieve notification record, %s", err.Error())
+		} else if n == nil {
+			trace.Debug("In GetData: nil notifications")
+		} else {
+			trace.Debug("In GetData: notification status %s", n.Status)
+		}
+		trace.Debug("In http.GetData, updating notification %s, %s. %s, %s, %s to getdata status", metaData.DestID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID)
+	}
+
+	if err := updateGetDataNotification(metaData, metaData.OriginType, metaData.OriginID, offset); err != nil {
+		return err
+	}
+
+	// now the ESS notification status is "getdata"
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("Checking notifications after updating notification status")
+		if n, err := Store.RetrieveNotificationRecord(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID); err != nil {
+			trace.Debug("Error when retrieve notification record, %s\n", err.Error())
+		} else if n == nil {
+			trace.Debug("Nil notifications")
+		} else {
+			trace.Debug("Notification status is %s after updating", n.Status)
+		}
+	}
+
+	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, metaData.DataID, common.Data)
+	request, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return err
+		return &Error{"Failed to create data request. Error: " + err.Error()}
+	}
+	security.AddIdentityToSPIRequest(request, url)
+
+	// add offset to header
+	var rangeHeader string
+	if offset+int64(metaData.ChunkSize)-1 > metaData.ObjectSize {
+		rangeHeader = fmt.Sprintf("bytes=%s-%s", strconv.FormatInt(offset, 10), strconv.FormatInt(metaData.ObjectSize-1, 10))
+	} else {
+		rangeHeader = fmt.Sprintf("bytes=%s-%s", strconv.FormatInt(offset, 10), strconv.FormatInt(offset+int64(metaData.ChunkSize)-1, 10))
+	}
+	request.Header.Add("Range", rangeHeader)
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In GetData, Add Range header to the request: %s\n", request.Header.Get("Range"))
+	}
+	request.Close = true
+
+	response, err := communication.requestWrapper.do(request)
+	if response != nil && response.Body != nil {
+		defer response.Body.Close()
+	}
+	if IsInterruptedNetworkError(response, err) {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("In interrupted network, will try again to download data for this chunk for %s %s\n", metaData.ObjectType, metaData.ObjectID)
+		}
+		msg := "Timeout in GetData: failed to receive data from the other side."
+		return &dataTransportTimeOutError{msg}
+	}
+	if err != nil {
+		return &Error{"Error in GetData: failed to get data. Error: " + err.Error()}
+	}
+	if response.StatusCode == http.StatusNotFound {
+		return &common.NotFound{}
 	}
 
-	// Send "received" notification
-	if err := SendNotifications(notificationsInfo); err != nil {
-		return err
+	if response.StatusCode == http.StatusConflict {
+		// ignored by CSS
+		return nil
+	}
+	if response.StatusCode != http.StatusPartialContent && response.StatusCode != http.StatusOK {
+		msg := fmt.Sprintf("Error in GetData: failed to receive data from the other side. Error code: %d, ", response.StatusCode)
+		return &notificationHandlerError{msg}
 	}
 
-	callWebhooks(&metaData)
+	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+	common.ObjectLocks.Lock(lockIndex)
+
+	// extract dataLengh from response header
+	dataLengthInString := response.Header.Get("Content-Length")
+	dataLength, err := strconv.ParseUint(dataLengthInString, 10, 32)
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In GetData, Content-Length header in response is %s, dataLength is %d\n", response.Header.Get("Content-Length"), dataLength)
+	}
+
+	if err != nil {
+		common.ObjectLocks.Unlock(lockIndex)
+		return &Error{"Failed to extract Content-Length from response header. Error: " + err.Error()}
+	}
+
+	total, err := checkNotificationRecord(metaData, metaData.OriginType, metaData.OriginID, metaData.InstanceID,
+		common.Getdata, offset)
+	if err != nil {
+		common.ObjectLocks.Unlock(lockIndex)
+		// This notification doesn't match the existing notification record, ignore
+		if trace.IsLogging(logger.INFO) {
+			trace.Info("Ignoring data of %s %s (%s)\n", metaData.ObjectType, metaData.ObjectID, err.Error())
+		}
+		return &notificationHandlerError{fmt.Sprintf("Error in handleData: checkNotificationRecord failed. Error: %s\n", err.Error())}
+	}
+
+	isFirstChunk := total == 0
+	isLastChunk := total+int64(dataLength) >= metaData.ObjectSize
+	isTempData := false
+	if dataLength != 0 {
+		if common.NeedDataVerification(metaData) {
+			isTempData = true
+		}
+
+		if metaData.DestinationDataURI != "" {
+			if _, err := dataURI.AppendData(metaData.DestinationDataURI, response.Body, uint32(dataLength), offset, metaData.ObjectSize,
+				isFirstChunk, isLastChunk, isTempData); err != nil {
+				common.ObjectLocks.Unlock(lockIndex)
+				return err
+			}
+		} else {
+			if _, err := Store.AppendObjectData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, response.Body, uint32(dataLength), offset, metaData.ObjectSize,
+				isFirstChunk, isLastChunk, isTempData); err != nil {
+				// if storage.IsDiscarded(err) {
+				// 	common.ObjectLocks.Unlock(lockIndex)
+				// 	return nil
+				// }
+				common.ObjectLocks.Unlock(lockIndex)
+				return err
+			}
+		}
+
+		if isLastChunk && isTempData {
+			// verify data
+			dataVf := dataVerifier.NewDataVerifier(metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature)
+			if dr, err := dataVf.GetTempData(metaData); err != nil {
+				common.ObjectLocks.Unlock(lockIndex)
+				return err
+			} else if success, err := dataVf.VerifyDataSignature(dr, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI); !success || err != nil {
+				// remove temp data
+				dataVf.RemoveUnverifiedData(metaData)
+				common.ObjectLocks.Unlock(lockIndex)
+				return err
+			}
+
+			// set metadata.DataVerified = true
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("Updated object DataVerified to true for %s %s %s", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+			}
+
+			if err = Store.UpdateObjectDataVerifiedStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, true); err != nil {
+				common.ObjectLocks.Unlock(lockIndex)
+				return err
+			}
+		}
+	}
+
+	/*
+		if dataLength != 0 {
+			if common.NeedDataVerification(metaData) {
+				isTempData = true
+				// need data verification
+				// append response body to a temp file
+				// During data verify, write temp -> real file.
+				// If verified change metaData.DataVerified to true and remove temp file
+				if metaData.DestinationDataURI != "" {
+					if _, err := dataURI.AppendData(metaData.DestinationDataURI, response.Body, uint32(dataLength), offset, metaData.ObjectSize,
+						isFirstChunk, isLastChunk, isTempData); err != nil {
+						common.ObjectLocks.Unlock(lockIndex)
+						return err
+					}
+				} else {
+					if _, err := Store.AppendObjectData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, response.Body, uint32(dataLength), offset, metaData.ObjectSize,
+						isFirstChunk, isLastChunk, isTempData); err != nil {
+						// if storage.IsDiscarded(err) {
+						// 	common.ObjectLocks.Unlock(lockIndex)
+						// 	return nil
+						// }
+						common.ObjectLocks.Unlock(lockIndex)
+						return err
+					}
+				}
+
+				if isLastChunk {
+					// verify
+					dataVf := dataVerifier.NewDataVerifier(metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature)
+					if dr, err := dataVf.GetTempData(metaData); err != nil {
+						common.ObjectLocks.Unlock(lockIndex)
+						return err
+					} else if success, err := dataVf.VerifyDataSignature(dr, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI); !success || err != nil {
+						// remove temp data
+						dataVf.RemoveUnverifiedData(metaData)
+						common.ObjectLocks.Unlock(lockIndex)
+						return err
+					}
+
+					// set metadata.DataVerified = true
+					if trace.IsLogging(logger.DEBUG) {
+						trace.Debug("Updated object DataVerified to true for %s %s %s", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+					}
+
+					if err = Store.UpdateObjectDataVerifiedStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, true); err != nil {
+						common.ObjectLocks.Unlock(lockIndex)
+						return err
+					}
+				}
+			} else {
+				// skip data verification
+				// append response body to database or dataURI
+				if metaData.DestinationDataURI != "" {
+					if _, err := dataURI.AppendData(metaData.DestinationDataURI, response.Body, uint32(dataLength), offset, metaData.ObjectSize,
+						isFirstChunk, isLastChunk, isTempData); err != nil {
+						common.ObjectLocks.Unlock(lockIndex)
+						return err
+					}
+				} else {
+					if _, err := Store.AppendObjectData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, response.Body, uint32(dataLength), offset, metaData.ObjectSize,
+						isFirstChunk, isLastChunk, isTempData); err != nil {
+						// if storage.IsDiscarded(err) {
+						// 	common.ObjectLocks.Unlock(lockIndex)
+						// 	return nil
+						// }
+						common.ObjectLocks.Unlock(lockIndex)
+						return err
+					}
+				}
+
+			}
+		} */
+
+	if _, err := handleChunkReceived(metaData, offset, int64(dataLength), false); err != nil {
+		common.ObjectLocks.Unlock(lockIndex)
+		return &notificationHandlerError{"Error in handleData: handleChunkReceived failed. Error: " + err.Error()}
+	}
+
+	if isLastChunk {
+		removeNotificationChunksInfo(metaData, metaData.OriginType, metaData.OriginID)
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("Updating ESS object status to completelyReceived for %s %s %s", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+		}
+		if err := Store.UpdateObjectStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, common.CompletelyReceived); err != nil {
+			common.ObjectLocks.Unlock(lockIndex)
+			return &Error{fmt.Sprintf("Error in GetData: %s\n", err)}
+		}
+
+	}
+	common.ObjectLocks.Unlock(lockIndex)
 	return nil
 }
 
@@ -975,6 +1259,8 @@ func (communication *HTTP) handleObjects(writer http.ResponseWriter, request *ht
 			err = handleAckConsumed(orgID, objectType, objectID, destType, destID, instanceID, dataID)
 		case common.Received:
 			err = handleObjectReceived(orgID, objectType, objectID, destType, destID, instanceID, dataID)
+		case common.AckReceived:
+			err = handleAckObjectReceived(orgID, objectType, objectID, destType, destID, instanceID, dataID)
 		case common.Feedback:
 			payload := feedbackMessage{}
 			if err = json.NewDecoder(request.Body).Decode(&payload); err == nil {
@@ -1054,56 +1340,172 @@ func (communication *HTTP) handlePutData(orgID string, objectType string, object
 		return err
 	}
 
+	totalSize, startOffset, endOffset, err := getStartAndEndRangeFromContentRangeHeader(request)
+	if err != nil {
+		common.ObjectLocks.Unlock(lockIndex)
+		return &common.InvalidRequest{Message: fmt.Sprintf("Failed to parse Content-Range header, Error: %s", err.Error())}
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("totalSize: %d, startOffset: %d, endOffset: %d\n", totalSize, startOffset, endOffset)
+	}
+
+	isLastChunk := false
+	var handlErr common.SyncServiceError
+	if totalSize == 0 && startOffset == 0 && endOffset == 0 {
+		//no Content-Range header, return all data
+		// common.ObjectLocks.Unlock(lockIndex)
+		// msg := "Mock timetou for testing"
+		// return &dataTransportTimeOutError{msg}
+		//return handlErr
+		if isLastChunk, handlErr = communication.handlePutAllData(*metaData, request); err != nil {
+			common.ObjectLocks.Unlock(lockIndex)
+			return handlErr
+		}
+	} else {
+		// return data by range
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("Get Content-Range header, will handle put chunked data")
+		}
+		if isLastChunk, handlErr = communication.handlePutChunkedData(*metaData, request, startOffset, endOffset, totalSize); err != nil {
+			common.ObjectLocks.Unlock(lockIndex)
+			return handlErr
+		}
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In handlePutData, isLastChunk is %t\n", isLastChunk)
+	}
+
+	if isLastChunk {
+		if metaData, err := Store.RetrieveObject(orgID, objectType, objectID); err == nil && metaData != nil {
+			handleDataReceived(*metaData)
+			common.ObjectLocks.Unlock(lockIndex)
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("In handlePutData, prepare %s notification for %s %s %s %s %s %s\n", common.Received, orgID, objectType, objectID, metaData.DestOrgID, metaData.DestType, metaData.DestID)
+			}
+			notificationsInfo, err := PrepareObjectStatusNotification(*metaData, common.Received)
+
+			if err != nil {
+				return err
+			}
+			if err := SendNotifications(notificationsInfo); err != nil {
+				return err
+			}
+
+			callWebhooks(metaData)
+		} else {
+			common.ObjectLocks.Unlock(lockIndex)
+			return &common.InvalidRequest{Message: "Failed to find object to set data"}
+		}
+	} else {
+		common.ObjectLocks.Unlock(lockIndex)
+	}
+	return nil
+}
+
+func (communication *HTTP) handlePutAllData(metaData common.MetaData, request *http.Request) (bool, common.SyncServiceError) {
 	var dataVf *dataVerifier.DataVerifier
-	if common.IsValidHashAlgorithm(metaData.HashAlgorithm) && metaData.PublicKey != "" && metaData.Signature != "" {
+	if common.NeedDataVerification(metaData) {
 		dataVf = dataVerifier.NewDataVerifier(metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature)
 		if dataVerified, err := dataVf.VerifyDataSignature(request.Body, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI); !dataVerified || err != nil {
 			if log.IsLogging(logger.ERROR) {
 				log.Error("Failed to verify data for object %s %s, remove temp data\n", metaData.ObjectType, metaData.ObjectID)
 			}
-			dataVf.RemoveTempData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI)
-			common.ObjectLocks.Unlock(lockIndex)
-			return err
+			dataVf.RemoveUnverifiedData(metaData)
+			return true, err
 		}
 	}
 
 	if dataVf != nil {
-		if err := dataVf.StoreVerifiedData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI); err != nil {
-			dataVf.RemoveTempData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI)
-			common.ObjectLocks.Unlock(lockIndex)
-			return err
+		if err := Store.UpdateObjectDataVerifiedStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, true); err != nil {
+			return true, err
 		}
-	} else if found, err := Store.StoreObjectData(orgID, objectType, objectID, request.Body); err != nil { // No data verification applied, then store data directly
-		common.ObjectLocks.Unlock(lockIndex)
-		return err
+	} else if found, err := Store.StoreObjectData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, request.Body); err != nil { // No data verification applied, then store data directly
+		return true, err
 	} else if !found {
-		common.ObjectLocks.Unlock(lockIndex)
-		return &common.InvalidRequest{Message: "Failed to find object to set data"}
+		return true, &common.InvalidRequest{Message: "Failed to find object to set data"}
 	}
 
-	if err := Store.UpdateObjectStatus(orgID, objectType, objectID, common.CompletelyReceived); err != nil {
-		common.ObjectLocks.Unlock(lockIndex)
-		return err
+	if err := Store.UpdateObjectStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, common.CompletelyReceived); err != nil {
+		return true, err
 	}
 
-	if metaData, err := Store.RetrieveObject(orgID, objectType, objectID); err == nil && metaData != nil {
-		handleDataReceived(*metaData)
-		common.ObjectLocks.Unlock(lockIndex)
-		notificationsInfo, err := PrepareObjectStatusNotification(*metaData, common.Received)
+	return true, nil
 
-		if err != nil {
-			return err
-		}
-		if err := SendNotifications(notificationsInfo); err != nil {
-			return err
-		}
+}
 
-		callWebhooks(metaData)
+func (communication *HTTP) handlePutChunkedData(metaData common.MetaData, request *http.Request, startOffset int64, endOffset int64, totalSize int64) (bool, common.SyncServiceError) {
+
+	isFirstChunk := startOffset == 0
+	isLastChunk := false
+	dataSize := endOffset - startOffset + 1
+
+	// append Data to temp file/data
+	isTempData := false
+	if common.NeedDataVerification(metaData) {
+		isTempData = true
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("Inside handlePutChunkedData for %s %s %s, isTempData: %t, isFirstChunk: %t \n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, isTempData, isFirstChunk)
+	}
+
+	var err common.SyncServiceError
+	if metaData.DestinationDataURI != "" {
+		if isLastChunk, err = dataURI.AppendData(metaData.DestinationDataURI, request.Body, uint32(dataSize), startOffset, metaData.ObjectSize,
+			isFirstChunk, isLastChunk, isTempData); err != nil {
+			return isLastChunk, err
+		}
 	} else {
-		common.ObjectLocks.Unlock(lockIndex)
-		return &common.InvalidRequest{Message: "Failed to find object to set data"}
+		if isLastChunk, err = Store.AppendObjectData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, request.Body, uint32(dataSize), startOffset, metaData.ObjectSize,
+			isFirstChunk, isLastChunk, isTempData); err != nil {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("Failed to apend data for %s %s %s, Error: %s\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, err.Error())
+			}
+			return isLastChunk, err
+		}
 	}
-	return nil
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("Inside putChunkedData, isLastChunk is: %t\n", isLastChunk)
+	}
+
+	if isLastChunk && isTempData {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("Start data verification for %s %s %s\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+		}
+
+		// verify
+		dataVf := dataVerifier.NewDataVerifier(metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature)
+		if dr, err := dataVf.GetTempData(metaData); err != nil {
+			return isLastChunk, err
+		} else if success, err := dataVf.VerifyDataSignature(dr, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI); !success || err != nil {
+			// remove temp data
+			dataVf.RemoveUnverifiedData(metaData)
+			return isLastChunk, err
+		}
+
+		// set metadata.DataVerified = true
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("Updated object DataVerified to true for %s %s %s", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+		}
+
+		if err := Store.UpdateObjectDataVerifiedStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, true); err != nil {
+			return isLastChunk, err
+		}
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("Updated object status to completelyReceived for %s %s %s", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+		}
+
+		if err := Store.UpdateObjectStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, common.CompletelyReceived); err != nil {
+			return isLastChunk, err
+		}
+
+	}
+
+	return isLastChunk, nil
 }
 
 func (communication *HTTP) handleGetData(orgID string, objectType string, objectID string,
@@ -1118,7 +1520,7 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 	defer common.ObjectLocks.Unlock(lockIndex)
 
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Trace("Handling object get data, retrieve notification record for %s %s %s %s %s\n", orgID, objectType, objectID, destType, destID)
+		trace.Debug("Handling object get data, retrieve notification record for %s %s %s %s %s\n", orgID, objectType, objectID, destType, destID)
 	}
 	notification, err := Store.RetrieveNotificationRecord(orgID, objectType, objectID, destType, destID)
 	if err != nil {
@@ -1133,7 +1535,7 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 
 		err = &ignoredByHandler{"Error in handleGetData: notification.InstanceID != instanceID or notification status is not updated."}
 		SendErrorResponse(writer, err, "", 0)
-	} else if notification.Status == common.Updated || notification.Status == common.Update || notification.Status == common.UpdatePending {
+	} else if notification.Status == common.Updated || notification.Status == common.Update || notification.Status == common.UpdatePending || notification.Status == common.Data {
 		//  notification.InstanceID == instanceID
 		updateNotificationRecord = true
 		if trace.IsLogging(logger.DEBUG) {
@@ -1146,18 +1548,136 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 		}
 	}
 
-	if trace.IsLogging(logger.DEBUG) {
-		trace.Trace("Handling object get data, retrieve object data for %s %s\n", objectType, objectID)
+	objectMeta, _, err := Store.RetrieveObjectAndStatus(orgID, objectType, objectID)
+	if err != nil {
+		SendErrorResponse(writer, err, "", 0)
 	}
 
-	if dataReader, err := Store.RetrieveObjectData(orgID, objectType, objectID); err != nil {
+	hasRangeHeader := true
+	beginOffset, endOffset, err := getStartAndEndRangeFromRangeHeader(request)
+	if err != nil {
+		SendErrorResponse(writer, err, "", 0)
+	}
+
+	if beginOffset == 0 && endOffset == 0 {
+		// Range header not specified, will get all data
+		endOffset = objectMeta.ObjectSize - 1
+		hasRangeHeader = false
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Trace("Handling object get data, retrieve object data for %s %s with range %d-%d\n", objectType, objectID, beginOffset, endOffset)
+	}
+
+	/*
+		if dataLength == int(objectMeta.ObjectSize) || !hasRangeHeader {
+			dataReader, err := Store.RetrieveObjectData(orgID, objectType, objectID, false)
+			if err != nil {
+				SendErrorResponse(writer, err, "", 0)
+			}
+
+			if dataReader == nil {
+				writer.WriteHeader(http.StatusNotFound)
+			} else {
+				writer.Header().Add("Content-Type", "application/octet-stream")
+				writer.WriteHeader(http.StatusOK)
+				if _, err := io.Copy(writer, dataReader); err != nil {
+					SendErrorResponse(writer, err, "", 0)
+				}
+				if err := Store.CloseDataReader(dataReader); err != nil {
+					SendErrorResponse(writer, err, "", 0)
+				}
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Debug("Handling object get data, update notification for %s %s %s %s, status: %s\n", objectType, objectID, destType, destID, common.Data)
+				}
+			}
+		} else {
+			if objectData, eof, length, err := Store.ReadObjectData(orgID, objectType, objectID, dataLength, beginOffset); err != nil {
+				SendErrorResponse(writer, err, "", 0)
+			} else {
+				if len(objectData) == 0 {
+					fmt.Printf("len(objectData)==%d, return 404\n", len(objectData))
+					writer.WriteHeader(http.StatusNotFound)
+				} else {
+					dataReader := bytes.NewReader(objectData)
+					writer.Header().Add("Content-Type", "application/octet-stream")
+					writer.Header().Add("Content-Length", strconv.Itoa(length))
+					if eof {
+						endOffset = objectMeta.ObjectSize - 1
+					}
+					writer.Header().Add("Content-Range", fmt.Sprintf("bytes %d-%d/%d", beginOffset, endOffset, objectMeta.ObjectSize))
+					if !hasRangeHeader {
+						//writer.WriteHeader(http.StatusOK)
+						writer.WriteHeader(http.StatusGatewayTimeout)
+					} else {
+						writer.WriteHeader(http.StatusPartialContent)
+					}
+
+					fmt.Printf("Set header Content-Length: %d\n", length)
+					fmt.Printf("Set header Content-Range: bytes %d-%d/%d\n", beginOffset, endOffset, objectMeta.ObjectSize)
+					if _, err := io.Copy(writer, dataReader); err != nil {
+						SendErrorResponse(writer, err, "", 0)
+					}
+					if err := Store.CloseDataReader(dataReader); err != nil {
+						SendErrorResponse(writer, err, "", 0)
+					}
+				}
+			}
+		}
+
+		// update notification only if current notification.InstanceID == metadata.InstanceID && current notification.status == "updated" && this is the last chunk
+		if updateNotificationRecord {
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("Handling object get data, update notification status to data for %s %s %s %s %s\n", orgID, objectType, objectID, destType, destID)
+			}
+			notification := common.Notification{ObjectID: objectID, ObjectType: objectType,
+				DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.Data, InstanceID: instanceID, DataID: dataID}
+			if err = Store.UpdateNotificationRecord(notification); err != nil {
+				if log.IsLogging(logger.ERROR) {
+					log.Error("Handling object get data, failed to update notification for %s %s %s %s with status: %s\n", objectType, objectID, destType, destID, common.Data)
+				}
+			} else {
+				if trace.IsLogging(logger.DEBUG) {
+					log.Debug("Handling object get data, update notification for %s %s %s %s with status %s is done\n", objectType, objectID, destType, destID, common.Data)
+				}
+			}
+		} else {
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("Handling object get data, return WITHOUT update notification status to data for %s %s %s %s %s, set updateNotificationRecord to %t \n", orgID, objectType, objectID, destType, destID, updateNotificationRecord)
+			}
+		}*/
+
+	dataLength := int(endOffset - beginOffset + 1)
+	if objectData, eof, length, err := Store.ReadObjectData(orgID, objectType, objectID, dataLength, beginOffset); err != nil {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("error in ReadObjectData for %s %s %s from offset: %d, Error: %s\n", orgID, objectType, objectID, beginOffset, err.Error())
+		}
 		SendErrorResponse(writer, err, "", 0)
 	} else {
-		if dataReader == nil {
+		if len(objectData) == 0 {
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Trace("data length is 0 for %s %s %s\n", orgID, objectType, objectID)
+			}
 			writer.WriteHeader(http.StatusNotFound)
 		} else {
+			dataReader := bytes.NewReader(objectData)
 			writer.Header().Add("Content-Type", "application/octet-stream")
-			writer.WriteHeader(http.StatusOK)
+			writer.Header().Add("Content-Length", strconv.Itoa(length))
+			if eof {
+				endOffset = objectMeta.ObjectSize - 1
+			}
+			writer.Header().Add("Content-Range", fmt.Sprintf("bytes %d-%d/%d", beginOffset, endOffset, objectMeta.ObjectSize))
+			if !hasRangeHeader {
+				writer.WriteHeader(http.StatusOK)
+				//writer.WriteHeader(http.StatusGatewayTimeout)
+			} else {
+				writer.WriteHeader(http.StatusPartialContent)
+			}
+
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Trace("Set header Content-Length: %d, set header Content-Range: bytes %d-%d/%d\n", length, beginOffset, endOffset, objectMeta.ObjectSize)
+			}
+
 			if _, err := io.Copy(writer, dataReader); err != nil {
 				SendErrorResponse(writer, err, "", 0)
 			}
@@ -1167,7 +1687,7 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 			if trace.IsLogging(logger.DEBUG) {
 				trace.Debug("Handling object get data, update notification for %s %s %s %s, status: %s\n", objectType, objectID, destType, destID, common.Data)
 			}
-			// update notification only if current notification.InstanceID == metadata.InstanceID && current notification.status == "updated"
+			// update notification only if current notification.InstanceID == metadata.InstanceID && current notification.status == "updated" && this is the last chunk
 			if updateNotificationRecord {
 				if trace.IsLogging(logger.DEBUG) {
 					trace.Debug("Handling object get data, update notification status to data for %s %s %s %s %s\n", orgID, objectType, objectID, destType, destID)
@@ -1185,7 +1705,7 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 				}
 			} else {
 				if trace.IsLogging(logger.DEBUG) {
-					trace.Debug("Handling object get data, return without update notification status to data for %s %s %s %s %s, set updateNotificationRecord to %t \n", orgID, objectType, objectID, destType, destID, updateNotificationRecord)
+					trace.Debug("Handling object get data, return WITHOUT update notification status to data for %s %s %s %s %s, set updateNotificationRecord to %t \n", orgID, objectType, objectID, destType, destID, updateNotificationRecord)
 				}
 			}
 		}
@@ -1193,6 +1713,60 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 }
 
 func (communication *HTTP) pushData(metaData *common.MetaData) common.SyncServiceError {
+	if err := communication.pushAllData(metaData); err != nil {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("Failed to send all data at once. Error: %s. Will send data by chunk", err.Error())
+		}
+		offset := int64(0)
+		if isDataTransportTimeoutError(err) {
+			for i := 0; offset < metaData.ObjectSize; i++ {
+				fmt.Printf("Lily -- For (%s/%s/%s), Inside loop i=%d, offset: %d, metaData.ObjectSize: %d\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, i, offset, metaData.ObjectSize)
+				if err := communication.pushDataByChunk(metaData, offset); err != nil {
+					if trace.IsLogging(logger.DEBUG) {
+						trace.Debug("Receive error from pushDataByChunk, retry with same offset %d, Error: %s\n", offset, err.Error())
+					}
+					if !isDataTransportTimeoutError(err) {
+						return err
+					}
+					time.Sleep(5 * time.Second)
+					continue
+				} else {
+					offset += int64(metaData.ChunkSize)
+					//offset += int64(metaData.ChunkSize * 2)
+					time.Sleep(5 * time.Second)
+					fmt.Printf("For (%s/%s/%s) updated offset: %d\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, offset)
+				}
+			}
+
+			// time.Sleep(5 * time.Second)
+			// // Another loop to sent left over chunks
+			// fmt.Println("Another loop to send left over chunks")
+			// offset = int64(metaData.ChunkSize)
+			// for i := 0; offset < metaData.ObjectSize; i++ {
+			// 	if err := communication.pushDataByChunk(metaData, offset); err != nil {
+			// 		if trace.IsLogging(logger.DEBUG) {
+			// 			trace.Debug("Receive error from pushDataByChunk, retry with same offset %d, Error: %s\n", offset, err.Error())
+			// 		}
+			// 		if !isDataTransportTimeoutError(err) {
+			// 			return err
+			// 		}
+			// 		time.Sleep(5 * time.Second)
+			// 		continue
+			// 	} else {
+			// 		offset += int64(metaData.ChunkSize * 2)
+			// 		time.Sleep(5 * time.Second)
+			// 		fmt.Printf("For (%s/%s/%s) updated offset: %d\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, offset)
+			// 	}
+			// }
+		} else {
+			return err
+		}
+	}
+	return nil
+
+}
+
+func (communication *HTTP) pushAllData(metaData *common.MetaData) common.SyncServiceError {
 	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 	common.ObjectLocks.RLock(lockIndex)
 	defer common.ObjectLocks.RUnlock(lockIndex)
@@ -1202,9 +1776,9 @@ func (communication *HTTP) pushData(metaData *common.MetaData) common.SyncServic
 	var dataReader io.Reader
 	var err error
 	if metaData.SourceDataURI != "" {
-		dataReader, err = dataURI.GetData(metaData.SourceDataURI)
+		dataReader, err = dataURI.GetData(metaData.SourceDataURI, false)
 	} else {
-		dataReader, err = Store.RetrieveObjectData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+		dataReader, err = Store.RetrieveObjectData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, false)
 	}
 	if err != nil {
 		return err
@@ -1213,7 +1787,7 @@ func (communication *HTTP) pushData(metaData *common.MetaData) common.SyncServic
 
 	request, err := http.NewRequest("PUT", url, dataReader)
 	if err != nil {
-		return &Error{"Failed to read data. Error: " + err.Error()}
+		return &Error{"Failed to create HTTP request to upload data. Error: " + err.Error()}
 	}
 	security.AddIdentityToSPIRequest(request, url)
 	request.Close = true
@@ -1222,7 +1796,16 @@ func (communication *HTTP) pushData(metaData *common.MetaData) common.SyncServic
 	if response != nil && response.Body != nil {
 		defer response.Body.Close()
 	}
-	if err != nil {
+	if IsInterruptedNetworkError(response, err) {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("In interrupted network, will try to upload data by chunk for %s %s\n", metaData.ObjectType, metaData.ObjectID)
+		}
+		if response != nil {
+			fmt.Printf("response code for pushAllData is: %d\n", response.StatusCode)
+		}
+		msg := "Timeout in PushAllData: failed to receive data from the other side."
+		return &dataTransportTimeOutError{msg}
+	} else if err != nil {
 		return &Error{"Failed to send HTTP request. Error: " + err.Error()}
 	}
 	if response.StatusCode != http.StatusNoContent {
@@ -1232,6 +1815,133 @@ func (communication *HTTP) pushData(metaData *common.MetaData) common.SyncServic
 		return &Error{"Failed to send push data."}
 	}
 	return nil
+}
+
+func (communication *HTTP) pushDataByChunk(metaData *common.MetaData, offset int64) common.SyncServiceError {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In pushDataByChunk, after updatePushDataNotification with offset %d\n", offset)
+	}
+
+	// For debugging
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In http.pushDataByChunk, retrieve notification %s, %s. %s, %s, %s", metaData.DestID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID)
+
+		if n, err := Store.RetrieveNotificationRecord(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID); err != nil {
+			trace.Debug("Error when retrieve notification record, %s", err.Error())
+		} else if n == nil {
+			trace.Debug("In pushDataByChunk: nil notifications")
+		} else {
+			trace.Debug("In pushDataByChunk: notification status %s", n.Status)
+		}
+		trace.Debug("In http.pushDataByChunk, updating notification %s, %s. %s, %s, %s to data status", metaData.DestID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID)
+	}
+
+	if err := updatePushDataNotification(*metaData, metaData.OriginType, metaData.OriginID, offset); err != nil {
+		return err
+	}
+
+	// now the ESS notification status is "data"
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("Checking notifications after updating notification status")
+		if n, err := Store.RetrieveNotificationRecord(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID); err != nil {
+			trace.Debug("Error when retrieve notification record, %s\n", err.Error())
+		} else if n == nil {
+			trace.Debug("Nil notifications")
+		} else {
+			trace.Debug("Notification status is %s after updating", n.Status)
+		}
+	}
+
+	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+	common.ObjectLocks.RLock(lockIndex)
+	defer common.ObjectLocks.RUnlock(lockIndex)
+
+	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, metaData.DataID, common.Data)
+
+	startOffset := offset
+	endOffset := offset + int64(metaData.ChunkSize) - 1
+	if endOffset >= metaData.ObjectSize {
+		endOffset = metaData.ObjectSize - 1
+	}
+
+	var err error
+	var objectData []byte
+	var length int
+	if metaData.SourceDataURI != "" {
+		objectData, _, length, err = dataURI.GetDataChunk(metaData.SourceDataURI, common.Configuration.MaxDataChunkSize,
+			offset)
+	} else {
+		objectData, _, length, err = Store.ReadObjectData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID,
+			common.Configuration.MaxDataChunkSize, offset)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	dataReader := bytes.NewReader(objectData)
+	request, err := http.NewRequest("PUT", url, dataReader)
+	if err != nil {
+		return &Error{"Failed to create HTTP request to upload data. Error: " + err.Error()}
+	}
+	security.AddIdentityToSPIRequest(request, url)
+
+	// add offset to header
+	request.Header.Add("Content-Range", fmt.Sprintf("bytes %d-%d/%d", startOffset, endOffset, metaData.ObjectSize))
+	request.Header.Add("Content-Length", strconv.Itoa(length))
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In pushDataByChunk, Add headers: Content-Range header is: %s, Content-Length header is: %s\n", request.Header.Get("Content-Range"), request.Header.Get("Content-Length"))
+	}
+	request.Close = true
+
+	response, err := communication.requestWrapper.do(request)
+	if response != nil && response.Body != nil {
+		defer response.Body.Close()
+	}
+
+	if IsInterruptedNetworkError(response, err) {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("In interrupted network, will try again to upload data for this chunk for %s %s\n", metaData.ObjectType, metaData.ObjectID)
+		}
+		msg := "Timeout in pushDataByChunk: failed to receive data from the other side."
+		return &dataTransportTimeOutError{msg}
+	} else if err != nil {
+		return &Error{"Failed to send data over HTTP request. Error: " + err.Error()}
+	}
+
+	if response.StatusCode != http.StatusNoContent {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("Failed to send chunked data. Received code: %d %s", response.StatusCode, response.Status)
+		}
+		return &Error{"Failed to push chunked data."}
+	}
+
+	// marks that the chunk is received by the other side
+	if _, err := handleChunkReceived(*metaData, offset, int64(length), true); err != nil {
+		return &notificationHandlerError{"Error in pushDataByChunk: handleChunkReceived failed. Error: " + err.Error()}
+	}
+
+	total, err := checkNotificationRecord(*metaData, metaData.OriginType, metaData.OriginID, metaData.InstanceID,
+		common.Data, offset)
+	if err != nil {
+		// This notification doesn't match the existing notification record, ignore
+		if trace.IsLogging(logger.INFO) {
+			trace.Info("Ignoring data of %s %s (%s)\n", metaData.ObjectType, metaData.ObjectID, err.Error())
+		}
+		return &notificationHandlerError{fmt.Sprintf("Error in handleData: checkNotificationRecord failed. Error: %s\n", err.Error())}
+	}
+
+	isLastChunk := total == metaData.ObjectSize
+
+	if isLastChunk {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("Removing notification chunks info for of %s %s\n", metaData.ObjectType, metaData.ObjectID)
+		}
+		removeNotificationChunksInfo(*metaData, metaData.OriginType, metaData.OriginID)
+	}
+
+	return nil
+
 }
 
 // ResendObjects requests to resend all the relevant objects
@@ -1493,4 +2203,79 @@ func buildUnregisterURL(url string, orgID string, destType string, destID string
 	strBuilder.WriteByte('/')
 	strBuilder.WriteString(destID)
 	return strBuilder.String()
+}
+
+func getStartAndEndRangeFromRangeHeader(request *http.Request) (int64, int64, common.SyncServiceError) {
+	// Get range from the "Range:bytes={startOffset}-{endOffset}"
+	requestRangeAll := request.Header.Get("Range")
+	fmt.Printf("Range header: %s\n", requestRangeAll)
+	if requestRangeAll == "" {
+		return 0, 0, nil
+	}
+	requestRange := requestRangeAll[6:]
+	ranges := strings.Split(requestRange, "-")
+
+	if len(ranges) != 2 {
+		return 0, 0, &common.InvalidRequest{Message: "Failed to parse Range header: " + requestRangeAll}
+	}
+
+	beginOffset, err := strconv.ParseInt(ranges[0], 10, 64)
+	if err != nil {
+		return 0, 0, &common.InvalidRequest{Message: "Failed to get begin offset from Range header: " + err.Error()}
+	}
+
+	endOffset, err := strconv.ParseInt(ranges[1], 10, 64)
+	if err != nil {
+		return 0, 0, &common.InvalidRequest{Message: "Failed to get end offset from Range header: " + err.Error()}
+	}
+
+	if beginOffset > endOffset {
+		return 0, 0, &common.InvalidRequest{Message: "Begin offset cannot be greater than end offset"}
+	}
+
+	return beginOffset, endOffset, nil
+}
+
+// Content-Range: bytes 1-2/*\
+// Returns totalsize, startOffset, endOffset, err
+func getStartAndEndRangeFromContentRangeHeader(request *http.Request) (int64, int64, int64, common.SyncServiceError) {
+	// Get range from the "Range:bytes={startOffset}-{endOffset}"
+	requestContentRange := request.Header.Get("Content-Range")
+	fmt.Printf("Content-Range header: %s\n", requestContentRange)
+	if requestContentRange == "" {
+		return 0, 0, 0, nil
+	}
+	contentRange := strings.Replace(requestContentRange, "bytes ", "", -1)
+	// 1-2/30
+	ranges := strings.Split(contentRange, "/")
+
+	if len(ranges) != 2 {
+		return 0, 0, 0, &common.InvalidRequest{Message: "Failed to parse Content-Range header: " + requestContentRange}
+	}
+	// [1-2, 30]
+	totalSize, err := strconv.ParseInt(ranges[1], 10, 64)
+	if err != nil {
+		return 0, 0, 0, &common.InvalidRequest{Message: "Failed to get total size from Content-Range header: " + err.Error()}
+	}
+
+	offsets := strings.Split(ranges[0], "-")
+	if len(offsets) != 2 {
+		return 0, 0, 0, &common.InvalidRequest{Message: "Failed to get offsets from Content-Range header: " + requestContentRange}
+	}
+
+	startOffset, err := strconv.ParseInt(offsets[0], 10, 64)
+	if err != nil {
+		return 0, 0, 0, &common.InvalidRequest{Message: "Failed to get start offset from Content-Range header: " + err.Error()}
+	}
+
+	endOffset, err := strconv.ParseInt(offsets[1], 10, 64)
+	if err != nil {
+		return 0, 0, 0, &common.InvalidRequest{Message: "Failed to get end offset from Content-Range header: " + err.Error()}
+	}
+
+	if startOffset > endOffset {
+		return 0, 0, 0, &common.InvalidRequest{Message: "Begin offset cannot be greater than end offset"}
+	}
+
+	return totalSize, startOffset, endOffset, nil
 }

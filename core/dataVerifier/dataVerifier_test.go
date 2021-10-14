@@ -90,22 +90,6 @@ func testVerifyDataSignature(hashAlgo string, t *testing.T) {
 	}
 
 	dataVerifier := NewDataVerifier(hashAlgo, publicKey, signature)
-	if verified, err := dataVerifier.VerifyDataSignature(bytes.NewReader(wrongDataToSign), orgID, objectType, objectID, ""); err == nil || verified {
-		t.Errorf("Error verifying data, wrong data should not pass verification. verified: %t, error: %s\n", verified, err.Error())
-	}
-
-	// Need another dataVerifier object because re-use old object will make the hash calculated on top of the hash from old object
-	dataVerifier = NewDataVerifier(hashAlgo, publicKey, signature)
-	if verified, err := dataVerifier.VerifyDataSignature(bytes.NewReader(dataToSign), orgID, objectType, objectID, ""); err != nil || !verified {
-		t.Errorf("Error verifying data, data should pass verification. verified: %t, error: %s\n", verified, err.Error())
-	}
-
-	var reader io.Reader
-	if reader, err = Store.RetrieveTempObjectData(orgID, objectType, objectID); err != nil {
-		Store.CloseDataReader(reader)
-		t.Errorf("Error get temp object data for %s %s %s, error: %s\n", orgID, objectType, objectID, err.Error())
-	}
-	Store.CloseDataReader(reader)
 
 	// Store object metadata
 	objMetaData := common.MetaData{
@@ -115,6 +99,7 @@ func testVerifyDataSignature(hashAlgo string, t *testing.T) {
 		HashAlgorithm: hashAlgo,
 		PublicKey:     publicKey,
 		Signature:     signature,
+		DataVerified:  false,
 	}
 
 	// Store object metadata
@@ -122,21 +107,30 @@ func testVerifyDataSignature(hashAlgo string, t *testing.T) {
 		t.Errorf("Failed to store object metadata, error: %s", err.Error())
 	}
 
-	// Store verified data
-	if err = dataVerifier.StoreVerifiedData(orgID, objectType, objectID, ""); err != nil {
-		t.Errorf("Error storeing verified data for %s %s %s, error: %s\n", orgID, objectType, objectID, err.Error())
+	if verified, err := dataVerifier.VerifyDataSignature(bytes.NewReader(wrongDataToSign), orgID, objectType, objectID, ""); err == nil || verified {
+		errMessage := ""
+		if err != nil {
+			errMessage = err.Error()
+		}
+		t.Errorf("Error verifying data, wrong data should not pass verification. verified: %t, error: %s\n", verified, errMessage)
 	}
 
-	if reader, err = Store.RetrieveTempObjectData(orgID, objectType, objectID); err != nil {
+	// Need another dataVerifier object because re-use old object will make the hash calculated on top of the hash from old object
+	dataVerifier = NewDataVerifier(hashAlgo, publicKey, signature)
+	if verified, err := dataVerifier.VerifyDataSignature(bytes.NewReader(dataToSign), orgID, objectType, objectID, ""); err != nil || !verified {
+		t.Errorf("Error verifying data, data should pass verification. verified: %t, error: %s\n", verified, err.Error())
+	}
+
+	if err = Store.UpdateObjectDataVerifiedStatus(orgID, objectType, objectID, true); err != nil {
+		t.Errorf("Failed to update DataVerified to true, error: %s\n", err.Error())
+	}
+
+	var reader io.Reader
+	if reader, err = Store.RetrieveObjectData(orgID, objectType, objectID, false); err != nil {
 		t.Errorf("Error retrieve verified data for %s %s %s, error: %s\n", orgID, objectType, objectID, err.Error())
-	} else if reader != nil {
+	} else if reader == nil {
 		Store.CloseDataReader(reader)
-		t.Errorf("Temp object data for %s %s %s should be deleted\n", orgID, objectType, objectID)
-	}
-
-	if reader, err = Store.RetrieveObjectData(orgID, objectType, objectID); err != nil {
-		Store.CloseDataReader(reader)
-		t.Errorf("Error get object data for %s %s %s, error: %s\n", orgID, objectType, objectID, err.Error())
+		t.Errorf("Object data for %s %s %s should be stored after verification\n", orgID, objectType, objectID)
 	}
 	Store.CloseDataReader(reader)
 
@@ -148,6 +142,17 @@ func TestVerifyDataSignatureWithDestintionDataURI(t *testing.T) {
 	destinationURIDirFileVerified = "file:///" + destinationURIDir + "/" + "test_verified.txt"
 	destinationURIDirFileWrong = "file:///" + destinationURIDir + "/" + "test_wrong.txt"
 
+	if status := setupDB(common.Mongo); status != "" {
+		t.Errorf("Failed to setup %s storage, error: %s", common.Mongo, status)
+	}
+	defer Store.Stop()
+	testVerifyDataSignatureWithDestintionDataURI(common.Sha1, t)
+	testVerifyDataSignatureWithDestintionDataURI(common.Sha256, t)
+
+	if status := setupDB(common.Bolt); status != "" {
+		t.Errorf("Failed to setup %s storage, error: %s", common.Bolt, status)
+	}
+	defer Store.Stop()
 	testVerifyDataSignatureWithDestintionDataURI(common.Sha1, t)
 	testVerifyDataSignatureWithDestintionDataURI(common.Sha256, t)
 
@@ -160,37 +165,40 @@ func testVerifyDataSignatureWithDestintionDataURI(hashAlgo string, t *testing.T)
 		t.Errorf("Failed to set up publicKey and signature with SHA1 for data. Error: %s\n", err.Error())
 	}
 
+	objectID1 := "testDVObjID1"
+	objectID2 := "testDVObjID2"
+
+	metaData1, err := setupObjectForVerify(objectID1, publicKey, signature, hashAlgo, destinationURIDirFileVerified)
+	if err != nil {
+		t.Errorf("Failed to set up object(objectID=%s) for testing. Error: %s\n", objectID1, err.Error())
+	}
+
+	metaData2, err := setupObjectForVerify(objectID2, publicKey, signature, hashAlgo, destinationURIDirFileWrong)
+	if err != nil {
+		t.Errorf("Failed to set up object(objectID=%s) for testing. Error: %s\n", objectID2, err.Error())
+	}
+
 	// Verify Signature
 	dataVerifier := NewDataVerifier(hashAlgo, publicKey, signature)
-	if verified, err := dataVerifier.VerifyDataSignature(bytes.NewReader(dataToSign), orgID, objectType, objectID, destinationURIDirFileVerified); err != nil || !verified {
+	if verified, err := dataVerifier.VerifyDataSignature(bytes.NewReader(dataToSign), metaData1.DestOrgID, metaData1.ObjectType, metaData1.ObjectID, metaData1.DestinationDataURI); err != nil || !verified {
 		t.Errorf("Error verifying data, data should pass verification. verified: %t, error: %s\n", verified, err.Error())
 	}
 
-	if verified, err := dataVerifier.VerifyDataSignature(bytes.NewReader(wrongDataToSign), orgID, objectType, objectID, destinationURIDirFileWrong); err == nil || verified {
+	if verified, err := dataVerifier.VerifyDataSignature(bytes.NewReader(wrongDataToSign), metaData2.DestOrgID, metaData2.ObjectType, metaData2.ObjectID, metaData2.DestinationDataURI); err == nil || verified {
 		t.Errorf("Error verifying data, wrong data should not pass verification. verified: %t, error: %s\n", verified, err.Error())
 	}
 
 	// check .tmp file is created
-	if _, err := os.Stat(destinationURIDir + "/test_verified.txt.tmp"); err != nil {
-		t.Errorf("Error checking files at destinationURI %s, error: %s\n", destinationURIDirFileVerified, err.Error())
-	}
-
-	if _, err := os.Stat(destinationURIDir + "/test_wrong.txt.tmp"); err != nil {
-		t.Errorf("Error checking files at destinationURI %s.tmp, error: %s\n", destinationURIDirFileWrong, err.Error())
-	}
-
-	// check file is created from .tmp file
-	if err := dataVerifier.StoreVerifiedData(orgID, objectType, objectID, destinationURIDirFileVerified); err != nil {
-		t.Errorf("Error storing verified data %s %s %s at destinationURI %s, error: %s\n", orgID, objectType, objectID, destinationURIDirFileVerified, err.Error())
-	}
-	if _, err := os.Stat(destinationURIDir + "/test_verified.txt.tmp"); !os.IsNotExist(err) {
-		t.Errorf("The .tmp file at destinationURI %s should be removed, error: %s\n", destinationURIDir, err.Error())
-	}
 	if _, err := os.Stat(destinationURIDir + "/test_verified.txt"); err != nil {
-		t.Errorf("Error checking files at destinationURI %s, error: %s\n", destinationURIDirFileVerified, err.Error())
+		t.Errorf("Error checking files at destinationURI %s, error: %s\n", metaData1.DestinationDataURI, err.Error())
 	}
-	if err = dataVerifier.RemoveTempData(orgID, objectType, objectID, destinationURIDirFileWrong); err != nil {
-		t.Errorf("Error remove tmp data for %s %s %s at %s, error: %s\n", orgID, objectType, objectID, destinationURIDirFileWrong, err.Error())
+
+	if _, err := os.Stat(destinationURIDir + "/test_wrong.txt"); err != nil {
+		t.Errorf("Error checking files at destinationURI %s, error: %s\n", metaData2.DestinationDataURI, err.Error())
+	}
+
+	if err = dataVerifier.RemoveUnverifiedData(*metaData2); err != nil {
+		t.Errorf("Error remove tmp data for %s %s %s at %s, error: %s\n", metaData2.DestOrgID, metaData2.ObjectType, metaData2.ObjectID, metaData2.DestinationDataURI, err.Error())
 	}
 
 }
@@ -201,6 +209,26 @@ func setupTestVars() {
 	orgID = "testDVOrg"
 	objectType = "testDVObjType"
 	objectID = "testDVObjID"
+}
+
+func setupObjectForVerify(objectID string, publicKey string, signature string, hashAlgo string, destinationURI string) (*common.MetaData, common.SyncServiceError) {
+	objMetaDataToStore := common.MetaData{
+		ObjectID:           objectID,
+		ObjectType:         objectType,
+		DestOrgID:          orgID,
+		HashAlgorithm:      hashAlgo,
+		PublicKey:          publicKey,
+		Signature:          signature,
+		DataVerified:       false,
+		DestinationDataURI: destinationURI,
+	}
+
+	// Store object metadata
+	if _, err := Store.StoreObject(objMetaDataToStore, []byte{}, ""); err != nil {
+		return nil, err
+	}
+	return &objMetaDataToStore, nil
+
 }
 
 func setupDB(dbType string) string {

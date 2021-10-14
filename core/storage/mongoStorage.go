@@ -103,6 +103,15 @@ type aclObject struct {
 	LastUpdate bson.MongoTimestamp `bson:"last-update"`
 }
 
+type dataInfoObject struct {
+	ID         string              `bson:"_id"`
+	ChunkSize  int32               `bson:"chunkSize"`
+	UploadDate bson.MongoTimestamp `bson:"uploadDate"`
+	Length     int32               `bson:"length"`
+	MD5        string              `bson:"md5"`
+	Filename   string              `bson:"filename"`
+}
+
 const maxUpdateTries = 5
 
 var sleepInMS int
@@ -980,8 +989,14 @@ func (store *MongoStorage) RetrieveObjectAndStatus(orgID string, objectType stri
 }
 
 // RetrieveObjectData returns the object data with the specified parameters
-func (store *MongoStorage) RetrieveObjectData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
-	id := createObjectCollectionID(orgID, objectType, objectID)
+func (store *MongoStorage) RetrieveObjectData(orgID string, objectType string, objectID string, isTempData bool) (io.Reader, common.SyncServiceError) {
+	var id string
+	if isTempData {
+		id = createTempObjectCollectionID(orgID, objectType, objectID)
+	} else {
+		id = createObjectCollectionID(orgID, objectType, objectID)
+	}
+
 	fileHandle, err := store.openFile(id)
 	if err != nil {
 		switch err {
@@ -1116,7 +1131,7 @@ func (store *MongoStorage) RemoveObjectTempData(orgID string, objectType string,
 
 }
 
-func (store *MongoStorage) RetrieveTempObjectData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
+func (store *MongoStorage) RetrieveObjectTempData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
 	id := createTempObjectCollectionID(orgID, objectType, objectID)
 	fileHandle, err := store.openFile(id)
 	if err != nil {
@@ -1133,20 +1148,26 @@ func (store *MongoStorage) RetrieveTempObjectData(orgID string, objectType strin
 
 // AppendObjectData appends a chunk of data to the object's data
 func (store *MongoStorage) AppendObjectData(orgID string, objectType string, objectID string, dataReader io.Reader,
-	dataLength uint32, offset int64, total int64, isFirstChunk bool, isLastChunk bool) common.SyncServiceError {
-	id := createObjectCollectionID(orgID, objectType, objectID)
+	dataLength uint32, offset int64, total int64, isFirstChunk bool, isLastChunk bool, isTempData bool) (bool, common.SyncServiceError) {
+	var id string
+	if isTempData {
+		id = createTempObjectCollectionID(orgID, objectType, objectID)
+	} else {
+		id = createObjectCollectionID(orgID, objectType, objectID)
+	}
+
 	var fileHandle *fileHandle
 	if isFirstChunk {
 		store.removeFile(id)
 		fh, err := store.createFile(id)
 		if err != nil {
-			return err
+			return isLastChunk, err
 		}
 		fileHandle = fh
 	} else {
 		fh := store.getFileHandle(id)
 		if fh == nil {
-			return &Error{fmt.Sprintf("Failed to append the data at offset %d, the file %s doesn't exist.", offset, id)}
+			return isLastChunk, &Error{fmt.Sprintf("Failed to append the data at offset %d, the file %s doesn't exist.", offset, id)}
 		}
 		fileHandle = fh
 	}
@@ -1161,11 +1182,11 @@ func (store *MongoStorage) AppendObjectData(orgID string, objectType string, obj
 		data, err = ioutil.ReadAll(dataReader)
 		n = len(data)
 	}
-	if err != nil {
-		return &Error{fmt.Sprintf("Failed to read the data from the dataReader. Error: %s.", err)}
+	if err != nil && err != io.EOF {
+		return isLastChunk, &Error{fmt.Sprintf("Failed to read the data from the dataReader. Error: %s.", err)}
 	}
 	if uint32(n) != dataLength && dataLength > 0 {
-		return &Error{fmt.Sprintf("Failed to read all the data from the dataReader. Read %d instead of %d.", n, dataLength)}
+		return isLastChunk, &Error{fmt.Sprintf("Failed to read all the data from the dataReader. Read %d instead of %d.", n, dataLength)}
 	}
 	if offset == fileHandle.offset {
 		for {
@@ -1174,10 +1195,10 @@ func (store *MongoStorage) AppendObjectData(orgID string, objectType string, obj
 			}
 			n, err = fileHandle.file.Write(data)
 			if err != nil {
-				return &Error{fmt.Sprintf("Failed to write the data to the file. Error: %s.", err)}
+				return isLastChunk, &Error{fmt.Sprintf("Failed to write the data to the file. Error: %s.", err)}
 			}
 			if n != len(data) {
-				return &Error{fmt.Sprintf("Failed to write all the data to the file. Wrote %d instead of %d.", n, len(data))}
+				return isLastChunk, &Error{fmt.Sprintf("Failed to write all the data to the file. Wrote %d instead of %d.", n, len(data))}
 			}
 			fileHandle.offset += int64(n)
 			if fileHandle.chunks == nil {
@@ -1200,25 +1221,79 @@ func (store *MongoStorage) AppendObjectData(orgID string, objectType string, obj
 			if trace.IsLogging(logger.INFO) {
 				trace.Info(" Discard data chunk at offset %d since there are too many (%d) out-of-order chunks\n", offset, len(fileHandle.chunks))
 			}
-			return &Discarded{fmt.Sprintf(" Discard data chunk at offset %d since there are too many out-of-order chunks\n", offset)}
+			return isLastChunk, &Discarded{fmt.Sprintf(" Discard data chunk at offset %d since there are too many out-of-order chunks\n", offset)}
 		}
 		fileHandle.chunks[offset] = data
 		if trace.IsLogging(logger.TRACE) {
 			trace.Trace(" Put data (%d) in map at offset %d (# in map %d)\n", len(data), offset, len(fileHandle.chunks))
 		}
 	}
-	if isLastChunk {
+
+	fileSize := fileHandle.file.Size()
+	fmt.Printf("fileSize is: %d\n", fileSize)
+
+	updatedLastChunk := isLastChunk
+	if fileSize == total {
+
+		updatedLastChunk = true
+		fmt.Printf("fileSize is same as total, set updatedLastChunk to %t\n", updatedLastChunk)
+	}
+
+	fmt.Printf("Inside Mongo, updatedLastChunk is: %t\n", updatedLastChunk)
+	if updatedLastChunk {
 		store.deleteFileHandle(id)
 		err := fileHandle.file.Close()
 		if err != nil {
-			return &Error{fmt.Sprintf("Failed to close the file. Error: %s.", err)}
+			return updatedLastChunk, &Error{fmt.Sprintf("Failed to close the file. Error: %s.", err)}
 		}
 	} else {
 		store.putFileHandle(id, fileHandle)
 	}
 
+	return updatedLastChunk, nil
+}
+
+// Handles the last data chunk
+func (store *MongoStorage) HandleLastDataChunk(orgID string, objectType string, objectID string, isTempData bool) common.SyncServiceError {
+	var id string
+	if isTempData {
+		id = createTempObjectCollectionID(orgID, objectType, objectID)
+	} else {
+		id = createObjectCollectionID(orgID, objectType, objectID)
+	}
+
+	fileHandle := store.getFileHandle(id)
+	if fileHandle == nil {
+		return &Error{fmt.Sprintf("Failed to get file handler, file %s doesn't exist.", id)}
+	}
+
+	store.deleteFileHandle(id)
+	err := fileHandle.file.Close()
+	if err != nil {
+		return &Error{fmt.Sprintf("Failed to close the file. Error: %s.", err)}
+	}
+
 	return nil
 }
+
+// // Get the data size
+// func (store *MongoStorage) GetObjectDataSize(orgID string, objectType string, objectID string, isTempData bool) (int64, common.SyncServiceError) {
+// 	var filename string
+// 	if isTempData {
+// 		filename = createTempObjectCollectionID(orgID, objectType, objectID)
+// 	} else {
+// 		filename = createObjectCollectionID(orgID, objectType, objectID)
+// 	}
+
+// 	result := dataInfoObject{}
+
+// 	if err := store.fetchOne(dataInfos, bson.M{"filename": filename}, nil, &result); err != nil {
+// 		return 0, &Error{fmt.Sprintf("Failed to retrieve object data length. Error: %s.", err)}
+// 	}
+
+// 	return int64(result.Length), nil
+
+// }
 
 // UpdateObjectStatus updates object's status
 func (store *MongoStorage) UpdateObjectStatus(orgID string, objectType string, objectID string, status string) common.SyncServiceError {
@@ -1229,6 +1304,19 @@ func (store *MongoStorage) UpdateObjectStatus(orgID string, objectType string, o
 			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
 		}); err != nil {
 		return &Error{fmt.Sprintf("Failed to update object's status. Error: %s.", err)}
+	}
+	return nil
+}
+
+// UpdateObjectDataVerifiedStatus updates object's dataVerified field
+func (store *MongoStorage) UpdateObjectDataVerifiedStatus(orgID string, objectType string, objectID string, verified bool) common.SyncServiceError {
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	if err := store.update(objects, bson.M{"_id": id},
+		bson.M{
+			"$set":         bson.M{"metadata.data-verified": verified},
+			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+		}); err != nil {
+		return &Error{fmt.Sprintf("Failed to update object's data-verified status. Error: %s.", err)}
 	}
 	return nil
 }
@@ -1282,8 +1370,14 @@ func (store *MongoStorage) DeleteStoredObject(orgID string, objectType string, o
 }
 
 // DeleteStoredData deletes the object's data
-func (store *MongoStorage) DeleteStoredData(orgID string, objectType string, objectID string) common.SyncServiceError {
-	id := createObjectCollectionID(orgID, objectType, objectID)
+func (store *MongoStorage) DeleteStoredData(orgID string, objectType string, objectID string, isTempData bool) common.SyncServiceError {
+	var id string
+	if isTempData {
+		id = createTempObjectCollectionID(orgID, objectType, objectID)
+	} else {
+		id = createObjectCollectionID(orgID, objectType, objectID)
+	}
+
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Deleting object's data %s\n", id)
 	}
@@ -1791,6 +1885,7 @@ func (store *MongoStorage) RetrievePendingNotifications(orgID string, destType s
 	if destType == "" && destID == "" {
 		query = bson.M{"$or": []bson.M{
 			bson.M{"notification.status": common.UpdatePending},
+			bson.M{"notification.status": common.ReceivedPending},
 			bson.M{"notification.status": common.ConsumedPending},
 			bson.M{"notification.status": common.DeletePending},
 			bson.M{"notification.status": common.DeletedPending}},
@@ -1798,6 +1893,7 @@ func (store *MongoStorage) RetrievePendingNotifications(orgID string, destType s
 	} else {
 		query = bson.M{"$or": []bson.M{
 			bson.M{"notification.status": common.UpdatePending},
+			bson.M{"notification.status": common.ReceivedPending},
 			bson.M{"notification.status": common.ConsumedPending},
 			bson.M{"notification.status": common.DeletePending},
 			bson.M{"notification.status": common.DeletedPending}},

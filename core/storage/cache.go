@@ -80,19 +80,28 @@ func (store *Cache) RemoveObjectTempData(orgID string, objectType string, object
 	return store.Store.RemoveObjectTempData(orgID, objectType, objectID)
 }
 
-func (store *Cache) RetrieveTempObjectData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
-	return store.Store.RetrieveTempObjectData(orgID, objectType, objectID)
+func (store *Cache) RetrieveObjectTempData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
+	return store.Store.RetrieveObjectTempData(orgID, objectType, objectID)
 }
 
 // AppendObjectData appends a chunk of data to the object's data
 func (store *Cache) AppendObjectData(orgID string, objectType string, objectID string, dataReader io.Reader, dataLength uint32,
-	offset int64, total int64, isFirstChunk bool, isLastChunk bool) common.SyncServiceError {
-	return store.Store.AppendObjectData(orgID, objectType, objectID, dataReader, dataLength, offset, total, isFirstChunk, isLastChunk)
+	offset int64, total int64, isFirstChunk bool, isLastChunk bool, isTempData bool) (bool, common.SyncServiceError) {
+	return store.Store.AppendObjectData(orgID, objectType, objectID, dataReader, dataLength, offset, total, isFirstChunk, isLastChunk, isTempData)
+}
+
+func (store *Cache) HandleLastDataChunk(orgID string, objectType string, objectID string, isTempData bool) common.SyncServiceError {
+	return store.Store.HandleLastDataChunk(orgID, objectType, objectID, isTempData)
 }
 
 // UpdateObjectStatus updates an object's status
 func (store *Cache) UpdateObjectStatus(orgID string, objectType string, objectID string, status string) common.SyncServiceError {
 	return store.Store.UpdateObjectStatus(orgID, objectType, objectID, status)
+}
+
+// UpdateObjectDataVerifiedStatus updates object's dataVerified field
+func (store *Cache) UpdateObjectDataVerifiedStatus(orgID string, objectType string, objectID string, verified bool) common.SyncServiceError {
+	return store.Store.UpdateObjectDataVerifiedStatus(orgID, objectType, objectID, verified)
 }
 
 // UpdateObjectSourceDataURI pdates object's source data URI
@@ -181,8 +190,8 @@ func (store *Cache) RetrieveObjectAndStatus(orgID string, objectType string, obj
 }
 
 // RetrieveObjectData returns the object data with the specified parameters
-func (store *Cache) RetrieveObjectData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
-	return store.Store.RetrieveObjectData(orgID, objectType, objectID)
+func (store *Cache) RetrieveObjectData(orgID string, objectType string, objectID string, isTempData bool) (io.Reader, common.SyncServiceError) {
+	return store.Store.RetrieveObjectData(orgID, objectType, objectID, isTempData)
 }
 
 // ReadObjectData returns the object data with the specified parameters
@@ -194,6 +203,11 @@ func (store *Cache) ReadObjectData(orgID string, objectType string, objectID str
 func (store *Cache) CloseDataReader(dataReader io.Reader) common.SyncServiceError {
 	return store.Store.CloseDataReader(dataReader)
 }
+
+// // Get the data size
+// func (store *Cache) GetObjectDataSize(orgID string, objectType string, objectID string, isTempData bool) (int64, common.SyncServiceError) {
+// 	return store.Store.GetObjectDataSize(orgID, objectType, objectID, isTempData)
+// }
 
 // MarkObjectDeleted marks the object as deleted
 func (store *Cache) MarkObjectDeleted(orgID string, objectType string, objectID string) common.SyncServiceError {
@@ -221,8 +235,8 @@ func (store *Cache) DeleteStoredObject(orgID string, objectType string, objectID
 }
 
 // DeleteStoredData deletes the object's data
-func (store *Cache) DeleteStoredData(orgID string, objectType string, objectID string) common.SyncServiceError {
-	return store.Store.DeleteStoredData(orgID, objectType, objectID)
+func (store *Cache) DeleteStoredData(orgID string, objectType string, objectID string, isTempData bool) common.SyncServiceError {
+	return store.Store.DeleteStoredData(orgID, objectType, objectID, isTempData)
 }
 
 // CleanObjects removes the objects received from the other side.

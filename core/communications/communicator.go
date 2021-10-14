@@ -85,6 +85,22 @@ func (e *Error) Error() string {
 	return e.message
 }
 
+type dataTransportTimeOutError struct {
+	message string
+}
+
+func (e *dataTransportTimeOutError) Error() string {
+	if e.message == "" {
+		return "Download timeout"
+	}
+	return e.message
+}
+
+func isDataTransportTimeoutError(err error) bool {
+	_, ok := err.(*dataTransportTimeOutError)
+	return ok
+}
+
 // ignoredByHandler error is returned if a notification is ignored by the notification handler
 type ignoredByHandler struct {
 	message string
@@ -115,6 +131,8 @@ var DestReqQueue *DestinationRequestQueue
 func SendErrorResponse(writer http.ResponseWriter, err error, message string, statusCode int) {
 	if statusCode == 0 {
 		switch err.(type) {
+		case *dataTransportTimeOutError:
+			statusCode = http.StatusGatewayTimeout
 		case *common.InvalidRequest:
 			statusCode = http.StatusBadRequest
 		case *storage.Error:
@@ -143,6 +161,27 @@ func SendErrorResponse(writer http.ResponseWriter, err error, message string, st
 		buffer.WriteString("\n")
 		writer.Write(buffer.Bytes())
 	}
+}
+
+func IsInterruptedNetworkError(pResp *http.Response, err error) bool {
+	if err != nil {
+		if strings.Contains(err.Error(), ": EOF") {
+			return true
+		}
+
+		l_error_string := strings.ToLower(err.Error())
+		if strings.Contains(l_error_string, "time") && strings.Contains(l_error_string, "out") {
+			return true
+		} else if strings.Contains(l_error_string, "connection") && (strings.Contains(l_error_string, "refused") || strings.Contains(l_error_string, "reset")) {
+			return true
+		}
+	}
+
+	if pResp != nil && (pResp.StatusCode == http.StatusGatewayTimeout || pResp.StatusCode == http.StatusServiceUnavailable) {
+		return true
+	}
+
+	return false
 }
 
 func IsTransportError(pResp *http.Response, err error) bool {

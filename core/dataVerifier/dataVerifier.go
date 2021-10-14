@@ -5,7 +5,6 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
-	"fmt"
 	"hash"
 	"io"
 
@@ -64,15 +63,15 @@ func (dataVerifier *DataVerifier) VerifyDataSignature(data io.Reader, orgID stri
 	} else {
 		dr := io.TeeReader(data, dataVerifier.dataHash)
 		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("DataVerifier - In VerifyDataSignature, verifying and storing temp data for object %s %s\n", objectType, objectID)
+			trace.Debug("DataVerifier - In VerifyDataSignature, verifying and storing data for object %s %s\n", objectType, objectID)
 		}
 
 		if destinationDataURI != "" {
-			if _, err := dataURI.StoreTempData(destinationDataURI, dr, 0); err != nil {
+			if _, err := dataURI.StoreData(destinationDataURI, dr, 0); err != nil {
 				return false, err
 			}
 		} else {
-			if exists, err := Store.StoreObjectTempData(orgID, objectType, objectID, dr); err != nil || !exists {
+			if exists, err := Store.StoreObjectData(orgID, objectType, objectID, dr); err != nil || !exists {
 				return false, err
 			}
 		}
@@ -82,70 +81,103 @@ func (dataVerifier *DataVerifier) VerifyDataSignature(data io.Reader, orgID stri
 }
 
 // StoreVerifiedData will store the data from temp data that generated during data verification. And remove temp data
-func (dataVerifier *DataVerifier) StoreVerifiedData(orgID string, objectType string, objectID string, destinationDataURI string) common.SyncServiceError {
-	if dataVerifier.writeThrough {
-		return nil
-	}
+// func (dataVerifier *DataVerifier) StoreVerifiedData(orgID string, objectType string, objectID string, destinationDataURI string) common.SyncServiceError {
+// 	if dataVerifier.writeThrough {
+// 		return nil
+// 	}
 
-	if destinationDataURI != "" {
-		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("DataVerifier - In StoreVerifiedData, store data from tmp data for object %s %s at URI %s\n", objectType, objectID, destinationDataURI)
-		}
-		// rename the {file}.tmp to {file}
-		if err := dataURI.StoreDataFromTempData(destinationDataURI); err != nil {
-			return err
-		}
+// 	if destinationDataURI != "" {
+// 		if trace.IsLogging(logger.DEBUG) {
+// 			trace.Debug("DataVerifier - In StoreVerifiedData, store data from tmp data for object %s %s at URI %s\n", objectType, objectID, destinationDataURI)
+// 		}
+// 		// rename the {file}.tmp to {file}
+// 		if err := dataURI.StoreDataFromTempData(destinationDataURI); err != nil {
+// 			return err
+// 		}
+// 	} else {
+// 		// 1. Retrieve temp data, 2. Store object data, 3. Remove temp data
+// 		if trace.IsLogging(logger.DEBUG) {
+// 			trace.Debug("DataVerifier - In StoreVerifiedData, retrieve temp data for object %s %s\n", objectType, objectID)
+// 		}
+
+// 		dataReader, err := Store.RetrieveTempObjectData(orgID, objectType, objectID)
+// 		if err != nil {
+// 			return &common.InvalidRequest{Message: "Failed to read temp data fro, Error: " + err.Error()}
+// 		} else if dataReader == nil {
+// 			return &common.InvalidRequest{Message: "Read empty temp data, Error: " + err.Error()}
+// 		}
+
+// 		if trace.IsLogging(logger.DEBUG) {
+// 			trace.Debug("DataVerifier - In StoreVerifiedData, storing data for object %s %s\n", objectType, objectID)
+// 		}
+
+// 		if exists, err := Store.StoreObjectData(orgID, objectType, objectID, dataReader); err != nil {
+// 			Store.CloseDataReader(dataReader)
+// 			return err
+// 		} else if !exists {
+// 			Store.CloseDataReader(dataReader)
+// 			message := fmt.Sprintf("Object metadata is not found for object %s %s %s, Error: %s\n", orgID, objectType, objectID, err.Error())
+// 			return &common.InternalError{Message: message}
+// 		}
+// 		Store.CloseDataReader(dataReader)
+
+// 		if trace.IsLogging(logger.DEBUG) {
+// 			trace.Debug("DataVerifier - In StoreVerifiedData, remove temp data for object %s %s\n", objectType, objectID)
+// 		}
+
+// 		if err := Store.RemoveObjectTempData(orgID, objectType, objectID); err != nil {
+// 			return err
+// 		}
+// 	}
+
+// 	return nil
+
+// }
+
+// GetTempData is to get temp data for data verification
+func (dataVerifier *DataVerifier) GetTempData(metaData common.MetaData) (io.Reader, common.SyncServiceError) {
+	var dr io.Reader
+	var err common.SyncServiceError
+	if metaData.DestinationDataURI != "" {
+		dr, err = dataURI.GetData(metaData.DestinationDataURI, true)
 	} else {
-		// 1. Retrieve temp data, 2. Store object data, 3. Remove temp data
-		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("DataVerifier - In StoreVerifiedData, retrieve temp data for object %s %s\n", objectType, objectID)
-		}
-
-		dataReader, err := Store.RetrieveTempObjectData(orgID, objectType, objectID)
-		if err != nil {
-			return &common.InvalidRequest{Message: "Failed to read temp data fro, Error: " + err.Error()}
-		} else if dataReader == nil {
-			return &common.InvalidRequest{Message: "Read empty temp data, Error: " + err.Error()}
-		}
-
-		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("DataVerifier - In StoreVerifiedData, storing data for object %s %s\n", objectType, objectID)
-		}
-
-		if exists, err := Store.StoreObjectData(orgID, objectType, objectID, dataReader); err != nil {
-			Store.CloseDataReader(dataReader)
-			return err
-		} else if !exists {
-			Store.CloseDataReader(dataReader)
-			message := fmt.Sprintf("Object metadata is not found for object %s %s %s, Error: %s\n", orgID, objectType, objectID, err.Error())
-			return &common.InternalError{Message: message}
-		}
-		Store.CloseDataReader(dataReader)
-
-		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("DataVerifier - In StoreVerifiedData, remove temp data for object %s %s\n", objectType, objectID)
-		}
-
-		if err := Store.RemoveObjectTempData(orgID, objectType, objectID); err != nil {
-			return err
-		}
+		dr, err = Store.RetrieveObjectTempData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 	}
 
-	return nil
+	if err != nil {
+		return nil, err
+	}
 
+	return dr, nil
 }
 
 // CleanUp function is to clean up the temp file created during data verification
 func (dataVerifier *DataVerifier) RemoveTempData(orgID string, objectType string, objectID string, destinationDataURI string) common.SyncServiceError {
 	if destinationDataURI != "" {
-		tmpFilePath := destinationDataURI + ".tmp"
-		if err := dataURI.DeleteStoredData(tmpFilePath); err != nil {
+		if err := dataURI.DeleteStoredData(destinationDataURI, true); err != nil {
 			return err
 		}
 	} else if err := Store.RemoveObjectTempData(orgID, objectType, objectID); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (dataVerifier *DataVerifier) RemoveUnverifiedData(metaData common.MetaData) common.SyncServiceError {
+	return storage.DeleteStoredData(Store, metaData)
+
+	// if err := dataVerifier.RemoveTempData(orgID, objectType, objectID, destinationDataURI); err != nil {
+	// 	return err
+	// }
+
+	// if destinationDataURI != "" {
+	// 	if err := dataURI.DeleteStoredData(destinationDataURI, false); err != nil {
+	// 		return err
+	// 	}
+	// } else if err := Store.DeleteStoredData(orgID, objectType, objectID, false); err != nil {
+	// 	return err
+	// }
+	// return nil
 }
 
 func (dataVerifier *DataVerifier) verifyHelper(publicKeyBytes []byte, signatureBytes []byte) (bool, common.SyncServiceError) {

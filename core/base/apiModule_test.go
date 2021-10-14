@@ -422,7 +422,7 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 		}
 
 		// Get data
-		dataReader, err := store.RetrieveObjectData(row.orgID, row.objectType, row.objectID)
+		dataReader, err := store.RetrieveObjectData(row.orgID, row.objectType, row.objectID, false)
 		if err != nil {
 			t.Errorf("An error occurred in data fetch (objectID = %s). Error: %s", row.objectID, err.Error())
 		}

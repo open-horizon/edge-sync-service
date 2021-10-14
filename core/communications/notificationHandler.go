@@ -391,6 +391,14 @@ func handleUpdate(metaData common.MetaData, maxInflightChunks int) common.SyncSe
 		return &notificationHandlerError{fmt.Sprintf("Error in handleUpdate: cannot update object from the receiver side.\n")}
 	}
 
+	// If has data, and need to verifiy data, set DataVerified to false
+	//if common.Configuration.NodeType == common.ESS {
+	metaData.DataVerified = true
+	if status == common.PartiallyReceived && common.NeedDataVerification(metaData) {
+		metaData.DataVerified = false
+	}
+	//}
+
 	// Store the object. Now change the receiver status to "PartiallyReceived" or "CompletelyReceived"
 	if _, err := Store.StoreObject(metaData, nil, status); err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
@@ -470,6 +478,38 @@ func handleUpdate(metaData common.MetaData, maxInflightChunks int) common.SyncSe
 			offset += int64(metaData.ChunkSize)
 		}
 	}
+
+	// if metaData.ChunkSize <= 0 || metaData.ObjectSize <= 0 {
+	// 	fmt.Printf("Lily -- For (%s/%s/%s), metaData.ChunkSize: %d, metaData.ObjectSize: %d\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.ChunkSize, metaData.ObjectSize)
+	// 	if err := Comm.GetData(metaData, 0); err != nil {
+	// 		return err
+	// 	}
+	// } else {
+	// 	var offset int64
+	// 	for i := 0; offset < metaData.ObjectSize; i++ {
+	// 		fmt.Printf("Lily -- For (%s/%s/%s), Inside loop i=%d, offset: %d, metaData.ObjectSize: %d\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, i, offset, metaData.ObjectSize)
+	// 		fmt.Printf("Lily -- protocol: %s\n", common.Configuratin.CommunicationProtocol)
+	// 		if common.Configuration.CommunicationProtocol != common.HTTPProtocol && i >= maxInflightChunks {
+	// 			// for mqtt, check maxInflightChunks
+	// 			if trace.IsLogging(logger.DEBUG) {
+	// 				trace.Debug("Current communication protocol (%s) is not http, i(%d) >= maxInflightChunks(%d), break\n", common.Configuration.CommunicationProtocol, i, maxInflightChunks)
+	// 			}
+	// 			fmt.Printf("Current communication protocol (%s) is not http, i(%d) >= maxInflightChunks(%d), break\n", common.Configuration.CommunicationProtocol, i, maxInflightChunks)
+	// 			break
+	// 		}
+	// 		if err := Comm.GetData(metaData, offset); err != nil {
+	// 			if trace.IsLogging(logger.DEBUG) {
+	// 				trace.Debug("Receive error from GetData, retry with same offset %d, Error: %s\n", offset, err.Error())
+	// 			}
+	// 			continue
+	// 		} else {
+	// 			offset += int64(metaData.ChunkSize)
+	// 			fmt.Printf("For (%s/%s/%s) updated offset: %d\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, offset)
+
+	// 		}
+
+	// 	}
+	// }
 
 	return nil
 }
@@ -715,21 +755,23 @@ func handleObjectReceived(orgID string, objectType string, objectID string, dest
 		return &ignoredByHandler{"Ignore object received"}
 	}
 
-	// Mark that the object was delivered to this destination
-	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("Update object status to delivery for %s %s %s %s %s\n", orgID, objectType, objectID, destType, destID)
-	}
-	_, err = Store.UpdateObjectDeliveryStatus(common.Delivered, "", orgID, objectType, objectID, destType, destID)
-	if err != nil && log.IsLogging(logger.ERROR) {
-		log.Error("Error in handleObjectReceived: failed to mark object (%s %s %s) as delivered to the destination(%s %s). Error: %s. Sending destination update request to destRequestQueue", orgID, objectType, objectID, destType, destID, err)
-		// put this request in queue
-		destinationUpdateRequestInQueue := common.DestinationRequestInQueue{
-			Action:      common.Update,
-			Status:      common.Delivered,
-			Object:      *metaData,
-			Destination: common.Destination{DestType: destType, DestID: destID},
+	if common.Configuration.NodeType == common.CSS {
+		// Mark that the object was delivered to this destination
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("Update object status to delivery for %s %s %s %s %s\n", orgID, objectType, objectID, destType, destID)
 		}
-		DestReqQueue.SendDestReqToQueue(destinationUpdateRequestInQueue)
+		_, err = Store.UpdateObjectDeliveryStatus(common.Delivered, "", orgID, objectType, objectID, destType, destID)
+		if err != nil && log.IsLogging(logger.ERROR) {
+			log.Error("Error in handleObjectReceived: failed to mark object (%s %s %s) as delivered to the destination(%s %s). Error: %s. Sending destination update request to destRequestQueue", orgID, objectType, objectID, destType, destID, err)
+			// put this request in queue
+			destinationUpdateRequestInQueue := common.DestinationRequestInQueue{
+				Action:      common.Update,
+				Status:      common.Delivered,
+				Object:      *metaData,
+				Destination: common.Destination{DestType: destType, DestID: destID},
+			}
+			DestReqQueue.SendDestReqToQueue(destinationUpdateRequestInQueue)
+		}
 	}
 
 	// Mark the corresponding update notification as "received by destination"
@@ -1135,14 +1177,14 @@ func handleData(dataMessage []byte) (*common.MetaData, common.SyncServiceError) 
 
 	if dataLength != 0 {
 		if metaData.DestinationDataURI != "" {
-			if err := dataURI.AppendData(metaData.DestinationDataURI, dataReader, dataLength, offset, metaData.ObjectSize,
-				isFirstChunk, isLastChunk); err != nil {
+			if _, err := dataURI.AppendData(metaData.DestinationDataURI, dataReader, dataLength, offset, metaData.ObjectSize,
+				isFirstChunk, isLastChunk, false); err != nil {
 				common.ObjectLocks.Unlock(lockIndex)
 				return metaData, err
 			}
 		} else {
-			if err := Store.AppendObjectData(orgID, objectType, objectID, dataReader, dataLength, offset, metaData.ObjectSize,
-				isFirstChunk, isLastChunk); err != nil {
+			if _, err := Store.AppendObjectData(orgID, objectType, objectID, dataReader, dataLength, offset, metaData.ObjectSize,
+				isFirstChunk, isLastChunk, false); err != nil {
 				if storage.IsDiscarded(err) {
 					common.ObjectLocks.Unlock(lockIndex)
 					return metaData, nil
@@ -1153,7 +1195,7 @@ func handleData(dataMessage []byte) (*common.MetaData, common.SyncServiceError) 
 		}
 	}
 
-	maxRequestedOffset, err := handleChunkReceived(*metaData, offset, int64(dataLength))
+	maxRequestedOffset, err := handleChunkReceived(*metaData, offset, int64(dataLength), false)
 	if err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
 		return metaData, &notificationHandlerError{"Error in handleData: handleChunkReceived failed. Error: " + err.Error()}
@@ -1604,31 +1646,37 @@ func checkNotificationRecord(metaData common.MetaData, destType string, destID s
 	return chunksInfo.receivedDataSize, nil
 }
 
-func updateGetDataNotification(metaData common.MetaData, destType string, destID string, offset int64) common.SyncServiceError {
-	return updateNotificationChunkInfo(true, metaData, destType, destID, offset)
+func updatePushDataNotification(metaData common.MetaData, destType string, destID string, offset int64) common.SyncServiceError {
+	return updateNotificationChunkInfo(true, metaData, destType, destID, offset, common.Data)
 }
 
-func updateNotificationChunkInfo(createNotification bool, metaData common.MetaData, destType string, destID string, offset int64) common.SyncServiceError {
+func updateGetDataNotification(metaData common.MetaData, destType string, destID string, offset int64) common.SyncServiceError {
+	return updateNotificationChunkInfo(true, metaData, destType, destID, offset, common.Getdata)
+}
+
+func updateNotificationChunkInfo(createNotification bool, metaData common.MetaData, destType string, destID string, offset int64, status string) common.SyncServiceError {
 	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 	common.ObjectLocks.Lock(lockIndex)
 	defer common.ObjectLocks.Unlock(lockIndex)
 
 	id := common.CreateNotificationID(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID)
 	notificationLock.RLock()
+	fmt.Printf("id to get notification chunks info is: %s\n", id)
 	chunksInfo, ok := notificationChunks[id]
 	notificationLock.RUnlock()
 
-	if !ok {
-		if createNotification {
-			err := Store.UpdateNotificationRecord(
-				common.Notification{ObjectID: metaData.ObjectID, ObjectType: metaData.ObjectType,
-					DestOrgID: metaData.DestOrgID, DestID: destID, DestType: destType,
-					Status: common.Getdata, InstanceID: metaData.InstanceID, DataID: metaData.DataID})
-			if err != nil {
-				return &notificationHandlerError{fmt.Sprintf("Failed to update notification record. Error: %s\n", err)}
-			}
+	fmt.Printf("In updateNotificationChunkInfo, update notification status to %s\n", status)
+	if createNotification {
+		err := Store.UpdateNotificationRecord(
+			common.Notification{ObjectID: metaData.ObjectID, ObjectType: metaData.ObjectType,
+				DestOrgID: metaData.DestOrgID, DestID: destID, DestType: destType,
+				Status: status, InstanceID: metaData.InstanceID, DataID: metaData.DataID})
+		if err != nil {
+			return &notificationHandlerError{fmt.Sprintf("Failed to update notification record. Error: %s\n", err)}
 		}
+	}
 
+	if !ok {
 		chunksInfo = notificationChunksInfo{chunkSize: metaData.ChunkSize, chunkResendTimes: make(map[int64]int64)}
 		if chunksInfo.chunkSize > 0 {
 			numberOfBytes := int(((metaData.ObjectSize/int64(chunksInfo.chunkSize) + 1) / 8) + 1)
@@ -1647,6 +1695,10 @@ func updateNotificationChunkInfo(createNotification bool, metaData common.MetaDa
 	notificationLock.Lock()
 	notificationChunks[id] = chunksInfo
 	notificationLock.Unlock()
+
+	fmt.Println("For debug, check chunksInfo:")
+	chunksInfo, ok = notificationChunks[id]
+	fmt.Printf("Get chunkResendTimes[%d]: %d", offset, chunksInfo.chunkResendTimes[offset])
 	return nil
 }
 
@@ -1661,7 +1713,7 @@ func deleteNotificationChunksInfo(orgID string, objectType string, objectID stri
 	notificationLock.Unlock()
 }
 
-func handleChunkReceived(metaData common.MetaData, offset int64, size int64) (int64, common.SyncServiceError) {
+func handleChunkReceived(metaData common.MetaData, offset int64, size int64, isOtherSide bool) (int64, common.SyncServiceError) {
 	id := common.CreateNotificationID(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID)
 	notificationLock.RLock()
 	chunksInfo, ok := notificationChunks[id]
@@ -1673,7 +1725,11 @@ func handleChunkReceived(metaData common.MetaData, offset int64, size int64) (in
 	if _, ok := chunksInfo.chunkResendTimes[offset]; !ok {
 		return 0, &notificationHandlerError{"Chunk's resend time not found"}
 	}
-	delete(chunksInfo.chunkResendTimes, offset)
+
+	// check if this is to track chunk received by other side
+	if !isOtherSide {
+		delete(chunksInfo.chunkResendTimes, offset)
+	}
 
 	// The chunksInfo.chunksReceived byte array holds a bit per chunk (identified by its offset), so each byte holds the bits of 8 chunks.
 	// To access the bit of a given chunk:
@@ -1686,6 +1742,7 @@ func handleChunkReceived(metaData common.MetaData, offset int64, size int64) (in
 	bitIndex := chunkIndex & 7
 	bitMask := byte(1 << bitIndex)
 	if chunksInfo.chunksReceived[byteIndex]&bitMask == 0 {
+		// received new chunk
 		chunksInfo.receivedDataSize += size
 		chunksInfo.chunksReceived[byteIndex] |= bitMask
 	} else {
@@ -1765,7 +1822,7 @@ func getOffsetsForResendFromScratch(notification common.Notification, metaData c
 		maxInflightChunks = common.Configuration.MaxInflightChunks
 	}
 
-	if err := updateNotificationChunkInfo(false, metaData, notification.DestType, notification.DestID, 0); err != nil {
+	if err := updateNotificationChunkInfo(false, metaData, notification.DestType, notification.DestID, 0, ""); err != nil {
 		if log.IsLogging(logger.ERROR) {
 			log.Error("Failed to resend getdata notification. Error: %s\n", err)
 		}

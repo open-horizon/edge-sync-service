@@ -403,6 +403,10 @@ type MetaData struct {
 	// Optional field, default is false (not visiable to all users)
 	Public bool `json:"public" bson:"public"`
 
+	// DataVerified is an internal field set by ESS after ESS downloads data from CSS or by CSS after ESS uploads data
+	// Data can be obtained only when DataVerified field is true
+	DataVerified bool `json:"dataVerified" bson:"data-verified"`
+
 	// OwnerID is an internal field indicating who creates the object
 	// This field should not be set by users
 	OwnerID string `json:"ownerID" bson:"owner-id"`
@@ -937,6 +941,13 @@ func BlockUntilNoRunningGoRoutines() {
 
 func IsValidHashAlgorithm(hashAlgorithm string) bool {
 	if hashAlgorithm == Sha1 || hashAlgorithm == Sha256 {
+		return true
+	}
+	return false
+}
+
+func NeedDataVerification(metaData MetaData) bool {
+	if IsValidHashAlgorithm(metaData.HashAlgorithm) && metaData.PublicKey != "" && metaData.Signature != "" {
 		return true
 	}
 	return false

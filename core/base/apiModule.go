@@ -227,24 +227,42 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 		metaData.ExpectedConsumers = math.MaxInt32
 	}
 
+	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+	apiObjectLocks.Lock(lockIndex)
+	common.ObjectLocks.Lock(lockIndex)
+
+	existingObject, existingObjStatus, _ := store.RetrieveObjectAndStatus(orgID, objectType, objectID)
+	if existingObjStatus != "" && existingObjStatus != common.ReadyToSend && existingObjStatus != common.NotReadyToSend {
+		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
+		return &common.InvalidRequest{Message: "Can't update object of the receiving side"}
+	}
+
 	// Store the object in the storage module
 	status := common.NotReadyToSend
-	if data != nil || metaData.Link != "" || metaData.NoData || metaData.SourceDataURI != "" {
+	metaData.DataVerified = false
+	if metaData.Link != "" || metaData.NoData || metaData.SourceDataURI != "" {
 		status = common.ReadyToSend
 	} else if metaData.MetaOnly {
-		reader, err := store.RetrieveObjectData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+		reader, err := store.RetrieveObjectData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, false)
 		if err != nil {
+			common.ObjectLocks.Unlock(lockIndex)
+			apiObjectLocks.Unlock(lockIndex)
 			return err
 		}
 		if reader != nil {
 			status = common.ReadyToSend
 			store.CloseDataReader(reader)
 		}
-	}
+		// for MetaOnly, we will re-use the checksum fields
+		if existingObject != nil {
+			metaData.HashAlgorithm = existingObject.HashAlgorithm
+			metaData.PublicKey = existingObject.PublicKey
+			metaData.Signature = existingObject.Signature
+		}
 
-	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
-	apiObjectLocks.Lock(lockIndex)
-	common.ObjectLocks.Lock(lockIndex)
+		metaData.DataVerified = true //don't need to verify data again
+	}
 
 	if metaData.NoData {
 		data = nil
@@ -252,44 +270,64 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 		metaData.SourceDataURI = ""
 		metaData.PublicKey = ""
 		metaData.Signature = ""
-	} else if data != nil {
-		// data signature verification if metadata has both publicKey and signature
-		// data is nil for metaOnly object. Meta-only object will not apply data verification
-		if common.IsValidHashAlgorithm(metaData.HashAlgorithm) && metaData.PublicKey != "" && metaData.Signature != "" {
-			// will no store data if object metadata not exist
-			dataReader := bytes.NewReader(data)
-			dataVf := dataVerifier.NewDataVerifier(metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature)
-			if success, err := dataVf.VerifyDataSignature(dataReader, orgID, objectType, objectID, ""); !success || err != nil {
-				if trace.IsLogging(logger.ERROR) {
-					trace.Error("Failed to verify data for object %s %s, remove temp data\n", objectType, objectID)
-				}
-				dataVf.RemoveTempData(orgID, objectType, objectID, "")
-
-				common.ObjectLocks.Unlock(lockIndex)
-				apiObjectLocks.Unlock(lockIndex)
-				return err
-			}
-			dataVf.RemoveTempData(orgID, objectType, objectID, "")
-
-		}
-
-		metaData.ObjectSize = int64(len(data))
+		metaData.DataVerified = true
 	}
+
+	if !metaData.DataVerified && !common.NeedDataVerification(metaData) {
+		metaData.DataVerified = true
+	}
+
+	if data != nil && metaData.DataVerified {
+		metaData.ObjectSize = int64(len(data))
+		status = common.ReadyToSend
+	}
+
 	metaData.ChunkSize = common.Configuration.MaxDataChunkSize
 
-	_, existingObjStatus, _ := store.RetrieveObjectAndStatus(orgID, objectType, objectID)
-	if existingObjStatus != "" && existingObjStatus != common.ReadyToSend && existingObjStatus != common.NotReadyToSend {
-		common.ObjectLocks.Unlock(lockIndex)
-		apiObjectLocks.Unlock(lockIndex)
-		return &common.InvalidRequest{Message: "Can't update object of the receiving side"}
-	}
-
+	// Store metadata and data, with correct verified status
 	deletedDestinations, err := store.StoreObject(metaData, data, status)
 	if err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
 		apiObjectLocks.Unlock(lockIndex)
 		return err
 	}
+
+	// Verify
+	if data != nil {
+		// data signature verification if metadata has both publicKey and signature
+		// data is nil for metaOnly object. Meta-only object will not apply data verification
+		if common.NeedDataVerification(metaData) {
+			// will no store data if object metadata not exist
+			dataReader := bytes.NewReader(data)
+			dataVf := dataVerifier.NewDataVerifier(metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature)
+			if success, err := dataVf.VerifyDataSignature(dataReader, orgID, objectType, objectID, ""); !success || err != nil {
+				if trace.IsLogging(logger.ERROR) {
+					if err != nil {
+						trace.Error("Failed to verify data for object %s %s, Error: %s\n", objectType, objectID, err.Error())
+
+					}
+
+				}
+
+				dataVf.RemoveUnverifiedData(metaData)
+				store.UpdateObjectStatus(orgID, objectType, objectID, common.NotReadyToSend)
+
+				common.ObjectLocks.Unlock(lockIndex)
+				apiObjectLocks.Unlock(lockIndex)
+				return err
+			}
+
+			if err = store.UpdateObjectDataVerifiedStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, true); err != nil {
+				common.ObjectLocks.Unlock(lockIndex)
+				apiObjectLocks.Unlock(lockIndex)
+				return err
+			}
+			status = common.ReadyToSend
+		}
+		//metaData.ObjectSize = int64(len(data))
+	}
+
+	fmt.Printf("Finished data verification\n")
 
 	store.DeleteNotificationRecords(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, "", "")
 
@@ -301,6 +339,7 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 
 	// StoreObject increments the instance id, we need to fetch the updated meta data
 	updatedMetaData, err := store.RetrieveObject(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+
 	if err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
 		apiObjectLocks.Unlock(lockIndex)
@@ -491,13 +530,17 @@ func GetObjectData(orgID string, objectType string, objectID string) (io.Reader,
 	if metaData == nil || status == common.NotReadyToSend || status == common.PartiallyReceived {
 		return nil, nil
 	}
+
+	if !metaData.DataVerified {
+		return nil, nil
+	}
 	if metaData.DestinationDataURI != "" && status == common.CompletelyReceived {
-		return dataURI.GetData(metaData.DestinationDataURI)
+		return dataURI.GetData(metaData.DestinationDataURI, false)
 	}
 	if metaData.SourceDataURI != "" && status == common.ReadyToSend {
-		return dataURI.GetData(metaData.SourceDataURI)
+		return dataURI.GetData(metaData.SourceDataURI, false)
 	}
-	return store.RetrieveObjectData(orgID, objectType, objectID)
+	return store.RetrieveObjectData(orgID, objectType, objectID, false)
 }
 
 // GetRemovedDestinationPolicyServicesFromESS get the removedDestinationPolicyServices list
@@ -559,7 +602,7 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 	}
 
 	var dataVf *dataVerifier.DataVerifier
-	if common.IsValidHashAlgorithm(metaData.HashAlgorithm) && metaData.PublicKey != "" && metaData.Signature != "" {
+	if common.NeedDataVerification(*metaData) {
 		//start data verification
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In PutObjectData. Start data verification %s %s\n", objectType, objectID)
@@ -570,7 +613,7 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 			if trace.IsLogging(logger.ERROR) {
 				trace.Error("Failed to verify data for object %s %s, remove temp data\n", objectType, objectID)
 			}
-			dataVf.RemoveTempData(orgID, objectType, objectID, "")
+			dataVf.RemoveUnverifiedData(*metaData)
 			common.ObjectLocks.Unlock(lockIndex)
 			apiObjectLocks.Unlock(lockIndex)
 			return false, &common.InvalidRequest{Message: "Failed to verify and store data, Error: " + err.Error()}
@@ -581,10 +624,9 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 
 	}
 
-	// If the data has been verified, then we retrieve the temp data, store in DB, and delete temp data
 	if dataVf != nil {
-		if err := dataVf.StoreVerifiedData(orgID, objectType, objectID, ""); err != nil {
-			dataVf.RemoveTempData(orgID, objectType, objectID, "")
+		// If the data has been verified, then set metadata.DataVerified to true
+		if err = store.UpdateObjectDataVerifiedStatus(orgID, objectType, objectID, true); err != nil {
 			common.ObjectLocks.Unlock(lockIndex)
 			apiObjectLocks.Unlock(lockIndex)
 			return false, err

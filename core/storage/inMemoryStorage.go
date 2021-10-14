@@ -196,7 +196,7 @@ func (store *InMemoryStorage) RemoveObjectTempData(orgID string, objectType stri
 	return notFound
 }
 
-func (store *InMemoryStorage) RetrieveTempObjectData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
+func (store *InMemoryStorage) RetrieveObjectTempData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
 	store.lock()
 	defer store.unLock()
 
@@ -213,7 +213,7 @@ func (store *InMemoryStorage) RetrieveTempObjectData(orgID string, objectType st
 
 // AppendObjectData appends a chunk of data to the object's data
 func (store *InMemoryStorage) AppendObjectData(orgID string, objectType string, objectID string, dataReader io.Reader, dataLength uint32,
-	offset int64, total int64, isFirstChunk bool, isLastChunk bool) common.SyncServiceError {
+	offset int64, total int64, isFirstChunk bool, isLastChunk bool, isTempData bool) (bool, common.SyncServiceError) {
 	store.lock()
 	defer store.unLock()
 
@@ -224,7 +224,7 @@ func (store *InMemoryStorage) AppendObjectData(orgID string, objectType string, 
 		if dataLength == 0 {
 			dt, err := ioutil.ReadAll(dataReader)
 			if err != nil {
-				return &Error{"Failed to read object data. Error: " + err.Error()}
+				return isLastChunk, &Error{"Failed to read object data. Error: " + err.Error()}
 			}
 			data = dt
 			dataLength = uint32(len(data))
@@ -233,26 +233,52 @@ func (store *InMemoryStorage) AppendObjectData(orgID string, objectType string, 
 			total = offset + int64(dataLength)
 		}
 		if isFirstChunk {
-			object.data = make([]byte, total)
+			if isTempData {
+				object.tmpData = make([]byte, total)
+			} else {
+				object.data = make([]byte, total)
+			}
+
 		} else {
-			object.data = ensureArrayCapacity(object.data, total)
+			if isTempData {
+				object.tmpData = ensureArrayCapacity(object.tmpData, total)
+			} else {
+				object.data = ensureArrayCapacity(object.data, total)
+			}
+
 		}
 		if data != nil {
-			copy(object.data[offset:], data)
+			if isTempData {
+				copy(object.tmpData[offset:], data)
+			} else {
+				copy(object.data[offset:], data)
+			}
+
 		} else {
-			count, err := dataReader.Read(object.data[offset:])
-			if err != nil {
-				return &Error{"Failed to read object data. Error: " + err.Error()}
+			var count int
+			var err error
+			if isTempData {
+				count, err = dataReader.Read(object.tmpData[offset:])
+			} else {
+				count, err = dataReader.Read(object.data[offset:])
+			}
+
+			if err != nil && err != io.EOF {
+				return isLastChunk, &Error{"Failed to read object data. Error: " + err.Error()}
 			}
 			if count != int(dataLength) {
-				return &Error{fmt.Sprintf("Read %d bytes for the object data, instead of %d", count, dataLength)}
+				return isLastChunk, &Error{fmt.Sprintf("Read %d bytes for the object data, instead of %d", count, dataLength)}
 			}
 		}
 		store.objects[id] = object
-		return nil
+		return isLastChunk, nil
 	}
 
-	return notFound
+	return isLastChunk, notFound
+}
+
+func (store *InMemoryStorage) HandleLastDataChunk(orgID string, objectType string, objectID string, isTempData bool) common.SyncServiceError {
+	return nil
 }
 
 // UpdateObjectStatus updates an object's status
@@ -266,6 +292,21 @@ func (store *InMemoryStorage) UpdateObjectStatus(orgID string, objectType string
 		if status == common.ConsumedByDest {
 			object.consumedTimestamp = time.Now()
 		}
+		store.objects[id] = object
+		return nil
+	}
+
+	return &NotFound{"Object not found"}
+}
+
+// UpdateObjectDataVerifiedStatus updates object's dataVerified field
+func (store *InMemoryStorage) UpdateObjectDataVerifiedStatus(orgID string, objectType string, objectID string, verified bool) common.SyncServiceError {
+	store.lock()
+	defer store.unLock()
+
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	if object, ok := store.objects[id]; ok {
+		object.meta.DataVerified = verified
 		store.objects[id] = object
 		return nil
 	}
@@ -474,14 +515,20 @@ func (store *InMemoryStorage) RetrieveObjectAndStatus(orgID string, objectType s
 }
 
 // RetrieveObjectData returns the object data with the specified parameters
-func (store *InMemoryStorage) RetrieveObjectData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
+func (store *InMemoryStorage) RetrieveObjectData(orgID string, objectType string, objectID string, isTempData bool) (io.Reader, common.SyncServiceError) {
 	store.lock()
 	defer store.unLock()
 
 	id := createObjectCollectionID(orgID, objectType, objectID)
 	if object, ok := store.objects[id]; ok {
-		if object.data != nil && len(object.data) > 0 {
-			return bytes.NewReader(object.data), nil
+		if isTempData {
+			if object.tmpData != nil && len(object.tmpData) > 0 {
+				return bytes.NewReader(object.tmpData), nil
+			}
+		} else {
+			if object.data != nil && len(object.data) > 0 {
+				return bytes.NewReader(object.data), nil
+			}
 		}
 		return nil, nil
 	}
@@ -522,6 +569,27 @@ func (store *InMemoryStorage) ReadObjectData(orgID string, objectType string, ob
 
 	return nil, true, 0, &common.NotFound{}
 }
+
+// // Get the data size
+// func (store *InMemoryStorage) GetObjectDataSize(orgID string, objectType string, objectID string, isTempData bool) (int64, common.SyncServiceError) {
+// 	store.lock()
+// 	defer store.unLock()
+
+// 	id := createObjectCollectionID(orgID, objectType, objectID)
+// 	if object, ok := store.objects[id]; ok {
+// 		if isTempData {
+// 			if object.tmpData != nil {
+// 				return int64(len(object.tmpData)), nil
+// 			}
+// 		} else {
+// 			if object.data != nil {
+// 				return int64(len(object.data)), nil
+// 			}
+// 		}
+// 		return 0, nil
+// 	}
+// 	return 0, &common.NotFound{}
+// }
 
 // MarkObjectDeleted marks the object as deleted
 func (store *InMemoryStorage) MarkObjectDeleted(orgID string, objectType string, objectID string) common.SyncServiceError {
@@ -586,13 +654,17 @@ func (store *InMemoryStorage) DeleteStoredObject(orgID string, objectType string
 }
 
 // DeleteStoredData deletes the object's data
-func (store *InMemoryStorage) DeleteStoredData(orgID string, objectType string, objectID string) common.SyncServiceError {
+func (store *InMemoryStorage) DeleteStoredData(orgID string, objectType string, objectID string, isTempData bool) common.SyncServiceError {
 	store.lock()
 	defer store.unLock()
 
 	id := createObjectCollectionID(orgID, objectType, objectID)
 	if object, ok := store.objects[id]; ok {
-		object.data = nil
+		if isTempData {
+			object.tmpData = nil
+		} else {
+			object.data = nil
+		}
 		store.objects[id] = object
 		return nil
 	}
@@ -1044,7 +1116,7 @@ func (store *InMemoryStorage) readPersistedTimebase(path string) int64 {
 		return 0
 	}
 
-	data, err := dataURI.GetData("file://" + path)
+	data, err := dataURI.GetData("file://"+path, false)
 	if err != nil || data == nil {
 		return 0
 	}

@@ -40,7 +40,7 @@ func TestHTTPCommUpdatedObjects(t *testing.T) {
 	}
 
 	testObjects := []httpTestObjectInfo{
-		{common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg000", DestID: "dev1", DestType: "httpDevice"},
+		{common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg000", DestID: "dev1", DestType: "httpDevice", ObjectSize: int64(len([]byte("plokmijnuhbygv")))},
 			common.ReadyToSend, []byte("plokmijnuhbygv")},
 		{common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "myorg000", DestID: "dev1", DestType: "httpDevice",
 			Deleted: true},
