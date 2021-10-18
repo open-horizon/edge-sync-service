@@ -27,10 +27,10 @@ jobs:
           path: go/src/github.com/open-horizon/edge-sync-service
 
       # prepare the environment
-      - name: Set up golang 1.14.1
+      - name: Set up golang 1.16
         uses: actions/setup-go@v2
         with:
-           go-version: '1.14.1'
+           go-version: '1.16'
 
       # build 
       - name: Build
