@@ -8,9 +8,11 @@ import (
 	"hash"
 	"os"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
+	"golang.org/x/sync/semaphore"
 )
 
 // SyncServiceError is a common error type used in the sync service
@@ -774,6 +776,16 @@ func NewLocks(name string) *Locks {
 
 	locks.locks = make([]sync.RWMutex, locks.numberOfLocks)
 	return &locks
+}
+
+
+// ObjectDownloadSemaphore sets the concurrent spi object download concurrency
+var ObjectDownloadSemaphore *semaphore.Weighted
+
+// InitObjectDownloadSemaphore initializes ObjectDownloadSemaphore
+func InitObjectDownloadSemaphore() {
+	maxWorkers := runtime.GOMAXPROCS(-1) * Configuration.HTTPCSSObjDownloadConcurrencyMultiplier
+	ObjectDownloadSemaphore = semaphore.NewWeighted(int64(maxWorkers))
 }
 
 // ObjectLocks are locks for object and notification changes

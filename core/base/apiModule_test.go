@@ -109,6 +109,7 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 	dataVerifier.Store = store
 
 	common.InitObjectLocks()
+	common.InitObjectDownloadSemaphore()
 
 	dests := []string{"device:dev1", "device2:dev", "device2:dev1"}
 
@@ -807,6 +808,7 @@ func testESSObjectDeletedAPI(store storage.Storage, t *testing.T) {
 	communications.Store = store
 	dataVerifier.Store = store
 	common.InitObjectLocks()
+	common.InitObjectDownloadSemaphore()
 
 	if err := store.Init(); err != nil {
 		t.Errorf("Failed to initialize storage driver. Error: %s\n", err.Error())
@@ -902,6 +904,7 @@ func TestObjectDestinationsAPI(t *testing.T) {
 func testObjectDestinationsAPI(store storage.Storage, t *testing.T) {
 	communications.Store = store
 	common.InitObjectLocks()
+	common.InitObjectDownloadSemaphore()
 
 	if err := store.Init(); err != nil {
 		t.Errorf("Failed to initialize storage driver. Error: %s\n", err.Error())
@@ -1330,6 +1333,7 @@ func testObjectWithPolicyAPI(store storage.Storage, t *testing.T) {
 
 	communications.Store = store
 	common.InitObjectLocks()
+	common.InitObjectDownloadSemaphore()
 
 	if err := store.Init(); err != nil {
 		t.Errorf("Failed to initialize storage driver. Error: %s\n", err.Error())
@@ -1414,6 +1418,7 @@ func testObjectWithPolicyAPI(store storage.Storage, t *testing.T) {
 	}
 
 	common.InitObjectLocks()
+	common.InitObjectDownloadSemaphore()
 
 	for _, destination := range destinations {
 		if err := store.StoreDestination(destination); err != nil {
