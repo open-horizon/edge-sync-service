@@ -1354,14 +1354,14 @@ func (communication *HTTP) handlePutData(orgID string, objectType string, object
 	var handlErr common.SyncServiceError
 	if totalSize == 0 && startOffset == 0 && endOffset == 0 {
 		//no Content-Range header, return all data
-		// common.ObjectLocks.Unlock(lockIndex)
-		// msg := "Mock timetou for testing"
-		// return &dataTransportTimeOutError{msg}
+		common.ObjectLocks.Unlock(lockIndex)
+		msg := "Mock timetou for testing"
+		return &dataTransportTimeOutError{msg}
 		//return handlErr
-		if isLastChunk, handlErr = communication.handlePutAllData(*metaData, request); err != nil {
-			common.ObjectLocks.Unlock(lockIndex)
-			return handlErr
-		}
+		// if isLastChunk, handlErr = communication.handlePutAllData(*metaData, request); err != nil {
+		// 	common.ObjectLocks.Unlock(lockIndex)
+		// 	return handlErr
+		// }
 	} else {
 		// return data by range
 		if trace.IsLogging(logger.DEBUG) {
@@ -1668,8 +1668,8 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 			}
 			writer.Header().Add("Content-Range", fmt.Sprintf("bytes %d-%d/%d", beginOffset, endOffset, objectMeta.ObjectSize))
 			if !hasRangeHeader {
-				writer.WriteHeader(http.StatusOK)
-				//writer.WriteHeader(http.StatusGatewayTimeout)
+				//writer.WriteHeader(http.StatusOK)
+				writer.WriteHeader(http.StatusGatewayTimeout)
 			} else {
 				writer.WriteHeader(http.StatusPartialContent)
 			}
