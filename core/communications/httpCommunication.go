@@ -645,9 +645,10 @@ func (communication *HTTP) GetData(metaData common.MetaData, offset int64) commo
 	}
 
 	if err := communication.GetAllData(metaData, offset); err != nil {
+		fmt.Printf("checking if err is DataTransportTimeoutError")
 		if isDataTransportTimeoutError(err) {
 			for i := 0; offset < metaData.ObjectSize; i++ {
-				fmt.Printf("Lily -- For (%s/%s/%s), Inside loop i=%d, offset: %d, metaData.ObjectSize: %d\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, i, offset, metaData.ObjectSize)
+				fmt.Printf("Lily -- For (%s/%s/%s), Inside loop i=%d, offset: %d, metaData.ObjectSize: %d, chunkSize: %d\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, i, offset, metaData.ObjectSize, metaData.ChunkSize)
 				fmt.Printf("Lily -- protocol: %s\n", common.Configuration.CommunicationProtocol)
 				if err := communication.GetDataByChunk(metaData, offset); err != nil {
 					if trace.IsLogging(logger.DEBUG) {
@@ -686,6 +687,7 @@ func (communication *HTTP) GetData(metaData common.MetaData, offset int64) commo
 }
 
 func (communication *HTTP) GetAllData(metaData common.MetaData, offset int64) common.SyncServiceError {
+	fmt.Println("In GetAllData")
 	// For debugging
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In http.GetData, retrieve notification %s, %s. %s, %s, %s", metaData.DestID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID)
@@ -728,11 +730,13 @@ func (communication *HTTP) GetAllData(metaData common.MetaData, offset int64) co
 	if response != nil && response.Body != nil {
 		defer response.Body.Close()
 	}
+	fmt.Printf("check if response has interrupted network error: %d\n", response.StatusCode)
 	if IsInterruptedNetworkError(response, err) {
 		if log.IsLogging(logger.ERROR) {
 			log.Error("In interrupted network, will try to download data by chunk for %s %s\n", metaData.ObjectType, metaData.ObjectID)
 		}
 		msg := "Timeout in GetData: failed to receive data from the other side."
+		fmt.Println(msg)
 		return &dataTransportTimeOutError{msg}
 	}
 
@@ -1352,16 +1356,16 @@ func (communication *HTTP) handlePutData(orgID string, objectType string, object
 
 	isLastChunk := false
 	var handlErr common.SyncServiceError
-	if totalSize == 0 && startOffset == 0 && endOffset == 0 {
+	if totalSize == 0 && startOffset == -1 && endOffset == -1 {
 		//no Content-Range header, return all data
-		common.ObjectLocks.Unlock(lockIndex)
-		msg := "Mock timetou for testing"
-		return &dataTransportTimeOutError{msg}
+		// common.ObjectLocks.Unlock(lockIndex)
+		// msg := "Mock timetou for testing"
+		// return &dataTransportTimeOutError{msg}
 		//return handlErr
-		// if isLastChunk, handlErr = communication.handlePutAllData(*metaData, request); err != nil {
-		// 	common.ObjectLocks.Unlock(lockIndex)
-		// 	return handlErr
-		// }
+		if isLastChunk, handlErr = communication.handlePutAllData(*metaData, request); err != nil {
+			common.ObjectLocks.Unlock(lockIndex)
+			return handlErr
+		}
 	} else {
 		// return data by range
 		if trace.IsLogging(logger.DEBUG) {
@@ -1554,130 +1558,37 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 	}
 
 	hasRangeHeader := true
-	beginOffset, endOffset, err := getStartAndEndRangeFromRangeHeader(request)
+	startOffset, endOffset, err := getStartAndEndRangeFromRangeHeader(request)
 	if err != nil {
 		SendErrorResponse(writer, err, "", 0)
 	}
 
-	if beginOffset == 0 && endOffset == 0 {
+	if startOffset == -1 && endOffset == -1 {
 		// Range header not specified, will get all data
+		startOffset = 0
 		endOffset = objectMeta.ObjectSize - 1
 		hasRangeHeader = false
 	}
 
+	dataLength := int(endOffset - startOffset + 1)
+
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Trace("Handling object get data, retrieve object data for %s %s with range %d-%d\n", objectType, objectID, beginOffset, endOffset)
+		trace.Trace("Handling object get data, retrieve object data for %s %s with range %d-%d\n", objectType, objectID, startOffset, endOffset)
 	}
 
-	/*
-		if dataLength == int(objectMeta.ObjectSize) || !hasRangeHeader {
-			dataReader, err := Store.RetrieveObjectData(orgID, objectType, objectID, false)
-			if err != nil {
-				SendErrorResponse(writer, err, "", 0)
-			}
-
-			if dataReader == nil {
-				writer.WriteHeader(http.StatusNotFound)
-			} else {
-				writer.Header().Add("Content-Type", "application/octet-stream")
-				writer.WriteHeader(http.StatusOK)
-				if _, err := io.Copy(writer, dataReader); err != nil {
-					SendErrorResponse(writer, err, "", 0)
-				}
-				if err := Store.CloseDataReader(dataReader); err != nil {
-					SendErrorResponse(writer, err, "", 0)
-				}
-				if trace.IsLogging(logger.DEBUG) {
-					trace.Debug("Handling object get data, update notification for %s %s %s %s, status: %s\n", objectType, objectID, destType, destID, common.Data)
-				}
-			}
-		} else {
-			if objectData, eof, length, err := Store.ReadObjectData(orgID, objectType, objectID, dataLength, beginOffset); err != nil {
-				SendErrorResponse(writer, err, "", 0)
-			} else {
-				if len(objectData) == 0 {
-					fmt.Printf("len(objectData)==%d, return 404\n", len(objectData))
-					writer.WriteHeader(http.StatusNotFound)
-				} else {
-					dataReader := bytes.NewReader(objectData)
-					writer.Header().Add("Content-Type", "application/octet-stream")
-					writer.Header().Add("Content-Length", strconv.Itoa(length))
-					if eof {
-						endOffset = objectMeta.ObjectSize - 1
-					}
-					writer.Header().Add("Content-Range", fmt.Sprintf("bytes %d-%d/%d", beginOffset, endOffset, objectMeta.ObjectSize))
-					if !hasRangeHeader {
-						//writer.WriteHeader(http.StatusOK)
-						writer.WriteHeader(http.StatusGatewayTimeout)
-					} else {
-						writer.WriteHeader(http.StatusPartialContent)
-					}
-
-					fmt.Printf("Set header Content-Length: %d\n", length)
-					fmt.Printf("Set header Content-Range: bytes %d-%d/%d\n", beginOffset, endOffset, objectMeta.ObjectSize)
-					if _, err := io.Copy(writer, dataReader); err != nil {
-						SendErrorResponse(writer, err, "", 0)
-					}
-					if err := Store.CloseDataReader(dataReader); err != nil {
-						SendErrorResponse(writer, err, "", 0)
-					}
-				}
-			}
+	if dataLength == int(objectMeta.ObjectSize) || !hasRangeHeader {
+		dataReader, err := Store.RetrieveObjectData(orgID, objectType, objectID, false)
+		if err != nil {
+			updateNotificationRecord = false
+			SendErrorResponse(writer, err, "", 0)
 		}
 
-		// update notification only if current notification.InstanceID == metadata.InstanceID && current notification.status == "updated" && this is the last chunk
-		if updateNotificationRecord {
-			if trace.IsLogging(logger.DEBUG) {
-				trace.Debug("Handling object get data, update notification status to data for %s %s %s %s %s\n", orgID, objectType, objectID, destType, destID)
-			}
-			notification := common.Notification{ObjectID: objectID, ObjectType: objectType,
-				DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.Data, InstanceID: instanceID, DataID: dataID}
-			if err = Store.UpdateNotificationRecord(notification); err != nil {
-				if log.IsLogging(logger.ERROR) {
-					log.Error("Handling object get data, failed to update notification for %s %s %s %s with status: %s\n", objectType, objectID, destType, destID, common.Data)
-				}
-			} else {
-				if trace.IsLogging(logger.DEBUG) {
-					log.Debug("Handling object get data, update notification for %s %s %s %s with status %s is done\n", objectType, objectID, destType, destID, common.Data)
-				}
-			}
-		} else {
-			if trace.IsLogging(logger.DEBUG) {
-				trace.Debug("Handling object get data, return WITHOUT update notification status to data for %s %s %s %s %s, set updateNotificationRecord to %t \n", orgID, objectType, objectID, destType, destID, updateNotificationRecord)
-			}
-		}*/
-
-	dataLength := int(endOffset - beginOffset + 1)
-	if objectData, eof, length, err := Store.ReadObjectData(orgID, objectType, objectID, dataLength, beginOffset); err != nil {
-		if log.IsLogging(logger.ERROR) {
-			log.Error("error in ReadObjectData for %s %s %s from offset: %d, Error: %s\n", orgID, objectType, objectID, beginOffset, err.Error())
-		}
-		SendErrorResponse(writer, err, "", 0)
-	} else {
-		if len(objectData) == 0 {
-			if trace.IsLogging(logger.DEBUG) {
-				trace.Trace("data length is 0 for %s %s %s\n", orgID, objectType, objectID)
-			}
+		if dataReader == nil {
+			updateNotificationRecord = false
 			writer.WriteHeader(http.StatusNotFound)
 		} else {
-			dataReader := bytes.NewReader(objectData)
 			writer.Header().Add("Content-Type", "application/octet-stream")
-			writer.Header().Add("Content-Length", strconv.Itoa(length))
-			if eof {
-				endOffset = objectMeta.ObjectSize - 1
-			}
-			writer.Header().Add("Content-Range", fmt.Sprintf("bytes %d-%d/%d", beginOffset, endOffset, objectMeta.ObjectSize))
-			if !hasRangeHeader {
-				//writer.WriteHeader(http.StatusOK)
-				writer.WriteHeader(http.StatusGatewayTimeout)
-			} else {
-				writer.WriteHeader(http.StatusPartialContent)
-			}
-
-			if trace.IsLogging(logger.DEBUG) {
-				trace.Trace("Set header Content-Length: %d, set header Content-Range: bytes %d-%d/%d\n", length, beginOffset, endOffset, objectMeta.ObjectSize)
-			}
-
+			writer.WriteHeader(http.StatusOK)
 			if _, err := io.Copy(writer, dataReader); err != nil {
 				SendErrorResponse(writer, err, "", 0)
 			}
@@ -1687,29 +1598,127 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 			if trace.IsLogging(logger.DEBUG) {
 				trace.Debug("Handling object get data, update notification for %s %s %s %s, status: %s\n", objectType, objectID, destType, destID, common.Data)
 			}
-			// update notification only if current notification.InstanceID == metadata.InstanceID && current notification.status == "updated" && this is the last chunk
-			if updateNotificationRecord {
-				if trace.IsLogging(logger.DEBUG) {
-					trace.Debug("Handling object get data, update notification status to data for %s %s %s %s %s\n", orgID, objectType, objectID, destType, destID)
-				}
-				notification := common.Notification{ObjectID: objectID, ObjectType: objectType,
-					DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.Data, InstanceID: instanceID, DataID: dataID}
-				if err = Store.UpdateNotificationRecord(notification); err != nil {
-					if log.IsLogging(logger.ERROR) {
-						log.Error("Handling object get data, failed to update notification for %s %s %s %s with status: %s\n", objectType, objectID, destType, destID, common.Data)
-					}
-				} else {
-					if trace.IsLogging(logger.DEBUG) {
-						log.Debug("Handling object get data, update notification for %s %s %s %s with status %s is done\n", objectType, objectID, destType, destID, common.Data)
-					}
-				}
+		}
+	} else {
+		// dataLength is partial && no range header
+		if objectData, eof, length, err := Store.ReadObjectData(orgID, objectType, objectID, dataLength, startOffset); err != nil {
+			updateNotificationRecord = false
+			SendErrorResponse(writer, err, "", 0)
+		} else {
+			if len(objectData) == 0 {
+				fmt.Printf("len(objectData)==%d, return 404\n", len(objectData))
+				updateNotificationRecord = false
+				writer.WriteHeader(http.StatusNotFound)
 			} else {
-				if trace.IsLogging(logger.DEBUG) {
-					trace.Debug("Handling object get data, return WITHOUT update notification status to data for %s %s %s %s %s, set updateNotificationRecord to %t \n", orgID, objectType, objectID, destType, destID, updateNotificationRecord)
+				dataReader := bytes.NewReader(objectData)
+				writer.Header().Add("Content-Type", "application/octet-stream")
+				writer.Header().Add("Content-Length", strconv.Itoa(length))
+				if eof {
+					endOffset = objectMeta.ObjectSize - 1
+				}
+				writer.Header().Add("Content-Range", fmt.Sprintf("bytes %d-%d/%d", startOffset, endOffset, objectMeta.ObjectSize))
+				writer.WriteHeader(http.StatusPartialContent)
+
+				fmt.Printf("Set header Content-Length: %d\n", length)
+				fmt.Printf("Set header Content-Range: bytes %d-%d/%d\n", startOffset, endOffset, objectMeta.ObjectSize)
+				if _, err := io.Copy(writer, dataReader); err != nil {
+					SendErrorResponse(writer, err, "", 0)
+				}
+				if err := Store.CloseDataReader(dataReader); err != nil {
+					SendErrorResponse(writer, err, "", 0)
 				}
 			}
 		}
 	}
+
+	// update notification only if current notification.InstanceID == metadata.InstanceID && current notification.status == "updated" && this is the last chunk
+	if updateNotificationRecord {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("Handling object get data, update notification status to data for %s %s %s %s %s\n", orgID, objectType, objectID, destType, destID)
+		}
+		notification := common.Notification{ObjectID: objectID, ObjectType: objectType,
+			DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.Data, InstanceID: instanceID, DataID: dataID}
+		if err = Store.UpdateNotificationRecord(notification); err != nil {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("Handling object get data, failed to update notification for %s %s %s %s with status: %s\n", objectType, objectID, destType, destID, common.Data)
+			}
+		} else {
+			if trace.IsLogging(logger.DEBUG) {
+				log.Debug("Handling object get data, update notification for %s %s %s %s with status %s is done\n", objectType, objectID, destType, destID, common.Data)
+			}
+		}
+	} else {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("Handling object get data, return WITHOUT update notification status to data for %s %s %s %s %s, set updateNotificationRecord to %t \n", orgID, objectType, objectID, destType, destID, updateNotificationRecord)
+		}
+	}
+
+	/*
+
+		if objectData, eof, length, err := Store.ReadObjectData(orgID, objectType, objectID, dataLength, startOffset); err != nil {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("error in ReadObjectData for %s %s %s from offset: %d, Error: %s\n", orgID, objectType, objectID, startOffset, err.Error())
+			}
+			SendErrorResponse(writer, err, "", 0)
+		} else {
+			if len(objectData) == 0 {
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Trace("data length is 0 for %s %s %s\n", orgID, objectType, objectID)
+				}
+				writer.WriteHeader(http.StatusNotFound)
+			} else {
+				dataReader := bytes.NewReader(objectData)
+				writer.Header().Add("Content-Type", "application/octet-stream")
+				writer.Header().Add("Content-Length", strconv.Itoa(length))
+				if eof {
+					endOffset = objectMeta.ObjectSize - 1
+				}
+				writer.Header().Add("Content-Range", fmt.Sprintf("bytes %d-%d/%d", startOffset, endOffset, objectMeta.ObjectSize))
+				if !hasRangeHeader {
+					writer.WriteHeader(http.StatusOK)
+					//writer.WriteHeader(http.StatusGatewayTimeout)
+				} else {
+					writer.WriteHeader(http.StatusPartialContent)
+				}
+
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Trace("Set header Content-Length: %d, set header Content-Range: bytes %d-%d/%d\n", length, startOffset, endOffset, objectMeta.ObjectSize)
+				}
+
+				if _, err := io.Copy(writer, dataReader); err != nil {
+					SendErrorResponse(writer, err, "", 0)
+				}
+
+				if err := Store.CloseDataReader(dataReader); err != nil {
+					SendErrorResponse(writer, err, "", 0)
+				}
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Debug("Handling object get data, update notification for %s %s %s %s, status: %s\n", objectType, objectID, destType, destID, common.Data)
+				}
+				// update notification only if current notification.InstanceID == metadata.InstanceID && current notification.status == "updated" && this is the last chunk
+				if updateNotificationRecord {
+					if trace.IsLogging(logger.DEBUG) {
+						trace.Debug("Handling object get data, update notification status to data for %s %s %s %s %s\n", orgID, objectType, objectID, destType, destID)
+					}
+					notification := common.Notification{ObjectID: objectID, ObjectType: objectType,
+						DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.Data, InstanceID: instanceID, DataID: dataID}
+					if err = Store.UpdateNotificationRecord(notification); err != nil {
+						if log.IsLogging(logger.ERROR) {
+							log.Error("Handling object get data, failed to update notification for %s %s %s %s with status: %s\n", objectType, objectID, destType, destID, common.Data)
+						}
+					} else {
+						if trace.IsLogging(logger.DEBUG) {
+							log.Debug("Handling object get data, update notification for %s %s %s %s with status %s is done\n", objectType, objectID, destType, destID, common.Data)
+						}
+					}
+				} else {
+					if trace.IsLogging(logger.DEBUG) {
+						trace.Debug("Handling object get data, return WITHOUT update notification status to data for %s %s %s %s %s, set updateNotificationRecord to %t \n", orgID, objectType, objectID, destType, destID, updateNotificationRecord)
+					}
+				}
+			}
+		}
+	*/
 }
 
 func (communication *HTTP) pushData(metaData *common.MetaData) common.SyncServiceError {
@@ -1728,12 +1737,12 @@ func (communication *HTTP) pushData(metaData *common.MetaData) common.SyncServic
 					if !isDataTransportTimeoutError(err) {
 						return err
 					}
-					time.Sleep(5 * time.Second)
+					//time.Sleep(5 * time.Second)
 					continue
 				} else {
 					offset += int64(metaData.ChunkSize)
 					//offset += int64(metaData.ChunkSize * 2)
-					time.Sleep(5 * time.Second)
+					//time.Sleep(5 * time.Second)
 					fmt.Printf("For (%s/%s/%s) updated offset: %d\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, offset)
 				}
 			}
@@ -2210,27 +2219,27 @@ func getStartAndEndRangeFromRangeHeader(request *http.Request) (int64, int64, co
 	requestRangeAll := request.Header.Get("Range")
 	fmt.Printf("Range header: %s\n", requestRangeAll)
 	if requestRangeAll == "" {
-		return 0, 0, nil
+		return -1, -1, nil
 	}
 	requestRange := requestRangeAll[6:]
 	ranges := strings.Split(requestRange, "-")
 
 	if len(ranges) != 2 {
-		return 0, 0, &common.InvalidRequest{Message: "Failed to parse Range header: " + requestRangeAll}
+		return -1, -1, &common.InvalidRequest{Message: "Failed to parse Range header: " + requestRangeAll}
 	}
 
 	beginOffset, err := strconv.ParseInt(ranges[0], 10, 64)
 	if err != nil {
-		return 0, 0, &common.InvalidRequest{Message: "Failed to get begin offset from Range header: " + err.Error()}
+		return -1, -1, &common.InvalidRequest{Message: "Failed to get begin offset from Range header: " + err.Error()}
 	}
 
 	endOffset, err := strconv.ParseInt(ranges[1], 10, 64)
 	if err != nil {
-		return 0, 0, &common.InvalidRequest{Message: "Failed to get end offset from Range header: " + err.Error()}
+		return -1, -1, &common.InvalidRequest{Message: "Failed to get end offset from Range header: " + err.Error()}
 	}
 
 	if beginOffset > endOffset {
-		return 0, 0, &common.InvalidRequest{Message: "Begin offset cannot be greater than end offset"}
+		return -1, -1, &common.InvalidRequest{Message: "Begin offset cannot be greater than end offset"}
 	}
 
 	return beginOffset, endOffset, nil
@@ -2243,38 +2252,38 @@ func getStartAndEndRangeFromContentRangeHeader(request *http.Request) (int64, in
 	requestContentRange := request.Header.Get("Content-Range")
 	fmt.Printf("Content-Range header: %s\n", requestContentRange)
 	if requestContentRange == "" {
-		return 0, 0, 0, nil
+		return 0, -1, -1, nil
 	}
 	contentRange := strings.Replace(requestContentRange, "bytes ", "", -1)
 	// 1-2/30
 	ranges := strings.Split(contentRange, "/")
 
 	if len(ranges) != 2 {
-		return 0, 0, 0, &common.InvalidRequest{Message: "Failed to parse Content-Range header: " + requestContentRange}
+		return 0, -1, -1, &common.InvalidRequest{Message: "Failed to parse Content-Range header: " + requestContentRange}
 	}
 	// [1-2, 30]
 	totalSize, err := strconv.ParseInt(ranges[1], 10, 64)
 	if err != nil {
-		return 0, 0, 0, &common.InvalidRequest{Message: "Failed to get total size from Content-Range header: " + err.Error()}
+		return 0, -1, -1, &common.InvalidRequest{Message: "Failed to get total size from Content-Range header: " + err.Error()}
 	}
 
 	offsets := strings.Split(ranges[0], "-")
 	if len(offsets) != 2 {
-		return 0, 0, 0, &common.InvalidRequest{Message: "Failed to get offsets from Content-Range header: " + requestContentRange}
+		return 0, -1, -1, &common.InvalidRequest{Message: "Failed to get offsets from Content-Range header: " + requestContentRange}
 	}
 
 	startOffset, err := strconv.ParseInt(offsets[0], 10, 64)
 	if err != nil {
-		return 0, 0, 0, &common.InvalidRequest{Message: "Failed to get start offset from Content-Range header: " + err.Error()}
+		return 0, -1, -1, &common.InvalidRequest{Message: "Failed to get start offset from Content-Range header: " + err.Error()}
 	}
 
 	endOffset, err := strconv.ParseInt(offsets[1], 10, 64)
 	if err != nil {
-		return 0, 0, 0, &common.InvalidRequest{Message: "Failed to get end offset from Content-Range header: " + err.Error()}
+		return 0, -1, -1, &common.InvalidRequest{Message: "Failed to get end offset from Content-Range header: " + err.Error()}
 	}
 
 	if startOffset > endOffset {
-		return 0, 0, 0, &common.InvalidRequest{Message: "Begin offset cannot be greater than end offset"}
+		return 0, -1, -1, &common.InvalidRequest{Message: "Begin offset cannot be greater than end offset"}
 	}
 
 	return totalSize, startOffset, endOffset, nil
