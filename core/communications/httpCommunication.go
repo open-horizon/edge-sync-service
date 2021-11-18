@@ -732,10 +732,18 @@ func (communication *HTTP) GetAllData(metaData common.MetaData, offset int64) co
 	}
 	fmt.Printf("check if response has interrupted network error: %d\n", response.StatusCode)
 	if IsInterruptedNetworkError(response, err) {
-		if log.IsLogging(logger.ERROR) {
-			log.Error("In interrupted network, will try to download data by chunk for %s %s\n", metaData.ObjectType, metaData.ObjectID)
+		msg := "Timeout in GetData: failed to receive data from the other side"
+		if err != nil {
+			msg = fmt.Sprintf("%s. Error: %s", msg, err.Error())
 		}
-		msg := "Timeout in GetData: failed to receive data from the other side."
+
+		if response != nil {
+			msg = fmt.Sprintf("%s. Response code: %d", msg, response.StatusCode)
+		}
+		if log.IsLogging(logger.ERROR) {
+			log.Error("In interrupted network, will try to download data by chunk for %s %s. %s\n", metaData.ObjectType, metaData.ObjectID, msg)
+		}
+
 		fmt.Println(msg)
 		return &dataTransportTimeOutError{msg}
 	}
@@ -748,7 +756,6 @@ func (communication *HTTP) GetAllData(metaData common.MetaData, offset int64) co
 	}
 	if response.StatusCode != http.StatusOK {
 		msg := fmt.Sprintf("Error in GetData: failed to receive data from the other side. Error code: %d, ", response.StatusCode)
-		// check the error. if it is 504
 		return &notificationHandlerError{msg}
 	}
 
@@ -765,6 +772,23 @@ func (communication *HTTP) GetAllData(metaData common.MetaData, offset int64) co
 			dataVf.RemoveUnverifiedData(metaData)
 			common.ObjectLocks.Unlock(lockIndex)
 			return err
+		}
+	} else {
+		// Directly store the data
+		if metaData.DestinationDataURI != "" {
+			if _, err := dataURI.StoreData(metaData.DestinationDataURI, response.Body, 0); err != nil {
+				common.ObjectLocks.Unlock(lockIndex)
+				return err
+			}
+		} else {
+			found, err := Store.StoreObjectData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, response.Body)
+			if err != nil {
+				common.ObjectLocks.Unlock(lockIndex)
+				return err
+			} else if !found {
+				common.ObjectLocks.Unlock(lockIndex)
+				return &Error{"Failed to store object's data."}
+			}
 		}
 	}
 
@@ -1587,6 +1611,7 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 			updateNotificationRecord = false
 			writer.WriteHeader(http.StatusNotFound)
 		} else {
+			//writer.WriteHeader(http.StatusGatewayTimeout)
 			writer.Header().Add("Content-Type", "application/octet-stream")
 			writer.WriteHeader(http.StatusOK)
 			if _, err := io.Copy(writer, dataReader); err != nil {
