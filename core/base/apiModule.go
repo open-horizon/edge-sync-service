@@ -611,7 +611,7 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 		dataVf = dataVerifier.NewDataVerifier(metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature)
 		if success, err := dataVf.VerifyDataSignature(dataReader, orgID, objectType, objectID, ""); !success || err != nil {
 			if trace.IsLogging(logger.ERROR) {
-				trace.Error("Failed to verify data for object %s %s, remove temp data\n", objectType, objectID)
+				trace.Error("Failed to verify data for object %s %s, remove unverified data\n", objectType, objectID)
 			}
 			dataVf.RemoveUnverifiedData(*metaData)
 			common.ObjectLocks.Unlock(lockIndex)

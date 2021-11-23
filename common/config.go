@@ -257,6 +257,9 @@ type Config struct {
 	// A value of zero means ESSs are never removed
 	RemoveESSRegistrationTime int16 `env:"REMOVE_ESS_REGISTRATION_TIME"`
 
+	// HTTPUseDataChunk specifies whether or not to transfer data in chunks between CSS and ESS in HTTP protocol
+	HTTPEnableDataChunk bool `env:"HTTP_ENABLE_DATA_CHUNK"`
+
 	// Maximum size of data that can be sent in one message
 	MaxDataChunkSize int `env:"MAX_DATA_CHUNK_SIZE"`
 
@@ -713,6 +716,7 @@ func SetDefaultConfig(config *Config) {
 	config.ESSCallSPIRetryInterval = 2
 	config.ESSPingInterval = 1
 	config.RemoveESSRegistrationTime = 30
+	config.HTTPEnableDataChunk = true
 	config.MaxDataChunkSize = 120 * 1024
 	config.MaxInflightChunks = 1
 	config.MongoAddressCsv = "localhost:27017"
