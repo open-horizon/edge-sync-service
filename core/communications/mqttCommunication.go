@@ -1138,6 +1138,11 @@ func (communication *MQTT) GetData(metaData common.MetaData, offset int64) commo
 	return err
 }
 
+// PushData uploade data to from ESS to CSS
+func (communication *MQTT) PushData(metaData *common.MetaData, offset int64) common.SyncServiceError {
+	return nil
+}
+
 // SendData sends data from the CSS to the ESS or from the ESS to the CSS
 func (communication *MQTT) SendData(orgID string, destType string, destID string, message []byte, chunked bool) common.SyncServiceError {
 	if log.IsLogging(logger.TRACE) {

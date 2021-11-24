@@ -54,6 +54,9 @@ type Communicator interface {
 	// GetData requests data to be sent from the CSS to the ESS or from the ESS to the CSS
 	GetData(metaData common.MetaData, offset int64) common.SyncServiceError
 
+	// PushData uploade data to from ESS to CSS
+	PushData(metaData *common.MetaData, offset int64) common.SyncServiceError
+
 	// SendData sends data from the CSS to the ESS or from the ESS to the CSS
 	SendData(orgID string, destType string, destID string, message []byte, chunked bool) common.SyncServiceError
 

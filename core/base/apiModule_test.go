@@ -32,7 +32,6 @@ func setupDB(dbType string) {
 	} else if dbType == common.Bolt {
 		dir, _ := os.Getwd()
 		common.Configuration.PersistenceRootPath = dir + "/persist"
-		fmt.Printf("common.Configuration.PersistenceRootPath: %s\n", common.Configuration.PersistenceRootPath)
 		boltStore := &storage.BoltStorage{}
 		boltStore.Cleanup(true)
 		store = boltStore

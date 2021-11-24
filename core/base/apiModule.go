@@ -327,8 +327,6 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 		//metaData.ObjectSize = int64(len(data))
 	}
 
-	fmt.Printf("Finished data verification\n")
-
 	store.DeleteNotificationRecords(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, "", "")
 
 	if status == common.NotReadyToSend || metaData.Inactive {

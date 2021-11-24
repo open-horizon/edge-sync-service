@@ -217,6 +217,7 @@ func TestHTTPCommEssSendObjects(t *testing.T) {
 		t.Errorf("Failed to store destination. Error: %s", err.Error())
 	}
 
+	common.Configuration.CommunicationProtocol = common.HTTPProtocol
 	for _, testObject := range testObjects {
 		writer := newHTTPCommTestResponseWriter()
 		theURL := testObject.metaData.DestOrgID + "/" + testObject.metaData.ObjectType + "/" +
@@ -321,15 +322,23 @@ func TestEssHTTPComm(t *testing.T) {
 	Store.UpdateNotificationRecord(notification)
 
 	ctx.subTest = "pushData"
-	err = httpComm.pushData(&ctx.pollPayload[2].MetaData)
+	fmt.Println("Test pushData")
+	common.Configuration.EnableDataChunk = false
+	err = httpComm.PushData(&ctx.pollPayload[2].MetaData, 0)
 	if err != nil {
 		t.Error(err)
 	}
 
 	ctx.subTest = "pushDataByChunk"
-	err = httpComm.pushData(&ctx.pollPayload[2].MetaData)
-	if err != nil {
-		t.Error(err)
+	fmt.Println("Test pushDataByChunk")
+	common.Configuration.EnableDataChunk = true
+	offset := int64(0)
+	for offset < ctx.pollPayload[2].MetaData.ObjectSize {
+		err = httpComm.PushData(&ctx.pollPayload[2].MetaData, offset)
+		if err != nil {
+			t.Error(err)
+		}
+		offset += int64(metaData.ChunkSize)
 	}
 
 	metaData = ctx.pollPayload[3].MetaData
@@ -354,6 +363,7 @@ func TestEssHTTPComm(t *testing.T) {
 
 	ctx.subTest = "getData"
 	fmt.Println("Test getData")
+	common.Configuration.EnableDataChunk = false
 	err = httpComm.GetData(ctx.pollPayload[0].MetaData, 0)
 	if err != nil {
 		t.Error(err)
@@ -361,9 +371,14 @@ func TestEssHTTPComm(t *testing.T) {
 
 	ctx.subTest = "getDataByChunk"
 	fmt.Println("Test getDataByChunk")
-	err = httpComm.GetData(ctx.pollPayload[0].MetaData, 0)
-	if err != nil {
-		t.Error(err)
+	common.Configuration.EnableDataChunk = true
+	offset = int64(0)
+	for offset < ctx.pollPayload[0].MetaData.ObjectSize {
+		err = httpComm.GetData(ctx.pollPayload[0].MetaData, offset)
+		if err != nil {
+			t.Error(err)
+		}
+		offset += int64(ctx.pollPayload[0].MetaData.ChunkSize)
 	}
 
 	ctx.subTest = "notification"

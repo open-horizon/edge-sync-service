@@ -66,6 +66,12 @@ func (communication *TestComm) GetData(metaData common.MetaData, offset int64) c
 	return err
 }
 
+// PushData uploade data to from ESS to CSS
+func (communication *TestComm) PushData(metaData *common.MetaData, offset int64) common.SyncServiceError {
+	err := updatePushDataNotification(*metaData, metaData.OriginType, metaData.OriginID, offset)
+	return err
+}
+
 // SendData sends data from the CSS to the ESS or from the ESS to the CSS
 func (communication *TestComm) SendData(orgID string, destType string, destID string, message []byte, chunked bool) common.SyncServiceError {
 	return nil
