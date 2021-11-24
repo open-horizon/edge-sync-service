@@ -1597,6 +1597,7 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 		} else {
 			//writer.WriteHeader(http.StatusGatewayTimeout)
 			writer.Header().Add("Content-Type", "application/octet-stream")
+			writer.Header().Add("Content-Length", strconv.Itoa(dataLength))
 			writer.WriteHeader(http.StatusOK)
 			if _, err := io.Copy(writer, dataReader); err != nil {
 				SendErrorResponse(writer, err, "", 0)
