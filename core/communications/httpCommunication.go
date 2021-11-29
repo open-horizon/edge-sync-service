@@ -1959,7 +1959,9 @@ func (communication *HTTP) pushDataByChunk(metaData *common.MetaData, offset int
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In pushDataByChunk, Add headers: Content-Range header is: %s, Content-Length header is: %s\n", request.Header.Get("Content-Range"), request.Header.Get("Content-Length"))
 	}
-	request.Close = true
+	if isLastChunk {
+		request.Close = true
+	}
 
 	response, err := communication.requestWrapper.do(request)
 	if response != nil && response.Body != nil {
