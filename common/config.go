@@ -721,7 +721,7 @@ func SetDefaultConfig(config *Config) {
 	config.ESSPingInterval = 1
 	config.RemoveESSRegistrationTime = 30
 	config.EnableDataChunk = true
-	config.MaxDataChunkSize = 120 * 1024
+	config.MaxDataChunkSize = 5120 * 1024
 	config.MaxInflightChunks = 1
 	config.MongoAddressCsv = "localhost:27017"
 	config.MongoDbName = "d_edge"
