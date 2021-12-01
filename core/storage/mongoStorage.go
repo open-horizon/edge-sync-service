@@ -1254,26 +1254,43 @@ func (store *MongoStorage) AppendObjectData(orgID string, objectType string, obj
 }
 
 // Handles the last data chunk
-func (store *MongoStorage) HandleLastDataChunk(orgID string, objectType string, objectID string, isTempData bool) common.SyncServiceError {
-	var id string
+func (store *MongoStorage) HandleObjectInfoForLastDataChunk(orgID string, objectType string, objectID string, isTempData bool, dataSize int64) (bool, common.SyncServiceError) {
 	if isTempData {
-		id = createTempObjectCollectionID(orgID, objectType, objectID)
-	} else {
-		id = createObjectCollectionID(orgID, objectType, objectID)
+		return false, nil
 	}
 
-	fileHandle := store.getFileHandle(id)
-	if fileHandle == nil {
-		return &Error{fmt.Sprintf("Failed to get file handler, file %s doesn't exist.", id)}
+	id := createObjectCollectionID(orgID, objectType, objectID)
+
+	result := object{}
+	if err := store.fetchOne(objects, bson.M{"_id": id}, bson.M{"status": bson.ElementString}, &result); err != nil {
+		switch err {
+		case mgo.ErrNotFound:
+			return false, nil
+		default:
+			return false, &Error{fmt.Sprintf("Failed to store the data. Error: %s.", err)}
+		}
 	}
 
-	store.deleteFileHandle(id)
-	err := fileHandle.file.Close()
-	if err != nil {
-		return &Error{fmt.Sprintf("Failed to close the file. Error: %s.", err)}
+	if result.Status == common.NotReadyToSend {
+		store.UpdateObjectStatus(orgID, objectType, objectID, common.ReadyToSend)
+	}
+	if result.Status == common.NotReadyToSend || result.Status == common.ReadyToSend {
+		newID := store.getInstanceID()
+		if err := store.update(objects, bson.M{"_id": id},
+			bson.M{
+				"$set":         bson.M{"metadata.data-id": newID, "metadata.instance-id": newID},
+				"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+			}); err != nil {
+			return false, &Error{fmt.Sprintf("Failed to set instance id. Error: %s.", err)}
+		}
 	}
 
-	return nil
+	// Update object size
+	if err := store.update(objects, bson.M{"_id": id}, bson.M{"$set": bson.M{"metadata.object-size": dataSize}}); err != nil {
+		return false, &Error{fmt.Sprintf("Failed to update object's size. Error: %s.", err)}
+	}
+
+	return true, nil
 }
 
 // // Get the data size

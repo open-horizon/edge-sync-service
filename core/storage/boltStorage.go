@@ -813,21 +813,30 @@ func (store *BoltStorage) AppendObjectData(orgID string, objectType string, obje
 }
 
 // Handles the last data chunk
-func (store *BoltStorage) HandleLastDataChunk(orgID string, objectType string, objectID string, isTempData bool) common.SyncServiceError {
-	dataPath := ""
+func (store *BoltStorage) HandleObjectInfoForLastDataChunk(orgID string, objectType string, objectID string, isTempData bool, dataSize int64) (bool, common.SyncServiceError) {
+	//dataPath := createDataPath(store.localDataPath, orgID, objectType, objectID)
 	function := func(object boltObject) (boltObject, common.SyncServiceError) {
-		dataPath = object.DataPath
-		if dataPath == "" {
-			dataPath = createDataPathFromMeta(store.localDataPath, object.Meta)
-			object.DataPath = dataPath
+		if object.Status == common.NotReadyToSend {
+			object.Status = common.ReadyToSend
 		}
+		if object.Status == common.NotReadyToSend || object.Status == common.ReadyToSend {
+			newID := store.getInstanceID()
+			object.Meta.InstanceID = newID
+			object.Meta.DataID = newID
+		}
+
+		//object.DataPath = dataPath
+		object.Meta.ObjectSize = dataSize
+
 		return object, nil
 	}
 	if err := store.updateObjectHelper(orgID, objectType, objectID, function); err != nil {
-		return err
+		if err == notFound {
+			return false, nil
+		}
+		return false, err
 	}
-
-	return dataURI.HandleLastDataChunk(dataPath, isTempData)
+	return true, nil
 }
 
 // UpdateObjectStatus updates an object's status

@@ -55,7 +55,7 @@ type Storage interface {
 	AppendObjectData(orgID string, objectType string, objectID string, dataReader io.Reader, dataLength uint32, offset int64, total int64, isFirstChunk bool, isLastChunk bool, isTempData bool) (bool, common.SyncServiceError)
 
 	// Handles the last data chunk
-	HandleLastDataChunk(orgID string, objectType string, objectID string, isTempData bool) common.SyncServiceError
+	HandleObjectInfoForLastDataChunk(orgID string, objectType string, objectID string, isTempData bool, dataSize int64) (bool, common.SyncServiceError)
 
 	// Update object's status
 	UpdateObjectStatus(orgID string, objectType string, objectID string, status string) common.SyncServiceError

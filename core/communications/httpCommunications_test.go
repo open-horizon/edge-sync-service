@@ -571,7 +571,7 @@ func (ctx *testEssCommContext) testHandleObjects(writer http.ResponseWriter, req
 		}
 	case "getDataByChunk":
 		if request.Method == http.MethodGet {
-			startOffset, endOffset, _ := getStartAndEndRangeFromRangeHeader(request)
+			startOffset, endOffset, _ := common.GetStartAndEndRangeFromRangeHeader(request)
 			fmt.Printf("startOffset: %d, endOffset: %d\n", startOffset, endOffset)
 			if startOffset == -1 && endOffset == -1 {
 				fmt.Printf("test return 504")
@@ -596,7 +596,7 @@ func (ctx *testEssCommContext) testHandleObjects(writer http.ResponseWriter, req
 		writer.WriteHeader(http.StatusNoContent)
 
 	case "pushDataByChunk":
-		_, startOffset, endOffset, _ := getStartAndEndRangeFromContentRangeHeader(request)
+		_, startOffset, endOffset, _ := common.GetStartAndEndRangeFromContentRangeHeader(request)
 		fmt.Printf("Content-Range header startOffset: %d, endOffset: %d\n", startOffset, endOffset)
 		if startOffset == -1 && endOffset == -1 {
 			fmt.Printf("test return 504 from handlePutData\n")

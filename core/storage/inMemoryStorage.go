@@ -277,8 +277,29 @@ func (store *InMemoryStorage) AppendObjectData(orgID string, objectType string, 
 	return isLastChunk, notFound
 }
 
-func (store *InMemoryStorage) HandleLastDataChunk(orgID string, objectType string, objectID string, isTempData bool) common.SyncServiceError {
-	return nil
+func (store *InMemoryStorage) HandleObjectInfoForLastDataChunk(orgID string, objectType string, objectID string, isTempData bool, dataSize int64) (bool, common.SyncServiceError) {
+	if isTempData {
+		return false, nil
+	}
+	store.lock()
+	defer store.unLock()
+
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	if object, ok := store.objects[id]; ok {
+		if object.status == common.NotReadyToSend {
+			object.status = common.ReadyToSend
+		}
+		if object.status == common.NotReadyToSend || object.status == common.ReadyToSend {
+			newID := store.getInstanceID()
+			object.meta.InstanceID = newID
+			object.meta.DataID = newID
+		}
+		object.meta.ObjectSize = dataSize
+		store.objects[id] = object
+		return true, nil
+	}
+
+	return false, nil
 }
 
 // UpdateObjectStatus updates an object's status

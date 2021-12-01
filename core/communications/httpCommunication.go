@@ -1352,7 +1352,7 @@ func (communication *HTTP) handlePutData(orgID string, objectType string, object
 		return err
 	}
 
-	totalSize, startOffset, endOffset, err := getStartAndEndRangeFromContentRangeHeader(request)
+	totalSize, startOffset, endOffset, err := common.GetStartAndEndRangeFromContentRangeHeader(request)
 	if err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
 		return &common.InvalidRequest{Message: fmt.Sprintf("Failed to parse Content-Range header, Error: %s", err.Error())}
@@ -1566,7 +1566,7 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 	}
 
 	hasRangeHeader := true
-	startOffset, endOffset, err := getStartAndEndRangeFromRangeHeader(request)
+	startOffset, endOffset, err := common.GetStartAndEndRangeFromRangeHeader(request)
 	if err != nil {
 		SendErrorResponse(writer, err, "", 0)
 	}
@@ -2274,79 +2274,4 @@ func buildUnregisterURL(url string, orgID string, destType string, destID string
 	strBuilder.WriteByte('/')
 	strBuilder.WriteString(destID)
 	return strBuilder.String()
-}
-
-func getStartAndEndRangeFromRangeHeader(request *http.Request) (int64, int64, common.SyncServiceError) {
-	// Get range from the "Range:bytes={startOffset}-{endOffset}"
-	requestRangeAll := request.Header.Get("Range")
-	fmt.Printf("Range header: %s\n", requestRangeAll)
-	if requestRangeAll == "" {
-		return -1, -1, nil
-	}
-	requestRange := requestRangeAll[6:]
-	ranges := strings.Split(requestRange, "-")
-
-	if len(ranges) != 2 {
-		return -1, -1, &common.InvalidRequest{Message: "Failed to parse Range header: " + requestRangeAll}
-	}
-
-	beginOffset, err := strconv.ParseInt(ranges[0], 10, 64)
-	if err != nil {
-		return -1, -1, &common.InvalidRequest{Message: "Failed to get begin offset from Range header: " + err.Error()}
-	}
-
-	endOffset, err := strconv.ParseInt(ranges[1], 10, 64)
-	if err != nil {
-		return -1, -1, &common.InvalidRequest{Message: "Failed to get end offset from Range header: " + err.Error()}
-	}
-
-	if beginOffset > endOffset {
-		return -1, -1, &common.InvalidRequest{Message: "Begin offset cannot be greater than end offset"}
-	}
-
-	return beginOffset, endOffset, nil
-}
-
-// Content-Range: bytes 1-2/*\
-// Returns totalsize, startOffset, endOffset, err
-func getStartAndEndRangeFromContentRangeHeader(request *http.Request) (int64, int64, int64, common.SyncServiceError) {
-	// Get range from the "Range:bytes={startOffset}-{endOffset}"
-	requestContentRange := request.Header.Get("Content-Range")
-	fmt.Printf("Content-Range header: %s\n", requestContentRange)
-	if requestContentRange == "" {
-		return 0, -1, -1, nil
-	}
-	contentRange := strings.Replace(requestContentRange, "bytes ", "", -1)
-	// 1-2/30
-	ranges := strings.Split(contentRange, "/")
-
-	if len(ranges) != 2 {
-		return 0, -1, -1, &common.InvalidRequest{Message: "Failed to parse Content-Range header: " + requestContentRange}
-	}
-	// [1-2, 30]
-	totalSize, err := strconv.ParseInt(ranges[1], 10, 64)
-	if err != nil {
-		return 0, -1, -1, &common.InvalidRequest{Message: "Failed to get total size from Content-Range header: " + err.Error()}
-	}
-
-	offsets := strings.Split(ranges[0], "-")
-	if len(offsets) != 2 {
-		return 0, -1, -1, &common.InvalidRequest{Message: "Failed to get offsets from Content-Range header: " + requestContentRange}
-	}
-
-	startOffset, err := strconv.ParseInt(offsets[0], 10, 64)
-	if err != nil {
-		return 0, -1, -1, &common.InvalidRequest{Message: "Failed to get start offset from Content-Range header: " + err.Error()}
-	}
-
-	endOffset, err := strconv.ParseInt(offsets[1], 10, 64)
-	if err != nil {
-		return 0, -1, -1, &common.InvalidRequest{Message: "Failed to get end offset from Content-Range header: " + err.Error()}
-	}
-
-	if startOffset > endOffset {
-		return 0, -1, -1, &common.InvalidRequest{Message: "Begin offset cannot be greater than end offset"}
-	}
-
-	return totalSize, startOffset, endOffset, nil
 }

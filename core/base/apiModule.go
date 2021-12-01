@@ -561,14 +561,14 @@ func GetRemovedDestinationPolicyServicesFromESS(orgID string, objectType string,
 	return removedDestinationPolicyServices, err
 }
 
-// PutObjectData stores an object's data
+// PutObjectAllData stores an object's data
 // Verify data signature (if publicKey and signature both have value)
 // Call the storage module to store the object's data
 // Return true if the object was found and updated
 // Return false and no error if the object was not found
-func PutObjectData(orgID string, objectType string, objectID string, dataReader io.Reader) (bool, common.SyncServiceError) {
+func PutObjectAllData(orgID string, objectType string, objectID string, dataReader io.Reader) (bool, common.SyncServiceError) {
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("In PutObjectData. Update data %s %s\n", objectType, objectID)
+		trace.Debug("In PutObjectAllData. Update data %s %s\n", objectType, objectID)
 	}
 
 	common.HealthStatus.ClientRequestReceived()
@@ -675,6 +675,145 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In PutObjectData. Return response for PutObjectData %s %s\n", objectType, objectID)
 	}
+	return true, nil
+}
+
+func PutObjectChunkData(orgID string, objectType string, objectID string, dataReader io.Reader, startOffset int64, endOffset int64, totalSize int64) (bool, common.SyncServiceError) {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In PutObjectChunkData. Update data %s %s %s, startOffset: %d, endOffset: %d\n", orgID, objectType, objectID, startOffset, endOffset)
+	}
+
+	common.HealthStatus.ClientRequestReceived()
+
+	lockIndex := common.HashStrings(orgID, objectType, objectID)
+	apiObjectLocks.Lock(lockIndex)
+	common.ObjectLocks.Lock(lockIndex)
+
+	metaData, status, err := store.RetrieveObjectAndStatus(orgID, objectType, objectID)
+	if err != nil {
+		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
+		return false, err
+	}
+	if metaData == nil {
+		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
+		return false, nil
+	}
+	if status != common.ReadyToSend && status != common.NotReadyToSend {
+		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
+		return false, &common.InvalidRequest{Message: "Can't update data of the receiving side"}
+	}
+	if metaData.NoData {
+		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
+		return false, &common.InvalidRequest{Message: "Can't update data, the NoData flag is set to true"}
+	}
+
+	isFirstChunk := startOffset == 0
+	isLastChunk := false
+	dataSize := endOffset - startOffset + 1
+
+	// append Data to temp file/data
+	isTempData := false
+	if common.NeedDataVerification(*metaData) {
+		isTempData = true
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In PutObjectChunkData for %s %s %s, isTempData: %t, isFirstChunk: %t, dataSize to store: %d \n", orgID, objectType, objectID, isTempData, isFirstChunk, dataSize)
+	}
+
+	if isLastChunk, err = store.AppendObjectData(orgID, objectType, objectID, dataReader, uint32(dataSize), startOffset, totalSize,
+		isFirstChunk, isLastChunk, isTempData); err != nil {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("Failed to append data for %s %s %s from offset %d to %d, Error: %s\n", orgID, objectType, objectID, startOffset, endOffset, err.Error())
+		}
+		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
+		return false, err
+	}
+
+	if isLastChunk {
+		if isTempData {
+			// Verify data
+			if common.NeedDataVerification(*metaData) {
+				//start data verification
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Debug("In PutObjectData. Start data verification %s %s\n", objectType, objectID)
+				}
+
+				dataVf := dataVerifier.NewDataVerifier(metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature)
+				if success, err := dataVf.VerifyDataSignature(dataReader, orgID, objectType, objectID, ""); !success || err != nil {
+					if trace.IsLogging(logger.ERROR) {
+						trace.Error("Failed to verify data for object %s %s, remove unverified data\n", objectType, objectID)
+					}
+					dataVf.RemoveUnverifiedData(*metaData)
+					common.ObjectLocks.Unlock(lockIndex)
+					apiObjectLocks.Unlock(lockIndex)
+					errMsg := ""
+					if err != nil && trace.IsLogging(logger.ERROR) {
+						errMsg = err.Error()
+						trace.Error("Failed to verify data for object %s %s, Error: %s\n", objectType, objectID, errMsg)
+					}
+
+					return false, &common.InvalidRequest{Message: "Failed to verify and store data, Error: " + errMsg}
+				}
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Debug("In PutObjectChunkData. data verified for object %s %s\n", objectType, objectID)
+				}
+
+				// If the data has been verified, then set metadata.DataVerified to true
+				if err = store.UpdateObjectDataVerifiedStatus(orgID, objectType, objectID, true); err != nil {
+					common.ObjectLocks.Unlock(lockIndex)
+					apiObjectLocks.Unlock(lockIndex)
+					return false, err
+				}
+
+			}
+		} else {
+			// handle object info (update metadata.ObjectSize, metadata.InstanceId, metaData.DataId and object status from notReady to Ready), because Store.AppendObjectData will not modify those object info
+			if _, err := store.HandleObjectInfoForLastDataChunk(orgID, objectType, objectID, false, totalSize); err != nil {
+				common.ObjectLocks.Unlock(lockIndex)
+				apiObjectLocks.Unlock(lockIndex)
+				return false, err
+			}
+		}
+
+		var updatedMetaData *common.MetaData
+		// StoreObject increments the instance id if this is a data update, we need to fetch the updated meta data
+		// Also, StoreObjectData updates the ObjectSize, so we need to fetch the updated meta data
+		updatedMetaData, err = store.RetrieveObject(orgID, objectType, objectID)
+		if err != nil {
+			common.ObjectLocks.Unlock(lockIndex)
+			apiObjectLocks.Unlock(lockIndex)
+			return false, err
+		}
+
+		if updatedMetaData.Inactive {
+			// Don't send inactive objects to the other side
+			common.ObjectLocks.Unlock(lockIndex)
+			apiObjectLocks.Unlock(lockIndex)
+			return true, nil
+		}
+
+		// Should be in antoher thread
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectChunkData. Send object to objectQueue %s %s\n", objectType, objectID)
+		}
+
+		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
+		objectInQueue := common.ObjectInQueue{NotificationAction: common.Update, NotificationType: common.TypeObject, Object: *updatedMetaData, Destinations: []common.StoreDestinationStatus{}}
+		objectQueue.SendObjectToQueue(objectInQueue)
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectChunkData. Return response for PutObjectChunkData %s %s\n", objectType, objectID)
+		}
+		return true, nil
+	}
+
 	return true, nil
 }
 

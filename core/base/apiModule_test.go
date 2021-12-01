@@ -618,7 +618,7 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 			key := fmt.Sprintf("%s/%s/%s", row.orgID, row.objectType, row.objectID)
 			metaInstanceIdMap[key] = instance
 
-			ok, err := PutObjectData(row.orgID, row.objectType, row.objectID, bytes.NewReader(row.newData))
+			ok, err := PutObjectAllData(row.orgID, row.objectType, row.objectID, bytes.NewReader(row.newData))
 			if err != nil {
 				if !row.metaData.NoData {
 					t.Errorf("Failed to update object's data (objectID = %s). Error: %s", row.objectID, err.Error())
@@ -1472,7 +1472,7 @@ func testObjectWithPolicyAPI(store storage.Storage, t *testing.T) {
 				}
 
 				if test.data != nil {
-					ok, err := PutObjectData(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID, bytes.NewReader(test.data))
+					ok, err := PutObjectAllData(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID, bytes.NewReader(test.data))
 					if !ok || err != nil {
 						t.Errorf("Failed to update object's data (objectID = %s). Error: %s", test.metaData.ObjectID, err.Error())
 					}

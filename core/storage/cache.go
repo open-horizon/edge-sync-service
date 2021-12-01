@@ -90,8 +90,8 @@ func (store *Cache) AppendObjectData(orgID string, objectType string, objectID s
 	return store.Store.AppendObjectData(orgID, objectType, objectID, dataReader, dataLength, offset, total, isFirstChunk, isLastChunk, isTempData)
 }
 
-func (store *Cache) HandleLastDataChunk(orgID string, objectType string, objectID string, isTempData bool) common.SyncServiceError {
-	return store.Store.HandleLastDataChunk(orgID, objectType, objectID, isTempData)
+func (store *Cache) HandleObjectInfoForLastDataChunk(orgID string, objectType string, objectID string, isTempData bool, dataSize int64) (bool, common.SyncServiceError) {
+	return store.Store.HandleObjectInfoForLastDataChunk(orgID, objectType, objectID, isTempData, dataSize)
 }
 
 // UpdateObjectStatus updates an object's status
