@@ -735,7 +735,12 @@ func PutObjectChunkData(orgID string, objectType string, objectID string, dataRe
 		return false, err
 	}
 
-	if isLastChunk {
+	if !isLastChunk {
+		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
+
+		return true, nil
+	} else {
 		if isTempData {
 			// Verify data
 			if common.NeedDataVerification(*metaData) {
@@ -813,11 +818,6 @@ func PutObjectChunkData(orgID string, objectType string, objectID string, dataRe
 		}
 		return true, nil
 	}
-
-	common.ObjectLocks.Unlock(lockIndex)
-	apiObjectLocks.Unlock(lockIndex)
-
-	return true, nil
 }
 
 // ObjectConsumed is used when an app indicates that it consumed the object
