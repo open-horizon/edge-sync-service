@@ -204,6 +204,14 @@ type Config struct {
 	// default is 120s
 	HTTPESSClientTimeout int `env:"HTTPESSClientTimeout"`
 
+	// HTTPESSObjClientTimeout is to specify the http client timeout for downloading models (or objects) in seconds for ESS
+	// default is 600s
+	HTTPESSObjClientTimeout int `env:"HTTPESSObjClientTimeout"`
+
+	// HTTPCSSObjDownloadConcurrencyMultiplier specifies a number to multiple the number of threads by to set allowed concurrent downloads per CSS
+	// default is 1
+	HTTPCSSObjDownloadConcurrencyMultiplier int `env:"HTTPCSSObjDownloadConcurrencyMultiplier"`
+
 	// LogLevel specifies the logging level in string format
 	LogLevel string `env:"LOG_LEVEL"`
 
@@ -741,6 +749,8 @@ func SetDefaultConfig(config *Config) {
 	config.HTTPCSSUseSSL = false
 	config.HTTPCSSCACertificate = ""
 	config.HTTPESSClientTimeout = 120
+	config.HTTPESSObjClientTimeout = 600
+	config.HTTPCSSObjDownloadConcurrencyMultiplier = 1
 	config.MessagingGroupCacheExpiration = 60
 	config.ShutdownQuiesceTime = 60
 	config.ESSConsumedObjectsKept = 1000

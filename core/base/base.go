@@ -145,14 +145,12 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 
 	if common.Configuration.NodeType == common.ESS {
 		common.Registered = false
-		// if common.Configuration.CommunicationProtocol == common.HTTPProtocol {
-		// 	go communication.Register()
-		// }
 	}
 
 	common.ResendAcked = true
 
 	common.InitObjectLocks()
+	common.InitObjectDownloadSemaphore()
 
 	// storage, lock should be setup before initialize objectQueue
 	queueBufferSize := common.Configuration.ObjectQueueBufferSize

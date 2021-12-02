@@ -36,11 +36,13 @@ var unauthorizedBytes = []byte("Unauthorized")
 
 // HTTP is the struct for the HTTP communications layer
 type HTTP struct {
-	httpClient          http.Client
-	started             bool
-	httpPollTimer       *time.Timer
-	httpPollStopChannel chan int
-	requestWrapper      *httpRequestWrapper
+	httpClient                http.Client
+	httpObjectDownloadClient  http.Client
+	started                   bool
+	httpPollTimer             *time.Timer
+	httpPollStopChannel       chan int
+	requestWrapper            *httpRequestWrapper
+	objDownloadRequestWrapper *httpRequestWrapper
 }
 
 type updateMessage struct {
@@ -63,6 +65,10 @@ func (communication *HTTP) StartCommunication() common.SyncServiceError {
 		http.Handle(pingURL, http.StripPrefix(pingURL, http.HandlerFunc(communication.handlePing)))
 		http.Handle(objectRequestURL, http.StripPrefix(objectRequestURL, http.HandlerFunc(communication.handleObjects)))
 	} else {
+		communication.httpObjectDownloadClient = http.Client{
+			Transport: &http.Transport{},
+			Timeout:   time.Second * time.Duration(common.Configuration.HTTPESSObjClientTimeout),
+		}
 		communication.httpClient = http.Client{
 			Transport: &http.Transport{},
 			Timeout:   time.Second * time.Duration(common.Configuration.HTTPESSClientTimeout),
@@ -88,9 +94,11 @@ func (communication *HTTP) StartCommunication() common.SyncServiceError {
 			caCertPool.AppendCertsFromPEM(certificate)
 			tlsConfig := &tls.Config{RootCAs: caCertPool}
 			communication.httpClient.Transport = &http.Transport{TLSClientConfig: tlsConfig}
+			communication.httpObjectDownloadClient.Transport = &http.Transport{TLSClientConfig: tlsConfig}
 		}
 		communication.httpPollStopChannel = make(chan int, 1)
 		communication.requestWrapper = newHTTPRequestWrapper(communication.httpClient)
+		communication.objDownloadRequestWrapper = newHTTPRequestWrapper(communication.httpObjectDownloadClient)
 	}
 	communication.started = true
 
@@ -139,14 +147,15 @@ func (communication *HTTP) StopCommunication() common.SyncServiceError {
 	}
 
 	communication.requestWrapper.cancel()
+	communication.objDownloadRequestWrapper.cancel()
 
 	return nil
 }
 
 // HandleRegAck handles a registration acknowledgement message from the CSS
 func (communication *HTTP) HandleRegAck() {
-	if trace.IsLogging(logger.TRACE) {
-		trace.Trace("Received regack")
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("Received regack")
 	}
 	communication.startPolling()
 }
@@ -727,7 +736,7 @@ func (communication *HTTP) GetAllData(metaData common.MetaData, offset int64) co
 	security.AddIdentityToSPIRequest(request, url)
 	request.Close = true
 
-	response, err := communication.requestWrapper.do(request)
+	response, err := communication.objDownloadRequestWrapper.do(request)
 	if response != nil && response.Body != nil {
 		defer response.Body.Close()
 	}
@@ -1094,8 +1103,8 @@ func (communication *HTTP) Poll() bool {
 	}
 
 	if response.StatusCode == http.StatusNoContent {
-		if trace.IsLogging(logger.TRACE) {
-			trace.Trace("Polled the CSS, received 0 objects.\n")
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("Polled the CSS, received 0 objects.\n")
 		}
 		return false
 	}
@@ -1116,8 +1125,8 @@ func (communication *HTTP) Poll() bool {
 		return false
 	}
 
-	if trace.IsLogging(logger.TRACE) {
-		trace.Trace("Polled the CSS, received %d objects.\n", len(payload))
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("Polled the CSS, received %d objects.\n", len(payload))
 	}
 
 	for _, message := range payload {
@@ -1538,19 +1547,38 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Handling object get data of %s %s %s %s \n", objectType, objectID, destType, destID)
 	}
+
+	handleGetData_enter_time := time.Now().Unix()
+
+	if common.ObjectDownloadSemaphore.TryAcquire(1) == false {
+		// If too many downloads are in flight, agent will get error and retry. Originally, there was a lock around the download that
+		// caused the downloads to be serial. It was changed to use a semaphore to allow limited concurrency.
+		if trace.IsLogging(logger.TRACE) {
+			trace.Trace("Failed to acquire semaphore for handleGetData of %s %s %s %s \n", objectType, objectID, destType, destID)
+		}
+		err := &Error{"Error in handleGetData: Unable to acquire object semaphore."}
+		SendErrorResponse(writer, err, "", http.StatusTooManyRequests)
+		return
+	}
+
+	defer common.ObjectDownloadSemaphore.Release(1)
+
 	lockIndex := common.HashStrings(orgID, objectType, objectID)
 	common.ObjectLocks.Lock(lockIndex)
-	defer common.ObjectLocks.Unlock(lockIndex)
 
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("Handling object get data, retrieve notification record for %s %s %s %s %s\n", orgID, objectType, objectID, destType, destID)
 	}
 	notification, err := Store.RetrieveNotificationRecord(orgID, objectType, objectID, destType, destID)
+	common.ObjectLocks.Unlock(lockIndex)
+
 	if err != nil {
 		SendErrorResponse(writer, err, "", 0)
+		return
 	} else if notification == nil {
 		err = &Error{"Error in handleGetData: no notification to update."}
 		SendErrorResponse(writer, err, "", 0)
+		return
 	} else if notification.InstanceID != instanceID {
 		if log.IsLogging(logger.ERROR) {
 			log.Error("Handling object get data, notification.InstanceID(%d) != metaData,InstanceID(%d), notification status(%s) for %s %s %s %s %s\n", notification.InstanceID, instanceID, notification.Status, orgID, objectType, objectID, destType, destID)
@@ -1558,6 +1586,7 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 
 		err = &ignoredByHandler{"Error in handleGetData: notification.InstanceID != instanceID or notification status is not updated."}
 		SendErrorResponse(writer, err, "", 0)
+		return
 	} else if notification.Status == common.Updated || notification.Status == common.Update || notification.Status == common.UpdatePending || notification.Status == common.Data {
 		//  notification.InstanceID == instanceID
 		updateNotificationRecord = true
@@ -1595,6 +1624,7 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 		trace.Trace("Handling object get data, retrieve object data for %s %s with range %d-%d\n", objectType, objectID, startOffset, endOffset)
 	}
 
+	hasError := false
 	if dataLength == int(objectMeta.ObjectSize) || !hasRangeHeader {
 		dataReader, err := Store.RetrieveObjectData(orgID, objectType, objectID, false)
 		if err != nil {
@@ -1610,10 +1640,14 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 			writer.Header().Add("Content-Type", "application/octet-stream")
 			writer.Header().Add("Content-Length", strconv.Itoa(dataLength))
 			writer.WriteHeader(http.StatusOK)
+
+			// Start the download
 			if _, err := io.Copy(writer, dataReader); err != nil {
+				hasError = true
 				SendErrorResponse(writer, err, "", 0)
 			}
 			if err := Store.CloseDataReader(dataReader); err != nil {
+				hasError = true
 				SendErrorResponse(writer, err, "", 0)
 			}
 			if trace.IsLogging(logger.DEBUG) {
@@ -1643,103 +1677,29 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 				fmt.Printf("Set header Content-Length: %d\n", length)
 				fmt.Printf("Set header Content-Range: bytes %d-%d/%d\n", startOffset, endOffset, objectMeta.ObjectSize)
 				if _, err := io.Copy(writer, dataReader); err != nil {
+					hasError = true
 					SendErrorResponse(writer, err, "", 0)
 				}
 				if err := Store.CloseDataReader(dataReader); err != nil {
+					hasError = true
 					SendErrorResponse(writer, err, "", 0)
 				}
 			}
 		}
 	}
 
-	// update notification only if current notification.InstanceID == metadata.InstanceID && current notification.status == "updated" && this is the last chunk
-	if updateNotificationRecord {
-		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("Handling object get data, update notification status to data for %s %s %s %s %s\n", orgID, objectType, objectID, destType, destID)
-		}
-		notification := common.Notification{ObjectID: objectID, ObjectType: objectType,
-			DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.Data, InstanceID: instanceID, DataID: dataID}
-		if err = Store.UpdateNotificationRecord(notification); err != nil {
-			if log.IsLogging(logger.ERROR) {
-				log.Error("Handling object get data, failed to update notification for %s %s %s %s with status: %s\n", objectType, objectID, destType, destID, common.Data)
-			}
-		} else {
-			if trace.IsLogging(logger.DEBUG) {
-				log.Debug("Handling object get data, update notification for %s %s %s %s with status %s is done\n", objectType, objectID, destType, destID, common.Data)
-			}
-		}
-	} else {
-		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("Handling object get data, return WITHOUT update notification status to data for %s %s %s %s %s, set updateNotificationRecord to %t \n", orgID, objectType, objectID, destType, destID, updateNotificationRecord)
-		}
+	if hasError == false && trace.IsLogging(logger.DEBUG) {
+		handleGetData_download_complete_time := time.Now().Unix()
+		trace.Debug("handleGetData has taken %d seconds to download %s %s %s %s", (handleGetData_download_complete_time - handleGetData_enter_time), orgID, objectType, objectID, destID)
 	}
 
-	/*
+	/**
+	 Removed the code with the CSS setting notificationRecord to status: common.Data since with the introduction of the semaphore and a client timeout
+	 there are more possibilities of the agent receiving an error due to timeout but the CSS thinks everything completed. If the agent set the status to
+	 an error but then the CSS set the status to common.Data, the agent would not receive the model update. The only way to guarantee that the CSS would
+	 not overwrite the status from the agent was to eliminate the CSS setting the status at all.
+	**/
 
-		if objectData, eof, length, err := Store.ReadObjectData(orgID, objectType, objectID, dataLength, startOffset); err != nil {
-			if log.IsLogging(logger.ERROR) {
-				log.Error("error in ReadObjectData for %s %s %s from offset: %d, Error: %s\n", orgID, objectType, objectID, startOffset, err.Error())
-			}
-			SendErrorResponse(writer, err, "", 0)
-		} else {
-			if len(objectData) == 0 {
-				if trace.IsLogging(logger.DEBUG) {
-					trace.Trace("data length is 0 for %s %s %s\n", orgID, objectType, objectID)
-				}
-				writer.WriteHeader(http.StatusNotFound)
-			} else {
-				dataReader := bytes.NewReader(objectData)
-				writer.Header().Add("Content-Type", "application/octet-stream")
-				writer.Header().Add("Content-Length", strconv.Itoa(length))
-				if eof {
-					endOffset = objectMeta.ObjectSize - 1
-				}
-				writer.Header().Add("Content-Range", fmt.Sprintf("bytes %d-%d/%d", startOffset, endOffset, objectMeta.ObjectSize))
-				if !hasRangeHeader {
-					writer.WriteHeader(http.StatusOK)
-					//writer.WriteHeader(http.StatusGatewayTimeout)
-				} else {
-					writer.WriteHeader(http.StatusPartialContent)
-				}
-
-				if trace.IsLogging(logger.DEBUG) {
-					trace.Trace("Set header Content-Length: %d, set header Content-Range: bytes %d-%d/%d\n", length, startOffset, endOffset, objectMeta.ObjectSize)
-				}
-
-				if _, err := io.Copy(writer, dataReader); err != nil {
-					SendErrorResponse(writer, err, "", 0)
-				}
-
-				if err := Store.CloseDataReader(dataReader); err != nil {
-					SendErrorResponse(writer, err, "", 0)
-				}
-				if trace.IsLogging(logger.DEBUG) {
-					trace.Debug("Handling object get data, update notification for %s %s %s %s, status: %s\n", objectType, objectID, destType, destID, common.Data)
-				}
-				// update notification only if current notification.InstanceID == metadata.InstanceID && current notification.status == "updated" && this is the last chunk
-				if updateNotificationRecord {
-					if trace.IsLogging(logger.DEBUG) {
-						trace.Debug("Handling object get data, update notification status to data for %s %s %s %s %s\n", orgID, objectType, objectID, destType, destID)
-					}
-					notification := common.Notification{ObjectID: objectID, ObjectType: objectType,
-						DestOrgID: orgID, DestID: destID, DestType: destType, Status: common.Data, InstanceID: instanceID, DataID: dataID}
-					if err = Store.UpdateNotificationRecord(notification); err != nil {
-						if log.IsLogging(logger.ERROR) {
-							log.Error("Handling object get data, failed to update notification for %s %s %s %s with status: %s\n", objectType, objectID, destType, destID, common.Data)
-						}
-					} else {
-						if trace.IsLogging(logger.DEBUG) {
-							log.Debug("Handling object get data, update notification for %s %s %s %s with status %s is done\n", objectType, objectID, destType, destID, common.Data)
-						}
-					}
-				} else {
-					if trace.IsLogging(logger.DEBUG) {
-						trace.Debug("Handling object get data, return WITHOUT update notification status to data for %s %s %s %s %s, set updateNotificationRecord to %t \n", orgID, objectType, objectID, destType, destID, updateNotificationRecord)
-					}
-				}
-			}
-		}
-	*/
 }
 
 func (communication *HTTP) PushData(metaData *common.MetaData, offset int64) common.SyncServiceError {
@@ -1766,6 +1726,14 @@ func (communication *HTTP) PushData(metaData *common.MetaData, offset int64) com
 			if !isDataTransportTimeoutError(err) {
 				return err
 			}
+
+			/**
+			 Removed the code with the CSS setting notificationRecord to status: common.Data since with the introduction of the semaphore and a client timeout
+			 there are more possibilities of the agent receiving an error due to timeout but the CSS thinks everything completed. If the agent set the status to
+			 an error but then the CSS set the status to common.Data, the agent would not receive the model update. The only way to guarantee that the CSS would
+			 not overwrite the status from the agent was to eliminate the CSS setting the status at all.
+			**/
+
 		}
 	}
 
