@@ -69,18 +69,18 @@ func AppendData(uri string, dataReader io.Reader, dataLength uint32, offset int6
 }
 
 // For last chunk of non-temp data, need to rename the file
-func HandleLastDataChunk(uri string, isTempData bool) common.SyncServiceError {
+func HandleObjectInfoForLastDataChunk(uri string, isTempData bool) (bool, common.SyncServiceError) {
 	if !isTempData {
 		dataURI, err := url.Parse(uri)
 		if err != nil || !strings.EqualFold(dataURI.Scheme, "file") {
-			return &Error{"Invalid data URI"}
+			return false, &Error{"Invalid data URI"}
 		}
 		filePath := dataURI.Path + ".tmp"
 		if err := os.Rename(filePath, dataURI.Path); err != nil {
-			return &common.IOError{Message: "Failed to rename data file. Error: " + err.Error()}
+			return false, &common.IOError{Message: "Failed to rename data file. Error: " + err.Error()}
 		}
 	}
-	return nil
+	return true, nil
 }
 
 // StoreData writes the data to the file stored at the given URI

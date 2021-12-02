@@ -814,6 +814,9 @@ func PutObjectChunkData(orgID string, objectType string, objectID string, dataRe
 		return true, nil
 	}
 
+	common.ObjectLocks.Unlock(lockIndex)
+	apiObjectLocks.Unlock(lockIndex)
+
 	return true, nil
 }
 

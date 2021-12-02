@@ -683,6 +683,7 @@ const (
 	AckConsumed           = "ackconsumed"
 	ConsumedByDestination = "consumedByDest"
 	Getdata               = "getdata"
+	DataReceived          = "dataReceived"
 	Data                  = "data"
 	UpdatePending         = "updatePending"
 	ConsumedPending       = "consumedPending"

@@ -1026,6 +1026,17 @@ func (communication *HTTP) GetDataByChunk(metaData common.MetaData, offset int64
 			return &Error{fmt.Sprintf("Error in GetDataByChunk: %s\n", err)}
 		}
 
+		// if trace.IsLogging(logger.DEBUG) {
+		// 	trace.Debug("Updating ESS notification status to dataReceived for %s %s %s", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+		// }
+
+		// if err := Store.UpdateNotificationRecord(
+		// 	common.Notification{ObjectID: metaData.ObjectID, ObjectType: metaData.ObjectType,
+		// 		DestOrgID: metaData.DestOrgID, DestID: metaData.OriginID, DestType: metaData.OriginType,
+		// 		Status: common.DataReceived, InstanceID: metaData.InstanceID, DataID: metaData.DataID}); err != nil {
+		// 			common.ObjectLocks.Unlock(lockIndex)
+		// 			return &Error{fmt.Sprintf("Error in GetDataByChunk: %s\n", err)}
+		// }
 		common.ObjectLocks.Unlock(lockIndex)
 
 		if trace.IsLogging(logger.DEBUG) {
