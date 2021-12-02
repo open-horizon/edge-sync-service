@@ -463,10 +463,12 @@ func handleUpdate(metaData common.MetaData, maxInflightChunks int) common.SyncSe
 		return &notificationHandlerError{fmt.Sprintf("Error in handleUpdate: failed to send notification. Error: %s\n", err)}
 	}
 
-	// if common.Configuration.NodeType == common.CSS && common.Configuration.CommunicationProtocol == common.HTTPProtocol {
-	// 	return nil
-	// }
-	// fmt.Println("Starting to get Data...")
+	// For debug
+	fmt.Println("Checking notification status before GetData")
+	if notification, err := Store.RetrieveNotificationRecord(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID,
+		metaData.OriginType, metaData.OriginID); err == nil && notification != nil {
+		fmt.Printf("Notification status is: %s\n", notification.Status)
+	}
 
 	Comm.LockDataChunks(lockIndex, &metaData)
 	defer Comm.UnlockDataChunks(lockIndex, &metaData)
@@ -483,6 +485,7 @@ func handleUpdate(metaData common.MetaData, maxInflightChunks int) common.SyncSe
 				return err
 			}
 			offset += int64(metaData.ChunkSize)
+			//time.Sleep(time.Duration(5000) * time.Millisecond)
 		}
 	}
 
@@ -1748,6 +1751,33 @@ func handleDataReceived(metaData common.MetaData) {
 
 func getOffsetsToResend(notification common.Notification, metaData common.MetaData) []int64 {
 	offsets := make([]int64, 0)
+
+	// retrieve notification again, in case the object notification status is already change from "getdata"/"data" to other status
+	n, err := Store.RetrieveNotificationRecord(notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
+	if err == nil || n == nil {
+		if trace.IsLogging(logger.DEBUG) {
+			if err != nil {
+				trace.Debug("Failed to retrieve notification record for %s %s %s %s %s, error: %s\n", notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID, err.Error())
+			} else if n == nil {
+				trace.Debug("Notification record not found for %s %s %s %s %s\n", notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
+			}
+		}
+		return offsets
+	}
+
+	if n.Status != notification.Status {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("Retrieved notification status %s is different from the notification to resend %s for object notificaiton %s %s %s %s %s\n", n.Status, notification.Status, notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
+		}
+		return offsets
+	}
+
+	if n.InstanceID != notification.InstanceID {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("Retrieved notification instanceID %d is different from the notification to resend %d for object notificaiton %s %s %s %s %s\n", n.InstanceID, notification.InstanceID, notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
+		}
+		return offsets
+	}
 
 	id := common.GetNotificationID(notification)
 	notificationLock.RLock()

@@ -689,6 +689,30 @@ func (communication *HTTP) GetData(metaData common.MetaData, offset int64) commo
 }
 
 func (communication *HTTP) GetAllData(metaData common.MetaData, offset int64) common.SyncServiceError {
+	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+
+	if n, err := Store.RetrieveNotificationRecord(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID); err != nil {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("Error when retrieve notification record, %s", err.Error())
+		}
+		return err
+	} else if n != nil && metaData.InstanceID < n.InstanceID {
+		trace.Debug("In GetAllData: metaData instance ID (%d) < notification instance ID (%d), ignore...", metaData.InstanceID, n.InstanceID)
+		return nil
+	} else if n != nil {
+		trace.Debug("In GetAllData: notification status %s", n.Status)
+	}
+
+	if obj, objStatus, err := Store.RetrieveObjectAndStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID); err != nil {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("Error when retrieve object, %s", err.Error())
+		}
+		return err
+	} else if obj != nil && objStatus == common.CompletelyReceived {
+		trace.Debug("In GetAllData: object (%s %s %s) is already completely received, ignore...", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+		return nil
+	}
+
 	// For debugging
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In http.GetAllData, retrieve notification %s, %s. %s, %s, %s", metaData.DestID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID)
@@ -760,7 +784,6 @@ func (communication *HTTP) GetAllData(metaData common.MetaData, offset int64) co
 		return &notificationHandlerError{msg}
 	}
 
-	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 	common.ObjectLocks.Lock(lockIndex)
 
 	var dataVf *dataVerifier.DataVerifier
@@ -840,18 +863,26 @@ func (communication *HTTP) GetDataByChunk(metaData common.MetaData, offset int64
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In http.GetDataByChunk for %s %s %s, offset: %d, object size: %d, chunk size: %d\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, offset, metaData.ObjectSize, metaData.ChunkSize)
 	}
-	// For debugging
-	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("In http.GetDataByChunk, retrieve notification %s, %s. %s, %s, %s", metaData.DestID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID)
-
-		if n, err := Store.RetrieveNotificationRecord(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID); err != nil {
-			trace.Debug("Error when retrieve notification record, %s", err.Error())
-		} else if n == nil {
-			trace.Debug("In GetDataByChunk: nil notifications")
-		} else {
-			trace.Debug("In GetDataByChunk: notification status %s", n.Status)
+	if n, err := Store.RetrieveNotificationRecord(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID); err != nil {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("Error when retrieve notification record, %s", err.Error())
 		}
-		trace.Debug("In http.GetDataByChunk, updating notification %s, %s. %s, %s, %s to getdata status", metaData.DestID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID)
+		return err
+	} else if n != nil && metaData.InstanceID < n.InstanceID {
+		trace.Debug("In GetDataByChunk: metaData instance ID (%d) < notification instance ID (%d), ignore...", metaData.InstanceID, n.InstanceID)
+		return nil
+	} else if n != nil {
+		trace.Debug("In GetDataByChunk: notification status %s", n.Status)
+	}
+
+	if obj, objStatus, err := Store.RetrieveObjectAndStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID); err != nil {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("Error when retrieve object, %s", err.Error())
+		}
+		return err
+	} else if obj != nil && obj.InstanceID == metaData.InstanceID && objStatus == common.CompletelyReceived {
+		trace.Debug("In GetDataByChunk: object (%s %s %s) is already completely received, ignore...", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+		return nil
 	}
 
 	if err := updateGetDataNotification(metaData, metaData.OriginType, metaData.OriginID, offset); err != nil {
