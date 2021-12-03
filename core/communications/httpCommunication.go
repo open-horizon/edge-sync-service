@@ -957,7 +957,7 @@ func (communication *HTTP) GetDataByChunk(metaData common.MetaData, offset int64
 		request.Close = true
 	}
 
-	response, err := communication.requestWrapper.do(request)
+	response, err := communication.objDownloadRequestWrapper.do(request)
 	if response != nil && response.Body != nil {
 		defer response.Body.Close()
 	}

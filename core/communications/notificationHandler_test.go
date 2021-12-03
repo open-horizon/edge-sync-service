@@ -12,6 +12,7 @@ import (
 func TestNotificationHandler(t *testing.T) {
 
 	common.InitObjectLocks()
+	common.InitObjectDownloadSemaphore()
 
 	if common.Registered {
 		t.Errorf("Registered flag is true")

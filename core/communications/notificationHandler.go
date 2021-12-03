@@ -554,7 +554,17 @@ func handleObjectConsumed(orgID string, objectType string, objectID string, dest
 		return &notificationHandlerError{fmt.Sprintf("Error in handleObjectConsumed: failed to retrieve object. Error: %s\n", err)}
 	}
 	if notification == nil || metaData == nil || notification.InstanceID != instanceID ||
-		(notification.Status != common.Data && notification.Status != common.Updated && notification.Status != common.ReceivedByDestination) {
+		(notification.Status != common.Data && notification.Status != common.Updated && notification.Status != common.Update &&
+			notification.Status != common.UpdatePending && notification.Status != common.ReceivedByDestination) {
+		if notification == nil {
+			fmt.Println("notification is nil")
+		} else if metaData == nil {
+			fmt.Println("metaData is nil")
+		} else if notification.InstanceID != instanceID {
+			fmt.Printf("Notificaiton.InstanceID(%d) != instanceID(%d)\n", notification.InstanceID, instanceID)
+		} else {
+			fmt.Printf("notification status (%s) is not data, update, updated, updatePending, receivedByDestinaion\n", notification.Status)
+		}
 		// Something went wrong: we can't retrieve the notification or the object, or the received notification doesn't
 		// match the existing notification record
 		if trace.IsLogging(logger.TRACE) {

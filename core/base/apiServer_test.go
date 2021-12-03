@@ -751,6 +751,10 @@ func testHandleObjectHelper(nodeType string, storageType string, t *testing.T) {
 		writer := newAPIServerTestResponseWriter()
 		request, _ := http.NewRequest(test.method, urlString, ioutil.NopCloser(&buffer))
 		request.SetBasicAuth(test.appKey, "")
+		//common.Configuration.LogLevel = "TRACE"
+		//fmt.Printf("Log level: %s\n", common.Configuration.LogLevel)
+		// buf := new(bytes.Buffer)
+		// trace.Start(buf)
 
 		handleObjects(writer, request)
 		if writer.statusCode == test.expectedHTTPStatus {
@@ -810,6 +814,9 @@ func testHandleObjectHelper(nodeType string, storageType string, t *testing.T) {
 		} else if nodeType != common.ESS && test.method != "destinations" {
 			t.Errorf("handleObjects of %s returned a status of %d instead of %d for test %d and %s under %s and %s database\n", urlString,
 				writer.statusCode, test.expectedHTTPStatus, test.testID, nodeType, test.appKey, storageType)
+			// fmt.Println("log writer: ")
+			// fmt.Printf("log is: %s\n", buf.String())
+			// fmt.Println("log done")
 		}
 	}
 

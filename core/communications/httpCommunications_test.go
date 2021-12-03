@@ -621,6 +621,7 @@ func testHTTPCommSetup(nodeType string) string {
 	common.Running = true
 	time.Sleep(100 * time.Millisecond) // Wait a bit
 	common.InitObjectLocks()
+	common.InitObjectDownloadSemaphore()
 	security.SetAuthentication(&security.TestAuthenticate{})
 	security.Start()
 
