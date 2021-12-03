@@ -241,7 +241,7 @@ func resendNotificationsForDestination(dest common.Destination, resendReceivedOb
 				offsets := getOffsetsToResend(*n, *metaData)
 				for _, offset := range offsets {
 					if trace.IsLogging(logger.TRACE) {
-						trace.Trace("Resending GetData request for offset %d of %s:%s:%s\n", offset, n.DestOrgID, n.ObjectType, n.ObjectID)
+						trace.Debug("Resending GetData request for offset %d of %s:%s:%s\n", offset, n.DestOrgID, n.ObjectType, n.ObjectID)
 					}
 					if err = Comm.GetData(*metaData, offset); err != nil {
 						if common.IsNotFound(err) {
