@@ -180,7 +180,7 @@ func IsInterruptedNetworkError(pResp *http.Response, err error) bool {
 		}
 	}
 
-	if pResp != nil && (pResp.StatusCode == http.StatusGatewayTimeout || pResp.StatusCode == http.StatusServiceUnavailable) {
+	if pResp != nil && (pResp.StatusCode == http.StatusGatewayTimeout || pResp.StatusCode == http.StatusServiceUnavailable || pResp.StatusCode == http.StatusTooManyRequests) {
 		return true
 	}
 

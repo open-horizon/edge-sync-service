@@ -741,6 +741,7 @@ func PutObjectChunkData(orgID string, objectType string, objectID string, dataRe
 
 		return true, nil
 	} else {
+		// Is lastChunk
 		if isTempData {
 			// Verify data
 			if common.NeedDataVerification(*metaData) {
@@ -748,9 +749,13 @@ func PutObjectChunkData(orgID string, objectType string, objectID string, dataRe
 				if trace.IsLogging(logger.DEBUG) {
 					trace.Debug("In PutObjectData. Start data verification %s %s\n", objectType, objectID)
 				}
-
+				// verify data
 				dataVf := dataVerifier.NewDataVerifier(metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature)
-				if success, err := dataVf.VerifyDataSignature(dataReader, orgID, objectType, objectID, ""); !success || err != nil {
+				if dr, err := dataVf.GetTempData(*metaData); err != nil {
+					common.ObjectLocks.Unlock(lockIndex)
+					apiObjectLocks.Unlock(lockIndex)
+					return false, &common.InvalidRequest{Message: "Failed to get temp data for data verify, Error: " + err.Error()}
+				} else if success, err := dataVf.VerifyDataSignature(dr, orgID, objectType, objectID, ""); !success || err != nil {
 					if trace.IsLogging(logger.ERROR) {
 						trace.Error("Failed to verify data for object %s %s, remove unverified data\n", objectType, objectID)
 					}
