@@ -1762,38 +1762,53 @@ func handleDataReceived(metaData common.MetaData) {
 func getOffsetsToResend(notification common.Notification, metaData common.MetaData) []int64 {
 	offsets := make([]int64, 0)
 
-	// retrieve notification again, in case the object notification status is already change from "getdata"/"data" to other status
-	n, err := Store.RetrieveNotificationRecord(notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
-	if err == nil || n == nil {
-		if trace.IsLogging(logger.DEBUG) {
-			if err != nil {
-				trace.Debug("Failed to retrieve notification record for %s %s %s %s %s, error: %s\n", notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID, err.Error())
-			} else if n == nil {
-				trace.Debug("Notification record not found for %s %s %s %s %s\n", notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
-			}
-		}
-		return offsets
-	}
+	// if trace.IsLogging(logger.DEBUG) {
+	// 	trace.Debug("In getOffsetsToResend, check notification record again before getting offsets to resend for %s %s %s %s %s\n", notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
+	// }
+	// // retrieve notification again, in case the object notification status is already change from "getdata"/"data" to other status
+	// n, err := Store.RetrieveNotificationRecord(notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
+	// if err == nil || n == nil {
+	// 	//if trace.IsLogging(logger.DEBUG) {
+	// 	if err != nil {
+	// 		fmt.Printf("Failed to retrieve notification record for %s %s %s %s %s, error: %s\n", notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID, err.Error())
+	// 		trace.Debug("Failed to retrieve notification record for %s %s %s %s %s, error: %s\n", notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID, err.Error())
+	// 	} else if n == nil {
+	// 		fmt.Printf("Notification record not found for %s %s %s %s %s\n", notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
+	// 		trace.Debug("Notification record not found for %s %s %s %s %s\n", notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
+	// 	}
+	// 	//}
+	// 	return offsets
+	// }
 
-	if n.Status != notification.Status {
-		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("Retrieved notification status %s is different from the notification to resend %s for object notificaiton %s %s %s %s %s\n", n.Status, notification.Status, notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
-		}
-		return offsets
-	}
+	// if n.Status != notification.Status {
 
-	if n.InstanceID != notification.InstanceID {
-		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("Retrieved notification instanceID %d is different from the notification to resend %d for object notificaiton %s %s %s %s %s\n", n.InstanceID, notification.InstanceID, notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
-		}
-		return offsets
-	}
+	// 	fmt.Printf("Retrieved notification status %s is different from the notification to resend %s for object notificaiton %s %s %s %s %s\n", n.Status, notification.Status, notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
+	// 	if trace.IsLogging(logger.DEBUG) {
+	// 		trace.Debug("Retrieved notification status %s is different from the notification to resend %s for object notificaiton %s %s %s %s %s\n", n.Status, notification.Status, notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
+	// 	}
+	// 	return offsets
+	// }
+
+	// if n.InstanceID != notification.InstanceID {
+	// 	fmt.Printf("Retrieved notification instanceID %d is different from the notification to resend %d for object notificaiton %s %s %s %s %s\n", n.InstanceID, notification.InstanceID, notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
+	// 	if trace.IsLogging(logger.DEBUG) {
+	// 		trace.Debug("Retrieved notification instanceID %d is different from the notification to resend %d for object notificaiton %s %s %s %s %s\n", n.InstanceID, notification.InstanceID, notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
+	// 	}
+	// 	return offsets
+	// }
 
 	id := common.GetNotificationID(notification)
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("Checking chunksInfo for %s\n", id)
+	}
 	notificationLock.RLock()
 	chunksInfo, ok := notificationChunks[id]
 	notificationLock.RUnlock()
 	if !ok {
+		fmt.Printf("No chunksInfo found for %s, will get Offsets for resend From Scratch\n", id)
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("No chunksInfo found for %s, will get Offsets for resend From Scratch\n", id)
+		}
 		return getOffsetsForResendFromScratch(notification, metaData)
 	}
 
@@ -1810,13 +1825,28 @@ func getOffsetsToResend(notification common.Notification, metaData common.MetaDa
 	// been received or that chunks have been received out of order.
 	// In such cases we want to scan the map and see if a chunk has to be re-requested.
 	currentTime := time.Now().Unix()
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("chunksInfo.resendTime: %d, currentTime: %d\n", chunksInfo.resendTime, currentTime)
+		trace.Debug("len(chunksInfo.chunkResendTimes)=%d\n", len(chunksInfo.chunkResendTimes))
+		trace.Debug("chunksInfo.maxRequestedOffset=%d, chunksInfo.maxReceivedOffset=%d, chunksInfo.chunkSize=%d", chunksInfo.maxRequestedOffset, chunksInfo.maxReceivedOffset, chunksInfo.chunkSize)
+	}
 	if chunksInfo.resendTime <= currentTime ||
 		(chunksInfo.chunkSize > 0 &&
 			int(chunksInfo.maxRequestedOffset-chunksInfo.maxReceivedOffset)/chunksInfo.chunkSize < len(chunksInfo.chunkResendTimes)) {
 		for offset, resendTime := range chunksInfo.chunkResendTimes {
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("chunksInfo.chunkResendTimes, offset: %d, resendTime: %d\n", offset, resendTime)
+			}
 			if resendTime <= currentTime {
 				offsets = append(offsets, offset)
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Debug("Adding offset %d to resend offsets list for %s\n", offset, id)
+				}
 			}
+		}
+	} else {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("Skip adding offsets")
 		}
 	}
 	return offsets

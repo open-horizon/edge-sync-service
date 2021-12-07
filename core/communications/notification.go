@@ -237,23 +237,36 @@ func resendNotificationsForDestination(dest common.Destination, resendReceivedOb
 					continue
 				}
 				common.ObjectLocks.Unlock(lockIndex)
-				Comm.LockDataChunks(lockIndex, metaData)
-				offsets := getOffsetsToResend(*n, *metaData)
-				for _, offset := range offsets {
-					if trace.IsLogging(logger.TRACE) {
-						trace.Debug("Resending GetData request for offset %d of %s:%s:%s\n", offset, n.DestOrgID, n.ObjectType, n.ObjectID)
+
+				nc, err := Store.RetrieveNotificationRecord(notification.DestOrgID, notification.ObjectType, notification.ObjectID,
+					notification.DestType, notification.DestID)
+				if err == nil && nc != nil && nc.Status == notification.Status && nc.InstanceID == notification.InstanceID {
+					Comm.LockDataChunks(lockIndex, metaData)
+					offsets := getOffsetsToResend(*n, *metaData)
+					if trace.IsLogging(logger.DEBUG) {
+						trace.Debug("len(offsets) to resend %d for %s:%s:%s\n", len(offsets), n.DestOrgID, n.ObjectType, n.ObjectID)
 					}
-					if err = Comm.GetData(*metaData, offset); err != nil {
-						if common.IsNotFound(err) {
-							if log.IsLogging(logger.ERROR) {
-								log.Error("Resending GetData, get notFound error for offset %d of %s:%s:%s, deleting object Info...", offset, n.DestOrgID, n.ObjectType, n.ObjectID)
-							}
-							deleteObjectInfo("", "", "", n.DestType, n.DestID, metaData, true)
+					for _, offset := range offsets {
+						if trace.IsLogging(logger.DEBUG) {
+							trace.Debug("Resending GetData request for offset %d of %s:%s:%s\n", offset, n.DestOrgID, n.ObjectType, n.ObjectID)
 						}
-						break
+						if err = Comm.GetData(*metaData, offset); err != nil {
+							if common.IsNotFound(err) {
+								if log.IsLogging(logger.ERROR) {
+									log.Error("Resending GetData, get notFound error for offset %d of %s:%s:%s, deleting object Info...", offset, n.DestOrgID, n.ObjectType, n.ObjectID)
+								}
+								deleteObjectInfo("", "", "", n.DestType, n.DestID, metaData, true)
+							}
+							break
+						}
+					}
+					Comm.UnlockDataChunks(lockIndex, metaData)
+				} else {
+					if trace.IsLogging(logger.DEBUG) {
+						trace.Debug("Retrieved notification is nil or with different instanceID or status")
 					}
 				}
-				Comm.UnlockDataChunks(lockIndex, metaData)
+
 				if trace.IsLogging(logger.DEBUG) {
 					trace.Debug("In notification.go, notification getdata status for destination, resend object %s %s to destination %s %s done", n.ObjectType, n.ObjectID, n.DestType, n.DestID)
 				}

@@ -991,7 +991,7 @@ func (communication *HTTP) GetDataByChunk(metaData common.MetaData, offset int64
 	dataLengthInString := response.Header.Get("Content-Length")
 	dataLength, err := strconv.ParseUint(dataLengthInString, 10, 32)
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("In GetData, Content-Length header in response is %s, dataLength is %d\n", response.Header.Get("Content-Length"), dataLength)
+		trace.Debug("In GetDataByChunk, Content-Length header in response is %s, dataLength is %d\n", response.Header.Get("Content-Length"), dataLength)
 	}
 
 	if err != nil {
@@ -1641,6 +1641,19 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 	if err != nil {
 		SendErrorResponse(writer, err, "", 0)
 	}
+
+	// For test
+	// count := 0
+	// if count == 0 && startOffset == 3 {
+	// 	msg := fmt.Sprintf("Test timeout error for count %d", count)
+	// 	count++
+	// 	fmt.Println(msg)
+	// 	writer.WriteHeader(http.StatusGatewayTimeout)
+	// 	return
+	// 	// dataErr := &dataTransportTimeOutError{msg}
+	// 	// SendErrorResponse(writer, dataErr, "", 0)
+	// }
+	// EndTest
 
 	if startOffset == -1 && endOffset == -1 {
 		// Range header not specified, will get all data
