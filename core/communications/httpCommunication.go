@@ -1006,21 +1006,27 @@ func (communication *HTTP) GetDataByChunk(metaData common.MetaData, offset int64
 		}
 
 		if metaData.DestinationDataURI != "" {
-			if _, err := dataURI.AppendData(metaData.DestinationDataURI, response.Body, uint32(dataLength), offset, metaData.ObjectSize,
-				isFirstChunk, isLastChunk, isTempData); err != nil {
-				common.ObjectLocks.Unlock(lockIndex)
-				return err
-			}
+			_, err = dataURI.AppendData(metaData.DestinationDataURI, response.Body, uint32(dataLength), offset, metaData.ObjectSize,
+				isFirstChunk, isLastChunk, isTempData)
 		} else {
-			if _, err := Store.AppendObjectData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, response.Body, uint32(dataLength), offset, metaData.ObjectSize,
-				isFirstChunk, isLastChunk, isTempData); err != nil {
-				// if storage.IsDiscarded(err) {
-				// 	common.ObjectLocks.Unlock(lockIndex)
-				// 	return nil
-				// }
-				common.ObjectLocks.Unlock(lockIndex)
-				return err
+			_, err = Store.AppendObjectData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, response.Body, uint32(dataLength), offset, metaData.ObjectSize,
+				isFirstChunk, isLastChunk, isTempData)
+		}
+
+		if err != nil {
+			common.ObjectLocks.Unlock(lockIndex)
+			// if storage.IsDiscarded(err) {
+			// 	common.ObjectLocks.Unlock(lockIndex)
+			// 	return nil
+			// }
+			if IsInterruptedNetworkError(nil, err) {
+				if log.IsLogging(logger.ERROR) {
+					log.Error("In interrupted network while appending object data, will try again to download data for this chunk for %s %s\n", metaData.ObjectType, metaData.ObjectID)
+				}
+				msg := "Interrupted network during appending object data"
+				return &dataTransportTimeOutError{msg}
 			}
+			return err
 		}
 
 		if isLastChunk && isTempData {

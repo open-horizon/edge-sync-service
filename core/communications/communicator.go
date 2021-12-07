@@ -2,6 +2,7 @@ package communications
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -168,7 +169,11 @@ func SendErrorResponse(writer http.ResponseWriter, err error, message string, st
 
 func IsInterruptedNetworkError(pResp *http.Response, err error) bool {
 	if err != nil {
-		if strings.Contains(err.Error(), ": EOF") {
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			return true
+		}
+
+		if strings.Contains(err.Error(), " EOF") {
 			return true
 		}
 

@@ -1024,7 +1024,12 @@ func (store *BoltStorage) DeleteStoredData(orgID string, objectType string, obje
 		object.DataPath = ""
 		return object, nil
 	}
-	return store.updateObjectHelper(orgID, objectType, objectID, function)
+
+	err := store.updateObjectHelper(orgID, objectType, objectID, function)
+	if err != nil && err != notFound {
+		return err
+	}
+	return nil
 }
 
 // CleanObjects removes the objects received from the other side.

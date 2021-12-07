@@ -355,7 +355,6 @@ func handleUpdate(metaData common.MetaData, maxInflightChunks int) common.SyncSe
 	}
 
 	// for receive resend error notification from CSS, the ESS notification status is still "receiverError"
-
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Finish process notification, then set status to partiallyReceived of %s %s\n", metaData.ObjectType, metaData.ObjectID)
 	}
@@ -398,6 +397,23 @@ func handleUpdate(metaData common.MetaData, maxInflightChunks int) common.SyncSe
 		metaData.DataVerified = false
 	}
 	//}
+
+	// Remove data or partially received data and data chunks
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("remove object Data for object\n")
+	}
+	if err := storage.DeleteStoredData(Store, metaData); err != nil {
+		common.ObjectLocks.Unlock(lockIndex)
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("Failed to delete stored data and tmp data for object. Error: %s", err.Error())
+		}
+		return &notificationHandlerError{fmt.Sprintf("Error in handleUpdate: failed to delete stored data for object. Error: %s\n", err)}
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("remove notificationChunksInfo for object\n")
+	}
+	removeNotificationChunksInfo(metaData, metaData.DestType, metaData.DestID)
 
 	// Store the object. Now change the receiver status to "PartiallyReceived" or "CompletelyReceived"
 	if _, err := Store.StoreObject(metaData, nil, status); err != nil {
