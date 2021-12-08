@@ -44,12 +44,6 @@ func AppendData(uri string, dataReader io.Reader, dataLength uint32, offset int6
 
 	written, err := io.Copy(file, dataReader)
 	if err != nil && err != io.EOF {
-		if err == io.ErrUnexpectedEOF {
-			if trace.IsLogging(logger.DEBUG) {
-				trace.Debug("In dataURI.AppendData(), err is io.ErrUnexpectedEOF: %s for uri: %s", err.Error(), uri)
-			}
-			return isLastChunk, err
-		}
 		return isLastChunk, &common.IOError{Message: "Failed to write to file. Error: " + err.Error()}
 	}
 	if written != int64(dataLength) {

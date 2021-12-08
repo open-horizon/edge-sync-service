@@ -167,34 +167,13 @@ func SendErrorResponse(writer http.ResponseWriter, err error, message string, st
 	}
 }
 
-func IsInterruptedNetworkError(pResp *http.Response, err error) bool {
+func IsTransportError(pResp *http.Response, err error) bool {
 	if err != nil {
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
 			return true
 		}
 
 		if strings.Contains(err.Error(), " EOF") {
-			return true
-		}
-
-		l_error_string := strings.ToLower(err.Error())
-		if strings.Contains(l_error_string, "time") && strings.Contains(l_error_string, "out") {
-			return true
-		} else if strings.Contains(l_error_string, "connection") && (strings.Contains(l_error_string, "refused") || strings.Contains(l_error_string, "reset")) {
-			return true
-		}
-	}
-
-	if pResp != nil && (pResp.StatusCode == http.StatusGatewayTimeout || pResp.StatusCode == http.StatusServiceUnavailable || pResp.StatusCode == http.StatusTooManyRequests) {
-		return true
-	}
-
-	return false
-}
-
-func IsTransportError(pResp *http.Response, err error) bool {
-	if err != nil {
-		if strings.Contains(err.Error(), ": EOF") {
 			return true
 		}
 
@@ -214,7 +193,10 @@ func IsTransportError(pResp *http.Response, err error) bool {
 			// 504: gateway timeout
 			return true
 		} else if pResp.StatusCode == http.StatusServiceUnavailable {
-			//503: service unavailable
+			// 503: service unavailable
+			return true
+		} else if pResp.StatusCode == http.StatusTooManyRequests {
+			// 429: too many requests
 			return true
 		}
 	}

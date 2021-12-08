@@ -765,7 +765,7 @@ func (communication *HTTP) GetAllData(metaData common.MetaData, offset int64) co
 		defer response.Body.Close()
 	}
 	fmt.Printf("check if response has interrupted network error: %d\n", response.StatusCode)
-	if IsInterruptedNetworkError(response, err) {
+	if IsTransportError(response, err) {
 		msg := "Timeout in GetData: failed to receive data from the other side"
 		if err != nil {
 			msg = fmt.Sprintf("%s. Error: %s", msg, err.Error())
@@ -961,7 +961,7 @@ func (communication *HTTP) GetDataByChunk(metaData common.MetaData, offset int64
 	if response != nil && response.Body != nil {
 		defer response.Body.Close()
 	}
-	if IsInterruptedNetworkError(response, err) {
+	if IsTransportError(response, err) {
 		if log.IsLogging(logger.ERROR) {
 			log.Error("In interrupted network, will try again to download data for this chunk for %s %s\n", metaData.ObjectType, metaData.ObjectID)
 		}
@@ -1019,15 +1019,16 @@ func (communication *HTTP) GetDataByChunk(metaData common.MetaData, offset int64
 			// 	common.ObjectLocks.Unlock(lockIndex)
 			// 	return nil
 			// }
-			if IsInterruptedNetworkError(nil, err) {
-				if log.IsLogging(logger.ERROR) {
-					log.Error("In interrupted network while appending object data, will try again to download data for this chunk for %s %s\n", metaData.ObjectType, metaData.ObjectID)
-				}
-				msg := "Interrupted network during appending object data"
-				return &dataTransportTimeOutError{msg}
+			if log.IsLogging(logger.ERROR) {
+				log.Error("In interrupted network while appending object data, will try again to download data for this chunk for %s %s\n", metaData.ObjectType, metaData.ObjectID)
 			}
-			return err
+			msg := "Interrupted network during appending object data"
+			return &dataTransportTimeOutError{msg}
+
 		}
+
+		// common.ObjectLocks.Unlock(lockIndex)
+		// return &Error{"Error for test"}
 
 		if isLastChunk && isTempData {
 			// verify data
@@ -1776,14 +1777,6 @@ func (communication *HTTP) PushData(metaData *common.MetaData, offset int64) com
 			if !isDataTransportTimeoutError(err) {
 				return err
 			}
-
-			/**
-			 Removed the code with the CSS setting notificationRecord to status: common.Data since with the introduction of the semaphore and a client timeout
-			 there are more possibilities of the agent receiving an error due to timeout but the CSS thinks everything completed. If the agent set the status to
-			 an error but then the CSS set the status to common.Data, the agent would not receive the model update. The only way to guarantee that the CSS would
-			 not overwrite the status from the agent was to eliminate the CSS setting the status at all.
-			**/
-
 		}
 	}
 
@@ -1874,7 +1867,7 @@ func (communication *HTTP) pushAllData(metaData *common.MetaData) common.SyncSer
 	if response != nil && response.Body != nil {
 		defer response.Body.Close()
 	}
-	if IsInterruptedNetworkError(response, err) {
+	if IsTransportError(response, err) {
 		if log.IsLogging(logger.ERROR) {
 			log.Error("In interrupted network, will try to upload data by chunk for %s %s\n", metaData.ObjectType, metaData.ObjectID)
 		}
@@ -1997,7 +1990,7 @@ func (communication *HTTP) pushDataByChunk(metaData *common.MetaData, offset int
 		defer response.Body.Close()
 	}
 
-	if IsInterruptedNetworkError(response, err) {
+	if IsTransportError(response, err) {
 		if log.IsLogging(logger.ERROR) {
 			log.Error("In interrupted network, will try again to upload data for this chunk for %s %s\n", metaData.ObjectType, metaData.ObjectID)
 		}

@@ -1704,8 +1704,9 @@ func updateNotificationChunkInfo(createNotification bool, metaData common.MetaDa
 	notificationLock.Unlock()
 
 	fmt.Println("For debug, check chunksInfo:")
-	chunksInfo, ok = notificationChunks[id]
-	fmt.Printf("Get chunkResendTimes[%d]: %d", offset, chunksInfo.chunkResendTimes[offset])
+	chunksInfo, _ = notificationChunks[id]
+	fmt.Printf("Get chunkResendTimes[%d]: %d\n", offset, chunksInfo.chunkResendTimes[offset])
+	fmt.Printf("chunksInfo.receivedDataSize is %d\n", chunksInfo.receivedDataSize)
 	return nil
 }
 
