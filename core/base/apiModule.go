@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"math"
 	"net/url"
 	"os"
@@ -725,7 +726,10 @@ func PutObjectChunkData(orgID string, objectType string, objectID string, dataRe
 		trace.Debug("In PutObjectChunkData for %s %s %s, isTempData: %t, isFirstChunk: %t, dataSize to store: %d \n", orgID, objectType, objectID, isTempData, isFirstChunk, dataSize)
 	}
 
-	if isLastChunk, err = store.AppendObjectData(orgID, objectType, objectID, dataReader, uint32(dataSize), startOffset, totalSize,
+	dataReaderToBytes, err := ioutil.ReadAll(dataReader)
+	fmt.Printf("Length of dataReaderToBytes is: %d, expected dataSize is: %d\n", len(dataReaderToBytes), dataSize)
+
+	if isLastChunk, err = store.AppendObjectData(orgID, objectType, objectID, bytes.NewReader(dataReaderToBytes), 0, startOffset, totalSize,
 		isFirstChunk, isLastChunk, isTempData); err != nil {
 		if log.IsLogging(logger.ERROR) {
 			log.Error("Failed to append data for %s %s %s from offset %d to %d, Error: %s\n", orgID, objectType, objectID, startOffset, endOffset, err.Error())
