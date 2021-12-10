@@ -1181,6 +1181,7 @@ func (store *MongoStorage) AppendObjectData(orgID string, objectType string, obj
 	} else {
 		data, err = ioutil.ReadAll(dataReader)
 		n = len(data)
+		fmt.Printf("In mongo AppendObjectData, data length is: %d\n", n)
 	}
 	if err != nil && err != io.EOF {
 		return isLastChunk, &Error{fmt.Sprintf("Failed to read the data from the dataReader. Error: %s.", err)}
