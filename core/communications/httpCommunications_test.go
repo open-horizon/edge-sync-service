@@ -306,10 +306,10 @@ func TestEssHTTPComm(t *testing.T) {
 	}
 
 	ctx.pollPayload = []updateMessage{
-		{common.Update, common.MetaData{ObjectID: "1", ObjectType: "type2", DestOrgID: "myorg000", NoData: true, ChunkSize: 1, ObjectSize: int64(len([]byte("wsxrfvyhnplijnygv")))}},
+		{common.Update, common.MetaData{ObjectID: "1", ObjectType: "type2", DestOrgID: "myorg000", NoData: true, ChunkSize: 2, ObjectSize: int64(len([]byte("wsxrfvyhnplijnygv")))}},
 		//{common.Update, common.MetaData{ObjectID: "1b", ObjectType: "type2", DestOrgID: "myorg000", NoData: false}},
 		{common.Delete, common.MetaData{ObjectID: "2", ObjectType: "type2", DestOrgID: "myorg000", NoData: true}},
-		{common.Consumed, common.MetaData{ObjectID: "3", ObjectType: "type2", DestOrgID: "myorg000", NoData: true, InstanceID: 1, ChunkSize: 1, ObjectSize: int64(len([]byte("1234567890abcdefghijkl")))}},
+		{common.Consumed, common.MetaData{ObjectID: "3", ObjectType: "type2", DestOrgID: "myorg000", NoData: false, InstanceID: 1, ChunkSize: 2, ObjectSize: int64(len([]byte("1234567890abcdefghijkl")))}},
 		{common.Deleted, common.MetaData{ObjectID: "4", ObjectType: "type2", DestOrgID: "myorg000", NoData: true, InstanceID: 1, Deleted: true}},
 	}
 	statusAfterPoll := []string{common.CompletelyReceived, common.ObjDeleted, common.ConsumedByDest, common.ObjDeleted}
@@ -332,6 +332,7 @@ func TestEssHTTPComm(t *testing.T) {
 	ctx.subTest = "pushDataByChunk"
 	fmt.Println("Test pushDataByChunk")
 	common.Configuration.EnableDataChunk = true
+	common.Configuration.MaxDataChunkSize = 2
 	offset := int64(0)
 	for offset < ctx.pollPayload[2].MetaData.ObjectSize {
 		err = httpComm.PushData(&ctx.pollPayload[2].MetaData, offset)
@@ -372,6 +373,7 @@ func TestEssHTTPComm(t *testing.T) {
 	ctx.subTest = "getDataByChunk"
 	fmt.Println("Test getDataByChunk")
 	common.Configuration.EnableDataChunk = true
+	common.Configuration.MaxDataChunkSize = 2
 	offset = int64(0)
 	for offset < ctx.pollPayload[0].MetaData.ObjectSize {
 		err = httpComm.GetData(ctx.pollPayload[0].MetaData, offset)

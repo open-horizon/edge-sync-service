@@ -323,7 +323,7 @@ func (communication *HTTP) SendNotificationMessage(notificationTopic string, des
 
 		response, err = communication.requestWrapper.do(request)
 		if response != nil && response.Body != nil {
-			defer response.Body.Close()
+			response.Body.Close()
 		}
 
 		if IsTransportError(response, err) {
@@ -878,10 +878,20 @@ func (communication *HTTP) GetDataByChunk(metaData common.MetaData, offset int64
 		}
 		return err
 	} else if n != nil && metaData.InstanceID < n.InstanceID {
-		trace.Debug("In GetDataByChunk: metaData instance ID (%d) < notification instance ID (%d), ignore...", metaData.InstanceID, n.InstanceID)
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In GetDataByChunk: metaData instance ID (%d) < notification instance ID (%d), ignore...", metaData.InstanceID, n.InstanceID)
+		}
+		return nil
+	} else if n != nil && n.Status == common.ReceiverError && metaData.InstanceID <= n.InstanceID {
+		if trace.IsLogging(logger.DEBUG) {
+			// If object notification is already "receiverError", only the new metaData can overrite the notification status to getdata
+			trace.Debug("In GetDataByChunk: notification status is %s, and metaData instance ID (%d) <= notification instance ID (%d), ignore...", n.Status, metaData.InstanceID, n.InstanceID)
+		}
 		return nil
 	} else if n != nil {
-		trace.Debug("In GetDataByChunk: notification status %s", n.Status)
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In GetDataByChunk: notification status %s", n.Status)
+		}
 	}
 
 	if obj, objStatus, err := Store.RetrieveObjectAndStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID); err != nil {
@@ -1893,18 +1903,27 @@ func (communication *HTTP) pushDataByChunk(metaData *common.MetaData, offset int
 		trace.Debug("In pushDataByChunk, after updatePushDataNotification with offset %d\n", offset)
 	}
 
-	// For debugging
-	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("In http.pushDataByChunk, retrieve notification %s, %s. %s, %s, %s", metaData.DestID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID)
-
-		if n, err := Store.RetrieveNotificationRecord(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID); err != nil {
-			trace.Debug("Error when retrieve notification record, %s", err.Error())
-		} else if n == nil {
-			trace.Debug("In pushDataByChunk: nil notifications")
-		} else {
+	if n, err := Store.RetrieveNotificationRecord(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID); err != nil {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("Error when retrieve notification record, %s", err.Error())
+		}
+		return err
+	} else if n != nil && metaData.InstanceID < n.InstanceID {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In pushDataByChunk: metaData instance ID (%d) < notification instance ID (%d), ignore...", metaData.InstanceID, n.InstanceID)
+		}
+		return nil
+	} else if n != nil && n.Status == common.ReceiverError && metaData.InstanceID <= n.InstanceID {
+		if trace.IsLogging(logger.DEBUG) {
+			// If object notification is already "receiverError", only the new metaData can overrite the notification status to data
+			trace.Debug("In pushDataByChunk: notification status is %s, and metaData instance ID (%d) <= notification instance ID (%d), ignore...", n.Status, metaData.InstanceID, n.InstanceID)
+		}
+		return nil
+	} else if n != nil {
+		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In pushDataByChunk: notification status %s", n.Status)
 		}
-		trace.Debug("In http.pushDataByChunk, updating notification %s, %s. %s, %s, %s to data status", metaData.DestID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID)
+
 	}
 
 	if err := updatePushDataNotification(*metaData, metaData.OriginType, metaData.OriginID, offset); err != nil {
