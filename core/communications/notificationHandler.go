@@ -354,6 +354,23 @@ func handleUpdate(metaData common.MetaData, maxInflightChunks int) common.SyncSe
 		}
 	}
 
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("Create/Update notification status to %s for %s %s %s %s %s\n", common.HandleUpdate, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID)
+	}
+	// Set notification status to "update"
+	notification := common.Notification{ObjectID: metaData.ObjectID, ObjectType: metaData.ObjectType,
+		DestOrgID: metaData.DestOrgID, DestID: metaData.OriginID, DestType: metaData.OriginType,
+		Status: common.HandleUpdate, InstanceID: metaData.InstanceID, DataID: metaData.DataID}
+
+	// Store the notification records in storage as part of the object
+	if err := Store.UpdateNotificationRecord(notification); err != nil {
+		common.ObjectLocks.Unlock(lockIndex)
+		if log.IsLogging(logger.ERROR) {
+			log.Error("In handleUpdate, failed to update notification record status to %s\n", common.HandleUpdate)
+		}
+		return err
+	}
+
 	// for receive resend error notification from CSS, the ESS notification status is still "receiverError"
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Finish process notification, then set status to partiallyReceived of %s %s\n", metaData.ObjectType, metaData.ObjectID)

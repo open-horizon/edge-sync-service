@@ -682,11 +682,11 @@ const (
 const (
 	Update                = "update"
 	Updated               = "updated"
+	HandleUpdate          = "handleUpdate"
 	Consumed              = "consumed"
 	AckConsumed           = "ackconsumed"
 	ConsumedByDestination = "consumedByDest"
 	Getdata               = "getdata"
-	DataReceived          = "dataReceived"
 	Data                  = "data"
 	UpdatePending         = "updatePending"
 	ConsumedPending       = "consumedPending"
