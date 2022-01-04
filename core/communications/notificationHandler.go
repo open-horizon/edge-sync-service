@@ -404,16 +404,14 @@ func handleUpdate(metaData common.MetaData, maxInflightChunks int) common.SyncSe
 	_, existingObjStatus, _ := Store.RetrieveObjectAndStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 	if existingObjStatus == common.ReadyToSend || existingObjStatus == common.NotReadyToSend {
 		common.ObjectLocks.Unlock(lockIndex)
-		return &notificationHandlerError{fmt.Sprintf("Error in handleUpdate: cannot update object from the receiver side.\n")}
+		return &notificationHandlerError{"Error in handleUpdate: cannot update object from the receiver side."}
 	}
 
 	// If has data, and need to verifiy data, set DataVerified to false
-	//if common.Configuration.NodeType == common.ESS {
 	metaData.DataVerified = true
 	if status == common.PartiallyReceived && common.NeedDataVerification(metaData) {
 		metaData.DataVerified = false
 	}
-	//}
 
 	// Remove data or partially received data and data chunks
 	if trace.IsLogging(logger.DEBUG) {
@@ -496,29 +494,22 @@ func handleUpdate(metaData common.MetaData, maxInflightChunks int) common.SyncSe
 		return &notificationHandlerError{fmt.Sprintf("Error in handleUpdate: failed to send notification. Error: %s\n", err)}
 	}
 
-	// For debug
-	fmt.Println("Checking notification status before GetData")
-	if notification, err := Store.RetrieveNotificationRecord(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID,
-		metaData.OriginType, metaData.OriginID); err == nil && notification != nil {
-		fmt.Printf("Notification status is: %s\n", notification.Status)
-	}
-
 	Comm.LockDataChunks(lockIndex, &metaData)
 	defer Comm.UnlockDataChunks(lockIndex, &metaData)
 	if metaData.ChunkSize <= 0 || metaData.ObjectSize <= 0 || !common.Configuration.EnableDataChunk {
-		// return Comm.GetData(metaData, 0)
 		if err := Comm.GetData(metaData, 0); err != nil {
 			return err
 		}
 	} else {
 		var offset int64
 		for i := 0; i < maxInflightChunks && offset < metaData.ObjectSize; i++ {
-			fmt.Printf("Lily -- For (%s/%s/%s), Inside loop i=%d, offset: %d, metaData.ObjectSize: %d\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, i, offset, metaData.ObjectSize)
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("(i=%d)GetData from offset: %d, for %s/%s/%s, object size: %d", i, offset, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.ObjectSize)
+			}
 			if err := Comm.GetData(metaData, offset); err != nil {
 				return err
 			}
 			offset += int64(metaData.ChunkSize)
-			//time.Sleep(time.Duration(5000) * time.Millisecond)
 		}
 	}
 
@@ -589,15 +580,18 @@ func handleObjectConsumed(orgID string, objectType string, objectID string, dest
 	if notification == nil || metaData == nil || notification.InstanceID != instanceID ||
 		(notification.Status != common.Data && notification.Status != common.Updated && notification.Status != common.Update &&
 			notification.Status != common.UpdatePending && notification.Status != common.ReceivedByDestination) {
-		if notification == nil {
-			fmt.Println("notification is nil")
-		} else if metaData == nil {
-			fmt.Println("metaData is nil")
-		} else if notification.InstanceID != instanceID {
-			fmt.Printf("Notificaiton.InstanceID(%d) != instanceID(%d)\n", notification.InstanceID, instanceID)
-		} else {
-			fmt.Printf("notification status (%s) is not data, update, updated, updatePending, receivedByDestinaion\n", notification.Status)
+		if trace.IsLogging(logger.TRACE) {
+			if notification == nil {
+				trace.Debug("notification is nil")
+			} else if metaData == nil {
+				trace.Debug("metaData is nil")
+			} else if notification.InstanceID != instanceID {
+				trace.Debug("Notificaiton.InstanceID(%d) != instanceID(%d)\n", notification.InstanceID, instanceID)
+			} else {
+				trace.Debug("notification status (%s) is not data, update, updated, updatePending, receivedByDestinaion\n", notification.Status)
+			}
 		}
+
 		// Something went wrong: we can't retrieve the notification or the object, or the received notification doesn't
 		// match the existing notification record
 		if trace.IsLogging(logger.TRACE) {
@@ -1678,18 +1672,16 @@ func updateGetDataNotification(metaData common.MetaData, destType string, destID
 	return updateNotificationChunkInfo(true, metaData, destType, destID, offset, common.Getdata)
 }
 
+// The caller will need the object lock before calling this function and unlock after
 func updateNotificationChunkInfo(createNotification bool, metaData common.MetaData, destType string, destID string, offset int64, status string) common.SyncServiceError {
-	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
-	common.ObjectLocks.Lock(lockIndex)
-	defer common.ObjectLocks.Unlock(lockIndex)
-
 	id := common.CreateNotificationID(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, destType, destID)
 	notificationLock.RLock()
-	fmt.Printf("id to get notification chunks info is: %s\n", id)
 	chunksInfo, ok := notificationChunks[id]
 	notificationLock.RUnlock()
 
-	fmt.Printf("In updateNotificationChunkInfo, update notification status to %s\n", status)
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In updateNotificationChunkInfo, update notification status of %s to %s", id, status)
+	}
 	if createNotification {
 		err := Store.UpdateNotificationRecord(
 			common.Notification{ObjectID: metaData.ObjectID, ObjectType: metaData.ObjectType,
@@ -1720,10 +1712,11 @@ func updateNotificationChunkInfo(createNotification bool, metaData common.MetaDa
 	notificationChunks[id] = chunksInfo
 	notificationLock.Unlock()
 
-	fmt.Println("For debug, check chunksInfo:")
-	chunksInfo, _ = notificationChunks[id]
-	fmt.Printf("Get chunkResendTimes[%d]: %d\n", offset, chunksInfo.chunkResendTimes[offset])
-	fmt.Printf("chunksInfo.receivedDataSize is %d\n", chunksInfo.receivedDataSize)
+	if trace.IsLogging(logger.DEBUG) {
+		chunksInfo = notificationChunks[id]
+		trace.Debug("Get chunkResendTimes[%d]: %d\n", offset, chunksInfo.chunkResendTimes[offset])
+		trace.Debug("chunksInfo.receivedDataSize is %d\n", chunksInfo.receivedDataSize)
+	}
 	return nil
 }
 
@@ -1795,51 +1788,14 @@ func handleDataReceived(metaData common.MetaData) {
 
 func getOffsetsToResend(notification common.Notification, metaData common.MetaData) []int64 {
 	offsets := make([]int64, 0)
-
-	// if trace.IsLogging(logger.DEBUG) {
-	// 	trace.Debug("In getOffsetsToResend, check notification record again before getting offsets to resend for %s %s %s %s %s\n", notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
-	// }
-	// // retrieve notification again, in case the object notification status is already change from "getdata"/"data" to other status
-	// n, err := Store.RetrieveNotificationRecord(notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
-	// if err == nil || n == nil {
-	// 	//if trace.IsLogging(logger.DEBUG) {
-	// 	if err != nil {
-	// 		fmt.Printf("Failed to retrieve notification record for %s %s %s %s %s, error: %s\n", notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID, err.Error())
-	// 		trace.Debug("Failed to retrieve notification record for %s %s %s %s %s, error: %s\n", notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID, err.Error())
-	// 	} else if n == nil {
-	// 		fmt.Printf("Notification record not found for %s %s %s %s %s\n", notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
-	// 		trace.Debug("Notification record not found for %s %s %s %s %s\n", notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
-	// 	}
-	// 	//}
-	// 	return offsets
-	// }
-
-	// if n.Status != notification.Status {
-
-	// 	fmt.Printf("Retrieved notification status %s is different from the notification to resend %s for object notificaiton %s %s %s %s %s\n", n.Status, notification.Status, notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
-	// 	if trace.IsLogging(logger.DEBUG) {
-	// 		trace.Debug("Retrieved notification status %s is different from the notification to resend %s for object notificaiton %s %s %s %s %s\n", n.Status, notification.Status, notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
-	// 	}
-	// 	return offsets
-	// }
-
-	// if n.InstanceID != notification.InstanceID {
-	// 	fmt.Printf("Retrieved notification instanceID %d is different from the notification to resend %d for object notificaiton %s %s %s %s %s\n", n.InstanceID, notification.InstanceID, notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
-	// 	if trace.IsLogging(logger.DEBUG) {
-	// 		trace.Debug("Retrieved notification instanceID %d is different from the notification to resend %d for object notificaiton %s %s %s %s %s\n", n.InstanceID, notification.InstanceID, notification.DestOrgID, notification.ObjectType, notification.ObjectID, notification.DestType, notification.DestID)
-	// 	}
-	// 	return offsets
-	// }
-
 	id := common.GetNotificationID(notification)
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("Checking chunksInfo for %s\n", id)
+		trace.Debug("In getOffsetsToResend, checking chunksInfo for %s\n", id)
 	}
 	notificationLock.RLock()
 	chunksInfo, ok := notificationChunks[id]
 	notificationLock.RUnlock()
 	if !ok {
-		fmt.Printf("No chunksInfo found for %s, will get Offsets for resend From Scratch\n", id)
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("No chunksInfo found for %s, will get Offsets for resend From Scratch\n", id)
 		}
@@ -1874,7 +1830,7 @@ func getOffsetsToResend(notification common.Notification, metaData common.MetaDa
 			if resendTime <= currentTime {
 				offsets = append(offsets, offset)
 				if trace.IsLogging(logger.DEBUG) {
-					trace.Debug("Adding offset %d to resend offsets list for %s\n", offset, id)
+					trace.Debug("resendTime <= currentTime, adding offset %d to resend offsets list for %s\n", offset, id)
 				}
 			}
 		}

@@ -272,21 +272,19 @@ func resendNotificationsForDestination(dest common.Destination, resendReceivedOb
 				}
 			case common.ReceivedByDestination:
 				fallthrough
-			case common.CompletelyReceived:
-				fallthrough
-			case common.Data:
-				if dest.DestType == "" {
-					common.ObjectLocks.Unlock(lockIndex)
-					continue
-				}
-				if trace.IsLogging(logger.DEBUG) {
-					trace.Debug("In notification.go, notification data status for destination, need to resend object %s %s to destination %s %s\n", n.ObjectType, n.ObjectID, n.DestType, n.DestID)
-				}
-
+			case common.Updated:
 				if common.Configuration.NodeType == common.CSS {
+					if dest.DestType == "" {
+						common.ObjectLocks.Unlock(lockIndex)
+						continue
+					}
+					if trace.IsLogging(logger.DEBUG) {
+						trace.Debug("In notification.go, notification updated status for destination with no persistent storage, need to resend object %s %s to destination %s %s\n", n.ObjectType, n.ObjectID, n.DestType, n.DestID)
+					}
+
 					// We get here only when an ESS without persistent storage reconnects,
-					// and the CSS has a notification with "data" or "received by destination" status.
-					// Send update notification for this object.
+					// and the CSS has a notification with "updated" or "received by destination" status.
+					// Send update notification for this object (then notification status will be changed to: updatePending)
 					n.Status = common.Update
 					n.ResendTime = 0
 					if err := Store.UpdateNotificationRecord(*n); err != nil && log.IsLogging(logger.ERROR) {
@@ -299,8 +297,19 @@ func resendNotificationsForDestination(dest common.Destination, resendReceivedOb
 					if trace.IsLogging(logger.DEBUG) {
 						trace.Debug("In notification.go, done with resend objects for notification with data status, metaData.DestType: %s, metaData.DestID: %s\n", metaData.DestType, metaData.DestID)
 					}
-
 				} else {
+					common.ObjectLocks.Unlock(lockIndex)
+				}
+			case common.Data:
+				if dest.DestType == "" {
+					common.ObjectLocks.Unlock(lockIndex)
+					continue
+				}
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Debug("In notification.go, notification data status for destination, need to resend object %s %s to destination %s %s\n", n.ObjectType, n.ObjectID, n.DestType, n.DestID)
+				}
+
+				if common.Configuration.NodeType == common.ESS {
 					// ESS with a data status, is in progress of sending data to CSS
 					common.ObjectLocks.Unlock(lockIndex)
 					Comm.LockDataChunks(lockIndex, metaData)

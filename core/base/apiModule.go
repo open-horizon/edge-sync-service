@@ -725,9 +725,6 @@ func PutObjectChunkData(orgID string, objectType string, objectID string, dataRe
 		trace.Debug("In PutObjectChunkData for %s %s %s, isTempData: %t, isFirstChunk: %t, dataSize to store: %d \n", orgID, objectType, objectID, isTempData, isFirstChunk, dataSize)
 	}
 
-	//dataReaderToBytes, err := ioutil.ReadAll(dataReader)
-	//fmt.Printf("Length of dataReaderToBytes is: %d, expected dataSize is: %d\n", len(dataReaderToBytes), dataSize)
-
 	if isLastChunk, err = store.AppendObjectData(orgID, objectType, objectID, dataReader, 0, startOffset, totalSize,
 		isFirstChunk, isLastChunk, isTempData); err != nil {
 		if log.IsLogging(logger.ERROR) {

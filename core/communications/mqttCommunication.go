@@ -1134,7 +1134,10 @@ func (communication *MQTT) GetData(metaData common.MetaData, offset int64) commo
 		messageJSON, false); err != nil {
 		return err
 	}
+	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+	common.ObjectLocks.Lock(lockIndex)
 	err = updateGetDataNotification(metaData, metaData.OriginType, metaData.OriginID, offset)
+	common.ObjectLocks.Unlock(lockIndex)
 	return err
 }
 

@@ -204,11 +204,6 @@ func (store *Cache) CloseDataReader(dataReader io.Reader) common.SyncServiceErro
 	return store.Store.CloseDataReader(dataReader)
 }
 
-// // Get the data size
-// func (store *Cache) GetObjectDataSize(orgID string, objectType string, objectID string, isTempData bool) (int64, common.SyncServiceError) {
-// 	return store.Store.GetObjectDataSize(orgID, objectType, objectID, isTempData)
-// }
-
 // MarkObjectDeleted marks the object as deleted
 func (store *Cache) MarkObjectDeleted(orgID string, objectType string, objectID string) common.SyncServiceError {
 	return store.Store.MarkObjectDeleted(orgID, objectType, objectID)

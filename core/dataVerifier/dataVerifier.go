@@ -80,60 +80,6 @@ func (dataVerifier *DataVerifier) VerifyDataSignature(data io.Reader, orgID stri
 	}
 }
 
-// StoreVerifiedData will store the data from temp data that generated during data verification. And remove temp data
-// func (dataVerifier *DataVerifier) StoreVerifiedData(orgID string, objectType string, objectID string, destinationDataURI string) common.SyncServiceError {
-// 	if dataVerifier.writeThrough {
-// 		return nil
-// 	}
-
-// 	if destinationDataURI != "" {
-// 		if trace.IsLogging(logger.DEBUG) {
-// 			trace.Debug("DataVerifier - In StoreVerifiedData, store data from tmp data for object %s %s at URI %s\n", objectType, objectID, destinationDataURI)
-// 		}
-// 		// rename the {file}.tmp to {file}
-// 		if err := dataURI.StoreDataFromTempData(destinationDataURI); err != nil {
-// 			return err
-// 		}
-// 	} else {
-// 		// 1. Retrieve temp data, 2. Store object data, 3. Remove temp data
-// 		if trace.IsLogging(logger.DEBUG) {
-// 			trace.Debug("DataVerifier - In StoreVerifiedData, retrieve temp data for object %s %s\n", objectType, objectID)
-// 		}
-
-// 		dataReader, err := Store.RetrieveTempObjectData(orgID, objectType, objectID)
-// 		if err != nil {
-// 			return &common.InvalidRequest{Message: "Failed to read temp data fro, Error: " + err.Error()}
-// 		} else if dataReader == nil {
-// 			return &common.InvalidRequest{Message: "Read empty temp data, Error: " + err.Error()}
-// 		}
-
-// 		if trace.IsLogging(logger.DEBUG) {
-// 			trace.Debug("DataVerifier - In StoreVerifiedData, storing data for object %s %s\n", objectType, objectID)
-// 		}
-
-// 		if exists, err := Store.StoreObjectData(orgID, objectType, objectID, dataReader); err != nil {
-// 			Store.CloseDataReader(dataReader)
-// 			return err
-// 		} else if !exists {
-// 			Store.CloseDataReader(dataReader)
-// 			message := fmt.Sprintf("Object metadata is not found for object %s %s %s, Error: %s\n", orgID, objectType, objectID, err.Error())
-// 			return &common.InternalError{Message: message}
-// 		}
-// 		Store.CloseDataReader(dataReader)
-
-// 		if trace.IsLogging(logger.DEBUG) {
-// 			trace.Debug("DataVerifier - In StoreVerifiedData, remove temp data for object %s %s\n", objectType, objectID)
-// 		}
-
-// 		if err := Store.RemoveObjectTempData(orgID, objectType, objectID); err != nil {
-// 			return err
-// 		}
-// 	}
-
-// 	return nil
-
-// }
-
 // GetTempData is to get temp data for data verification
 func (dataVerifier *DataVerifier) GetTempData(metaData common.MetaData) (io.Reader, common.SyncServiceError) {
 	var dr io.Reader
@@ -165,19 +111,6 @@ func (dataVerifier *DataVerifier) RemoveTempData(orgID string, objectType string
 
 func (dataVerifier *DataVerifier) RemoveUnverifiedData(metaData common.MetaData) common.SyncServiceError {
 	return storage.DeleteStoredData(Store, metaData)
-
-	// if err := dataVerifier.RemoveTempData(orgID, objectType, objectID, destinationDataURI); err != nil {
-	// 	return err
-	// }
-
-	// if destinationDataURI != "" {
-	// 	if err := dataURI.DeleteStoredData(destinationDataURI, false); err != nil {
-	// 		return err
-	// 	}
-	// } else if err := Store.DeleteStoredData(orgID, objectType, objectID, false); err != nil {
-	// 	return err
-	// }
-	// return nil
 }
 
 func (dataVerifier *DataVerifier) verifyHelper(publicKeyBytes []byte, signatureBytes []byte) (bool, common.SyncServiceError) {

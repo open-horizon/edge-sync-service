@@ -68,21 +68,6 @@ func AppendData(uri string, dataReader io.Reader, dataLength uint32, offset int6
 	return updateLastChunk, nil
 }
 
-// For last chunk of non-temp data, need to rename the file
-func HandleObjectInfoForLastDataChunk(uri string, isTempData bool) (bool, common.SyncServiceError) {
-	if !isTempData {
-		dataURI, err := url.Parse(uri)
-		if err != nil || !strings.EqualFold(dataURI.Scheme, "file") {
-			return false, &Error{"Invalid data URI"}
-		}
-		filePath := dataURI.Path + ".tmp"
-		if err := os.Rename(filePath, dataURI.Path); err != nil {
-			return false, &common.IOError{Message: "Failed to rename data file. Error: " + err.Error()}
-		}
-	}
-	return true, nil
-}
-
 // StoreData writes the data to the file stored at the given URI
 func StoreData(uri string, dataReader io.Reader, dataLength uint32) (int64, common.SyncServiceError) {
 	if trace.IsLogging(logger.TRACE) {
@@ -255,22 +240,3 @@ func DeleteStoredData(uri string, isTempData bool) common.SyncServiceError {
 	}
 	return nil
 }
-
-// func GetStoredDataSize(uri string, isTempData bool) (int64, common.SyncServiceError) {
-// 	dataURI, err := url.Parse(uri)
-// 	if err != nil || !strings.EqualFold(dataURI.Scheme, "file") {
-// 		return 0, &Error{"Invalid data URI"}
-// 	}
-// 	filePath := dataURI.Path
-// 	if isTempData {
-// 		filePath = dataURI.Path + ".tmp"
-// 	}
-
-// 	file, err := os.Stat(filePath)
-// 	if err != nil {
-// 		return 0, &common.IOError{Message: "Failed to check file size. Error: " + err.Error()}
-// 	}
-
-// 	return file.Size(), nil
-
-// }

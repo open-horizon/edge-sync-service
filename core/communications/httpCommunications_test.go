@@ -307,7 +307,6 @@ func TestEssHTTPComm(t *testing.T) {
 
 	ctx.pollPayload = []updateMessage{
 		{common.Update, common.MetaData{ObjectID: "1", ObjectType: "type2", DestOrgID: "myorg000", NoData: true, ChunkSize: 2, ObjectSize: int64(len([]byte("wsxrfvyhnplijnygv")))}},
-		//{common.Update, common.MetaData{ObjectID: "1b", ObjectType: "type2", DestOrgID: "myorg000", NoData: false}},
 		{common.Delete, common.MetaData{ObjectID: "2", ObjectType: "type2", DestOrgID: "myorg000", NoData: true}},
 		{common.Consumed, common.MetaData{ObjectID: "3", ObjectType: "type2", DestOrgID: "myorg000", NoData: false, InstanceID: 1, ChunkSize: 2, ObjectSize: int64(len([]byte("1234567890abcdefghijkl")))}},
 		{common.Deleted, common.MetaData{ObjectID: "4", ObjectType: "type2", DestOrgID: "myorg000", NoData: true, InstanceID: 1, Deleted: true}},
@@ -322,7 +321,6 @@ func TestEssHTTPComm(t *testing.T) {
 	Store.UpdateNotificationRecord(notification)
 
 	ctx.subTest = "pushData"
-	fmt.Println("Test pushData")
 	common.Configuration.EnableDataChunk = false
 	err = httpComm.PushData(&ctx.pollPayload[2].MetaData, 0)
 	if err != nil {
@@ -330,7 +328,6 @@ func TestEssHTTPComm(t *testing.T) {
 	}
 
 	ctx.subTest = "pushDataByChunk"
-	fmt.Println("Test pushDataByChunk")
 	common.Configuration.EnableDataChunk = true
 	common.Configuration.MaxDataChunkSize = 2
 	offset := int64(0)
@@ -363,7 +360,6 @@ func TestEssHTTPComm(t *testing.T) {
 	}
 
 	ctx.subTest = "getData"
-	fmt.Println("Test getData")
 	common.Configuration.EnableDataChunk = false
 	err = httpComm.GetData(ctx.pollPayload[0].MetaData, 0)
 	if err != nil {
@@ -371,7 +367,6 @@ func TestEssHTTPComm(t *testing.T) {
 	}
 
 	ctx.subTest = "getDataByChunk"
-	fmt.Println("Test getDataByChunk")
 	common.Configuration.EnableDataChunk = true
 	common.Configuration.MaxDataChunkSize = 2
 	offset = int64(0)
@@ -574,7 +569,6 @@ func (ctx *testEssCommContext) testHandleObjects(writer http.ResponseWriter, req
 	case "getDataByChunk":
 		if request.Method == http.MethodGet {
 			startOffset, endOffset, _ := common.GetStartAndEndRangeFromRangeHeader(request)
-			fmt.Printf("startOffset: %d, endOffset: %d\n", startOffset, endOffset)
 			if startOffset == -1 && endOffset == -1 {
 				fmt.Printf("test return 504")
 				writer.WriteHeader(http.StatusGatewayTimeout)
@@ -599,7 +593,6 @@ func (ctx *testEssCommContext) testHandleObjects(writer http.ResponseWriter, req
 
 	case "pushDataByChunk":
 		_, startOffset, endOffset, _ := common.GetStartAndEndRangeFromContentRangeHeader(request)
-		fmt.Printf("Content-Range header startOffset: %d, endOffset: %d\n", startOffset, endOffset)
 		if startOffset == -1 && endOffset == -1 {
 			fmt.Printf("test return 504 from handlePutData\n")
 			writer.WriteHeader(http.StatusGatewayTimeout)

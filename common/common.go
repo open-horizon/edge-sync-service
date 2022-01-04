@@ -299,7 +299,6 @@ func GetStartAndEndRangeFromRangeHeader(request *http.Request) (int64, int64, Sy
 func GetStartAndEndRangeFromContentRangeHeader(request *http.Request) (int64, int64, int64, SyncServiceError) {
 	// Get range from the "Range:bytes={startOffset}-{endOffset}"
 	requestContentRange := request.Header.Get("Content-Range")
-	fmt.Printf("Content-Range header: %s\n", requestContentRange)
 	if requestContentRange == "" {
 		return 0, -1, -1, nil
 	}

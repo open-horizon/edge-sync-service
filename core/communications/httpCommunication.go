@@ -19,8 +19,6 @@ import (
 	"github.com/open-horizon/edge-sync-service/core/dataURI"
 	"github.com/open-horizon/edge-sync-service/core/dataVerifier"
 	"github.com/open-horizon/edge-sync-service/core/security"
-
-	//"github.com/open-horizon/edge-sync-service/core/storage"
 	"github.com/open-horizon/edge-utilities/logger"
 	"github.com/open-horizon/edge-utilities/logger/log"
 	"github.com/open-horizon/edge-utilities/logger/trace"
@@ -356,15 +354,8 @@ func (communication *HTTP) SendNotificationMessage(notificationTopic string, des
 						return err
 					}
 
-					// // Push the data
-					// if metaData.Link == "" && !metaData.NoData && !metaData.MetaOnly {
-					// 	if err = communication.pushData(metaData); err != nil {
-					// 		return err
-					// 	}
-					// }
-
+					// Push the data
 					if metaData.Link == "" && !metaData.NoData && !metaData.MetaOnly {
-
 						if metaData.ChunkSize <= 0 || metaData.ObjectSize <= 0 || !common.Configuration.EnableDataChunk {
 							if err := communication.PushData(metaData, 0); err != nil {
 								return err
@@ -374,13 +365,22 @@ func (communication *HTTP) SendNotificationMessage(notificationTopic string, des
 							communication.LockDataChunks(lockIndex, metaData)
 							var offset int64
 							for offset < metaData.ObjectSize {
-								fmt.Printf("(i=%d)pushData from offset: %d\n", i, offset)
-								if err := communication.PushData(metaData, offset); err != nil {
-									communication.UnlockDataChunks(lockIndex, metaData)
-									return err
+								if trace.IsLogging(logger.DEBUG) {
+									trace.Debug("(i=%d)pushData from offset: %d\n", i, offset)
 								}
+								if err := communication.PushData(metaData, offset); err != nil {
+									if log.IsLogging(logger.ERROR) {
+										log.Error("Receive error from PushData, offset %d, Error: %s\n", offset, err.Error())
+									}
+
+									if !isDataTransportTimeoutError(err) {
+										communication.UnlockDataChunks(lockIndex, metaData)
+										return err
+									}
+								}
+								// If received data transport timeout error, this for loop will continue with next offset without throwing an error.
+								// ResendNotification will push the chunks with data transport error
 								offset += int64(metaData.ChunkSize)
-								fmt.Printf("update offset to: %d\n", offset)
 							}
 							communication.UnlockDataChunks(lockIndex, metaData)
 						}
@@ -668,6 +668,7 @@ func (communication *HTTP) SendPing() common.SyncServiceError {
 	return communication.registerOrPing(pingURL)
 }
 
+// GetData requests data to be sent from the CSS to the ESS
 func (communication *HTTP) GetData(metaData common.MetaData, offset int64) common.SyncServiceError {
 	if common.Configuration.NodeType != common.ESS {
 		return nil
@@ -683,8 +684,8 @@ func (communication *HTTP) GetData(metaData common.MetaData, offset int64) commo
 		}
 	} else {
 		if err := communication.GetDataByChunk(metaData, offset); err != nil {
-			if trace.IsLogging(logger.DEBUG) {
-				trace.Debug("Receive error from GetDataByChunk, offset %d, Error: %s\n", offset, err.Error())
+			if log.IsLogging(logger.ERROR) {
+				log.Error("Receive error from GetDataByChunk, offset %d, Error: %s\n", offset, err.Error())
 			}
 
 			if !isDataTransportTimeoutError(err) {
@@ -694,19 +695,24 @@ func (communication *HTTP) GetData(metaData common.MetaData, offset int64) commo
 	}
 
 	return nil
-
 }
 
 func (communication *HTTP) GetAllData(metaData common.MetaData, offset int64) common.SyncServiceError {
 	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 
+	common.ObjectLocks.Lock(lockIndex)
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In http.GetAllData, retrieve notification %s, %s. %s, %s, %s", metaData.DestID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID)
+	}
 	if n, err := Store.RetrieveNotificationRecord(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID); err != nil {
 		if log.IsLogging(logger.ERROR) {
 			log.Error("Error when retrieve notification record, %s", err.Error())
 		}
+		common.ObjectLocks.Unlock(lockIndex)
 		return err
 	} else if n != nil && metaData.InstanceID < n.InstanceID {
 		trace.Debug("In GetAllData: metaData instance ID (%d) < notification instance ID (%d), ignore...", metaData.InstanceID, n.InstanceID)
+		common.ObjectLocks.Unlock(lockIndex)
 		return nil
 	} else if n != nil {
 		trace.Debug("In GetAllData: notification status %s", n.Status)
@@ -716,27 +722,20 @@ func (communication *HTTP) GetAllData(metaData common.MetaData, offset int64) co
 		if log.IsLogging(logger.ERROR) {
 			log.Error("Error when retrieve object, %s", err.Error())
 		}
+		common.ObjectLocks.Unlock(lockIndex)
 		return err
 	} else if obj != nil && objStatus == common.CompletelyReceived {
 		trace.Debug("In GetAllData: object (%s %s %s) is already completely received, ignore...", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+		common.ObjectLocks.Unlock(lockIndex)
 		return nil
 	}
 
-	// For debugging
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("In http.GetAllData, retrieve notification %s, %s. %s, %s, %s", metaData.DestID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID)
-
-		if n, err := Store.RetrieveNotificationRecord(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID); err != nil {
-			trace.Debug("Error when retrieve notification record, %s", err.Error())
-		} else if n == nil {
-			trace.Debug("In GetAllData: nil notifications")
-		} else {
-			trace.Debug("In GetAllData: notification status %s", n.Status)
-		}
 		trace.Debug("In http.GetAllData, updating notification %s, %s. %s, %s, %s to getdata status", metaData.DestID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID)
 	}
 
 	if err := updateGetDataNotification(metaData, metaData.OriginType, metaData.OriginID, offset); err != nil {
+		common.ObjectLocks.Unlock(lockIndex)
 		return err
 	}
 
@@ -751,6 +750,7 @@ func (communication *HTTP) GetAllData(metaData common.MetaData, offset int64) co
 			trace.Debug("Notification status is %s after updating", n.Status)
 		}
 	}
+	common.ObjectLocks.Unlock(lockIndex)
 
 	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, metaData.DataID, common.Data)
 	request, err := http.NewRequest("GET", url, nil)
@@ -764,9 +764,9 @@ func (communication *HTTP) GetAllData(metaData common.MetaData, offset int64) co
 	if response != nil && response.Body != nil {
 		defer response.Body.Close()
 	}
-	fmt.Printf("check if response has interrupted network error: %d\n", response.StatusCode)
+
 	if IsTransportError(response, err) {
-		msg := "Timeout in GetData: failed to receive data from the other side"
+		msg := "Timeout in GetAllData: failed to receive data from the other side"
 		if err != nil {
 			msg = fmt.Sprintf("%s. Error: %s", msg, err.Error())
 		}
@@ -774,11 +774,10 @@ func (communication *HTTP) GetAllData(metaData common.MetaData, offset int64) co
 		if response != nil {
 			msg = fmt.Sprintf("%s. Response code: %d", msg, response.StatusCode)
 		}
-		if log.IsLogging(logger.ERROR) {
-			log.Error("In interrupted network, will try to download data by chunk for %s %s. %s\n", metaData.ObjectType, metaData.ObjectID, msg)
-		}
 
-		fmt.Println(msg)
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("%s", msg)
+		}
 		return &dataTransportTimeOutError{msg}
 	}
 
@@ -869,6 +868,9 @@ func (communication *HTTP) GetAllData(metaData common.MetaData, offset int64) co
 }
 
 func (communication *HTTP) GetDataByChunk(metaData common.MetaData, offset int64) common.SyncServiceError {
+	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+	common.ObjectLocks.Lock(lockIndex)
+
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In http.GetDataByChunk for %s %s %s, offset: %d, object size: %d, chunk size: %d\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, offset, metaData.ObjectSize, metaData.ChunkSize)
 	}
@@ -876,17 +878,20 @@ func (communication *HTTP) GetDataByChunk(metaData common.MetaData, offset int64
 		if log.IsLogging(logger.ERROR) {
 			log.Error("Error when retrieve notification record, %s", err.Error())
 		}
+		common.ObjectLocks.Unlock(lockIndex)
 		return err
 	} else if n != nil && metaData.InstanceID < n.InstanceID {
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In GetDataByChunk: metaData instance ID (%d) < notification instance ID (%d), ignore...", metaData.InstanceID, n.InstanceID)
 		}
+		common.ObjectLocks.Unlock(lockIndex)
 		return nil
 	} else if n != nil && n.Status == common.ReceiverError && metaData.InstanceID <= n.InstanceID {
 		if trace.IsLogging(logger.DEBUG) {
 			// If object notification is already "receiverError", only the new metaData can overrite the notification status to getdata
 			trace.Debug("In GetDataByChunk: notification status is %s, and metaData instance ID (%d) <= notification instance ID (%d), ignore...", n.Status, metaData.InstanceID, n.InstanceID)
 		}
+		common.ObjectLocks.Unlock(lockIndex)
 		return nil
 	} else if n != nil {
 		if trace.IsLogging(logger.DEBUG) {
@@ -898,13 +903,16 @@ func (communication *HTTP) GetDataByChunk(metaData common.MetaData, offset int64
 		if log.IsLogging(logger.ERROR) {
 			log.Error("Error when retrieve object, %s", err.Error())
 		}
+		common.ObjectLocks.Unlock(lockIndex)
 		return err
 	} else if obj != nil && obj.InstanceID == metaData.InstanceID && objStatus == common.CompletelyReceived {
 		trace.Debug("In GetDataByChunk: object (%s %s %s) is already completely received, ignore...", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+		common.ObjectLocks.Unlock(lockIndex)
 		return nil
 	}
 
 	if err := updateGetDataNotification(metaData, metaData.OriginType, metaData.OriginID, offset); err != nil {
+		common.ObjectLocks.Unlock(lockIndex)
 		return err
 	}
 
@@ -932,8 +940,10 @@ func (communication *HTTP) GetDataByChunk(metaData common.MetaData, offset int64
 		if trace.IsLogging(logger.INFO) {
 			trace.Info("Ignoring data of %s %s (%s)\n", metaData.ObjectType, metaData.ObjectID, err.Error())
 		}
+		common.ObjectLocks.Unlock(lockIndex)
 		return &notificationHandlerError{fmt.Sprintf("Error in handleData: checkNotificationRecord failed. Error: %s\n", err.Error())}
 	}
+	common.ObjectLocks.Unlock(lockIndex)
 
 	isFirstChunk := total == 0
 	isLastChunk := false
@@ -972,11 +982,19 @@ func (communication *HTTP) GetDataByChunk(metaData common.MetaData, offset int64
 		defer response.Body.Close()
 	}
 	if IsTransportError(response, err) {
-		if log.IsLogging(logger.ERROR) {
-			log.Error("In interrupted network, will try again to download data for this chunk for %s %s\n", metaData.ObjectType, metaData.ObjectID)
+		msg := fmt.Sprintf("In interrupted network during GetDataByChunk, for %s %s, offset: %d\n", metaData.ObjectType, metaData.ObjectID, offset)
+		if err != nil {
+			msg = fmt.Sprintf("%s. Error: %s", msg, err.Error())
 		}
-		msg := "Timeout in GetDataByChunk: failed to receive data from the other side."
+
+		if response != nil {
+			msg = fmt.Sprintf("%s. Response code: %d", msg, response.StatusCode)
+		}
+		if log.IsLogging(logger.ERROR) {
+			log.Error("%s", msg)
+		}
 		return &dataTransportTimeOutError{msg}
+
 	}
 	if err != nil {
 		return &Error{"Error in GetDataByChunk: failed to get data. Error: " + err.Error()}
@@ -994,7 +1012,6 @@ func (communication *HTTP) GetDataByChunk(metaData common.MetaData, offset int64
 		return &notificationHandlerError{msg}
 	}
 
-	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 	common.ObjectLocks.Lock(lockIndex)
 
 	// extract dataLengh from response header
@@ -1025,10 +1042,6 @@ func (communication *HTTP) GetDataByChunk(metaData common.MetaData, offset int64
 
 		if err != nil {
 			common.ObjectLocks.Unlock(lockIndex)
-			// if storage.IsDiscarded(err) {
-			// 	common.ObjectLocks.Unlock(lockIndex)
-			// 	return nil
-			// }
 			if log.IsLogging(logger.ERROR) {
 				log.Error("In interrupted network while appending object data, will try again to download data for this chunk for %s %s\n", metaData.ObjectType, metaData.ObjectID)
 			}
@@ -1036,9 +1049,6 @@ func (communication *HTTP) GetDataByChunk(metaData common.MetaData, offset int64
 			return &dataTransportTimeOutError{msg}
 
 		}
-
-		// common.ObjectLocks.Unlock(lockIndex)
-		// return &Error{"Error for test"}
 
 		if isLastChunk && isTempData {
 			// verify data
@@ -1083,17 +1093,6 @@ func (communication *HTTP) GetDataByChunk(metaData common.MetaData, offset int64
 			return &Error{fmt.Sprintf("Error in GetDataByChunk: %s\n", err)}
 		}
 
-		// if trace.IsLogging(logger.DEBUG) {
-		// 	trace.Debug("Updating ESS notification status to dataReceived for %s %s %s", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
-		// }
-
-		// if err := Store.UpdateNotificationRecord(
-		// 	common.Notification{ObjectID: metaData.ObjectID, ObjectType: metaData.ObjectType,
-		// 		DestOrgID: metaData.DestOrgID, DestID: metaData.OriginID, DestType: metaData.OriginType,
-		// 		Status: common.DataReceived, InstanceID: metaData.InstanceID, DataID: metaData.DataID}); err != nil {
-		// 			common.ObjectLocks.Unlock(lockIndex)
-		// 			return &Error{fmt.Sprintf("Error in GetDataByChunk: %s\n", err)}
-		// }
 		common.ObjectLocks.Unlock(lockIndex)
 
 		if trace.IsLogging(logger.DEBUG) {
@@ -1180,9 +1179,6 @@ func (communication *HTTP) Poll() bool {
 	for _, message := range payload {
 		switch message.Type {
 		case common.Update:
-			// objSize := message.MetaData.ObjectSize
-			// objChunkSize := message.MetaData.ChunkSize
-
 			// For httpCommunication, we don't need maxInFlightChunks to control data chunk, so give it a large number
 			httpMaxInFlightChunks := math.MaxInt64
 			if err = handleUpdate(message.MetaData, httpMaxInFlightChunks); err != nil {
@@ -1434,10 +1430,6 @@ func (communication *HTTP) handlePutData(orgID string, objectType string, object
 	var handlErr common.SyncServiceError
 	if totalSize == 0 && startOffset == -1 && endOffset == -1 {
 		//no Content-Range header, return all data
-		// common.ObjectLocks.Unlock(lockIndex)
-		// msg := "Mock timetou for testing"
-		// return &dataTransportTimeOutError{msg}
-		//return handlErr
 		if isLastChunk, handlErr = communication.handlePutAllData(*metaData, request); err != nil {
 			common.ObjectLocks.Unlock(lockIndex)
 			return handlErr
@@ -1574,15 +1566,15 @@ func (communication *HTTP) handlePutChunkedData(metaData common.MetaData, reques
 		if err := Store.UpdateObjectDataVerifiedStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, true); err != nil {
 			return isLastChunk, err
 		}
+	}
 
+	if isLastChunk {
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("Updated object status to completelyReceived for %s %s %s", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 		}
-
 		if err := Store.UpdateObjectStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, common.CompletelyReceived); err != nil {
 			return isLastChunk, err
 		}
-
 	}
 
 	return isLastChunk, nil
@@ -1591,7 +1583,6 @@ func (communication *HTTP) handlePutChunkedData(metaData common.MetaData, reques
 func (communication *HTTP) handleGetData(orgID string, objectType string, objectID string,
 	destType string, destID string, instanceID int64, dataID int64, writer http.ResponseWriter, request *http.Request) {
 
-	updateNotificationRecord := false
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Handling object get data of %s %s %s %s \n", objectType, objectID, destType, destID)
 	}
@@ -1635,16 +1626,9 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 		err = &ignoredByHandler{"Error in handleGetData: notification.InstanceID != instanceID or notification status is not updated."}
 		SendErrorResponse(writer, err, "", 0)
 		return
-	} else if notification.Status == common.Updated || notification.Status == common.Update || notification.Status == common.UpdatePending || notification.Status == common.Data {
-		//  notification.InstanceID == instanceID
-		updateNotificationRecord = true
-		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("In handleGetData: notification (status: %s) is updated status,  for %s %s %s %s %s, set updateNotificationRecord to %t \n", notification.Status, orgID, objectType, objectID, destType, destID, updateNotificationRecord)
-		}
 	} else {
-		// notification status "error" cannot update notification status to "data"
 		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("In handleGetData: notification (status: %s) is not in updated status,  for %s %s %s %s %s, set updateNotificationRecord to %t \n", notification.Status, orgID, objectType, objectID, destType, destID, updateNotificationRecord)
+			trace.Debug("In handleGetData: notification status is: %s, for %s %s %s %s %s", notification.Status, orgID, objectType, objectID, destType, destID)
 		}
 	}
 
@@ -1659,19 +1643,6 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 		SendErrorResponse(writer, err, "", 0)
 	}
 
-	// For test
-	// count := 0
-	// if count == 0 && startOffset == 3 {
-	// 	msg := fmt.Sprintf("Test timeout error for count %d", count)
-	// 	count++
-	// 	fmt.Println(msg)
-	// 	writer.WriteHeader(http.StatusGatewayTimeout)
-	// 	return
-	// 	// dataErr := &dataTransportTimeOutError{msg}
-	// 	// SendErrorResponse(writer, dataErr, "", 0)
-	// }
-	// EndTest
-
 	if startOffset == -1 && endOffset == -1 {
 		// Range header not specified, will get all data
 		startOffset = 0
@@ -1682,22 +1653,19 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 	dataLength := int(endOffset - startOffset + 1)
 
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Trace("Handling object get data, retrieve object data for %s %s with range %d-%d\n", objectType, objectID, startOffset, endOffset)
+		trace.Debug("Handling object get data, retrieve object data for %s %s with range %d-%d\n", objectType, objectID, startOffset, endOffset)
 	}
 
 	hasError := false
 	if dataLength == int(objectMeta.ObjectSize) || !hasRangeHeader {
 		dataReader, err := Store.RetrieveObjectData(orgID, objectType, objectID, false)
 		if err != nil {
-			updateNotificationRecord = false
 			SendErrorResponse(writer, err, "", 0)
 		}
 
 		if dataReader == nil {
-			updateNotificationRecord = false
 			writer.WriteHeader(http.StatusNotFound)
 		} else {
-			//writer.WriteHeader(http.StatusGatewayTimeout)
 			writer.Header().Add("Content-Type", "application/octet-stream")
 			writer.Header().Add("Content-Length", strconv.Itoa(dataLength))
 			writer.WriteHeader(http.StatusOK)
@@ -1718,12 +1686,12 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 	} else {
 		// dataLength is partial && no range header
 		if objectData, eof, length, err := Store.ReadObjectData(orgID, objectType, objectID, dataLength, startOffset); err != nil {
-			updateNotificationRecord = false
 			SendErrorResponse(writer, err, "", 0)
 		} else {
 			if len(objectData) == 0 {
-				fmt.Printf("len(objectData)==%d, return 404\n", len(objectData))
-				updateNotificationRecord = false
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Debug("Object data length is 0 for %s %s, return 404", objectType, objectID)
+				}
 				writer.WriteHeader(http.StatusNotFound)
 			} else {
 				dataReader := bytes.NewReader(objectData)
@@ -1735,8 +1703,6 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 				writer.Header().Add("Content-Range", fmt.Sprintf("bytes %d-%d/%d", startOffset, endOffset, objectMeta.ObjectSize))
 				writer.WriteHeader(http.StatusPartialContent)
 
-				fmt.Printf("Set header Content-Length: %d\n", length)
-				fmt.Printf("Set header Content-Range: bytes %d-%d/%d\n", startOffset, endOffset, objectMeta.ObjectSize)
 				if _, err := io.Copy(writer, dataReader); err != nil {
 					hasError = true
 					SendErrorResponse(writer, err, "", 0)
@@ -1791,60 +1757,6 @@ func (communication *HTTP) PushData(metaData *common.MetaData, offset int64) com
 	}
 
 	return nil
-
-	/*
-		if err := communication.pushAllData(metaData); err != nil {
-			if log.IsLogging(logger.ERROR) {
-				log.Error("Failed to send all data at once. Error: %s. Will send data by chunk", err.Error())
-			}
-			offset := int64(0)
-			if isDataTransportTimeoutError(err) {
-				for i := 0; offset < metaData.ObjectSize; i++ {
-					fmt.Printf("Lily -- For (%s/%s/%s), Inside loop i=%d, offset: %d, metaData.ObjectSize: %d\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, i, offset, metaData.ObjectSize)
-					if err := communication.pushDataByChunk(metaData, offset); err != nil {
-						if trace.IsLogging(logger.DEBUG) {
-							trace.Debug("Receive error from pushDataByChunk, retry with same offset %d, Error: %s\n", offset, err.Error())
-						}
-						if !isDataTransportTimeoutError(err) {
-							return err
-						}
-						//time.Sleep(5 * time.Second)
-						continue
-					} else {
-						offset += int64(metaData.ChunkSize)
-						//offset += int64(metaData.ChunkSize * 2)
-						//time.Sleep(5 * time.Second)
-						fmt.Printf("For (%s/%s/%s) updated offset: %d\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, offset)
-					}
-				}
-
-				// time.Sleep(5 * time.Second)
-				// // Another loop to sent left over chunks
-				// fmt.Println("Another loop to send left over chunks")
-				// offset = int64(metaData.ChunkSize)
-				// for i := 0; offset < metaData.ObjectSize; i++ {
-				// 	if err := communication.pushDataByChunk(metaData, offset); err != nil {
-				// 		if trace.IsLogging(logger.DEBUG) {
-				// 			trace.Debug("Receive error from pushDataByChunk, retry with same offset %d, Error: %s\n", offset, err.Error())
-				// 		}
-				// 		if !isDataTransportTimeoutError(err) {
-				// 			return err
-				// 		}
-				// 		time.Sleep(5 * time.Second)
-				// 		continue
-				// 	} else {
-				// 		offset += int64(metaData.ChunkSize * 2)
-				// 		time.Sleep(5 * time.Second)
-				// 		fmt.Printf("For (%s/%s/%s) updated offset: %d\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, offset)
-				// 	}
-				// }
-			} else {
-				return err
-			}
-		}
-		return nil
-	*/
-
 }
 
 func (communication *HTTP) pushAllData(metaData *common.MetaData) common.SyncServiceError {
@@ -1902,6 +1814,9 @@ func (communication *HTTP) pushDataByChunk(metaData *common.MetaData, offset int
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In pushDataByChunk, after updatePushDataNotification with offset %d\n", offset)
 	}
+	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+	common.ObjectLocks.RLock(lockIndex)
+	defer common.ObjectLocks.RUnlock(lockIndex)
 
 	if n, err := Store.RetrieveNotificationRecord(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.OriginType, metaData.OriginID); err != nil {
 		if log.IsLogging(logger.ERROR) {
@@ -1941,10 +1856,6 @@ func (communication *HTTP) pushDataByChunk(metaData *common.MetaData, offset int
 			trace.Debug("Notification status is %s after updating", n.Status)
 		}
 	}
-
-	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
-	common.ObjectLocks.RLock(lockIndex)
-	defer common.ObjectLocks.RUnlock(lockIndex)
 
 	// check if this is the last chunk to send out
 	total, chunkAlreadySend, err := checkNotificationRecord(*metaData, metaData.OriginType, metaData.OriginID, metaData.InstanceID,

@@ -456,27 +456,8 @@ func createDataPath(prefix string, orgID string, objectType string, objectID str
 	return strBuilder.String()
 }
 
-// func createDataPathForTempData(prefix string, orgID string, objectType string, objectID string) string {
-// 	var strBuilder strings.Builder
-// 	strBuilder.Grow(len(prefix) + len(orgID) + len(objectType) + len(objectID) + len("tmp") + 4)
-// 	strBuilder.WriteString(prefix)
-// 	strBuilder.WriteString(orgID)
-// 	strBuilder.WriteByte('-')
-// 	strBuilder.WriteString(objectType)
-// 	strBuilder.WriteByte('-')
-// 	strBuilder.WriteString(objectID)
-// 	strBuilder.WriteByte('-')
-// 	strBuilder.WriteString("tmp")
-// 	return strBuilder.String()
-// }
-
 func createDataPathFromMeta(prefix string, metaData common.MetaData) string {
-	// if isTempData {
-	// 	return createDataPathForTempData(prefix, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
-	// } else {
 	return createDataPath(prefix, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
-	//}
-
 }
 
 func createDestinationFromList(orgID string, store Storage, destinationsList []string) ([]common.StoreDestinationStatus, common.SyncServiceError) {

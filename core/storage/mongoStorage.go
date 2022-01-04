@@ -1192,7 +1192,7 @@ func (store *MongoStorage) AppendObjectData(orgID string, objectType string, obj
 	if offset == fileHandle.offset {
 		for {
 			if trace.IsLogging(logger.TRACE) {
-				trace.Trace(" Put data (%d) in file at offset %d\n", len(data), fileHandle.offset)
+				trace.Trace(" Put data (data size: %d) in file at offset %d\n", len(data), fileHandle.offset)
 			}
 			n, err = fileHandle.file.Write(data)
 			if err != nil {
@@ -1231,13 +1231,17 @@ func (store *MongoStorage) AppendObjectData(orgID string, objectType string, obj
 	}
 
 	fileSize := fileHandle.file.Size()
-	fmt.Printf("fileSize is: %d\n", fileSize)
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace(" FileSize is: %d\n", fileSize)
+	}
 
 	updatedLastChunk := isLastChunk
 	if fileSize == total {
 
 		updatedLastChunk = true
-		fmt.Printf("fileSize is same as total, set updatedLastChunk to %t\n", updatedLastChunk)
+		if trace.IsLogging(logger.TRACE) {
+			trace.Trace(" FileSize is same as total, set updatedLastChunk to %t\n", updatedLastChunk)
+		}
 	}
 
 	fmt.Printf("Inside Mongo, updatedLastChunk is: %t\n", updatedLastChunk)
@@ -1293,25 +1297,6 @@ func (store *MongoStorage) HandleObjectInfoForLastDataChunk(orgID string, object
 
 	return true, nil
 }
-
-// // Get the data size
-// func (store *MongoStorage) GetObjectDataSize(orgID string, objectType string, objectID string, isTempData bool) (int64, common.SyncServiceError) {
-// 	var filename string
-// 	if isTempData {
-// 		filename = createTempObjectCollectionID(orgID, objectType, objectID)
-// 	} else {
-// 		filename = createObjectCollectionID(orgID, objectType, objectID)
-// 	}
-
-// 	result := dataInfoObject{}
-
-// 	if err := store.fetchOne(dataInfos, bson.M{"filename": filename}, nil, &result); err != nil {
-// 		return 0, &Error{fmt.Sprintf("Failed to retrieve object data length. Error: %s.", err)}
-// 	}
-
-// 	return int64(result.Length), nil
-
-// }
 
 // UpdateObjectStatus updates object's status
 func (store *MongoStorage) UpdateObjectStatus(orgID string, objectType string, objectID string, status string) common.SyncServiceError {
@@ -1861,10 +1846,10 @@ func (store *MongoStorage) RetrieveNotifications(orgID string, destType string, 
 		if retrieveReceived {
 			query = bson.M{"$or": []bson.M{
 				bson.M{"notification.status": common.Update},
+				bson.M{"notification.status": common.Updated},
 				bson.M{"notification.status": common.Received},
 				bson.M{"notification.status": common.Consumed},
 				bson.M{"notification.status": common.Getdata},
-				bson.M{"notification.status": common.Data},
 				bson.M{"notification.status": common.ReceivedByDestination},
 				bson.M{"notification.status": common.Delete},
 				bson.M{"notification.status": common.Deleted}},

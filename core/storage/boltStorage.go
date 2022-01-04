@@ -948,26 +948,6 @@ func (store *BoltStorage) ReadObjectData(orgID string, objectType string, object
 	return
 }
 
-// // Get the data size
-// func (store *BoltStorage) GetObjectDataSize(orgID string, objectType string, objectID string, isTempData bool) (int64, common.SyncServiceError) {
-// 	var dataSize int64
-// 	function := func(object boltObject) common.SyncServiceError {
-// 		var err error
-// 		if object.DataPath != "" {
-// 			dataSize, err = dataURI.GetStoredDataSize(object.DataPath, isTempData)
-// 			return err
-// 		}
-// 		return nil
-// 	}
-// 	if err := store.viewObjectHelper(orgID, objectType, objectID, function); err != nil {
-// 		if common.IsNotFound(err) {
-// 			return 0, nil
-// 		}
-// 		return 0, err
-// 	}
-// 	return dataSize, nil
-// }
-
 // MarkObjectDeleted marks the object as deleted
 func (store *BoltStorage) MarkObjectDeleted(orgID string, objectType string, objectID string) common.SyncServiceError {
 	function := func(object boltObject) (boltObject, common.SyncServiceError) {

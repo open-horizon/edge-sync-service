@@ -591,27 +591,6 @@ func (store *InMemoryStorage) ReadObjectData(orgID string, objectType string, ob
 	return nil, true, 0, &common.NotFound{}
 }
 
-// // Get the data size
-// func (store *InMemoryStorage) GetObjectDataSize(orgID string, objectType string, objectID string, isTempData bool) (int64, common.SyncServiceError) {
-// 	store.lock()
-// 	defer store.unLock()
-
-// 	id := createObjectCollectionID(orgID, objectType, objectID)
-// 	if object, ok := store.objects[id]; ok {
-// 		if isTempData {
-// 			if object.tmpData != nil {
-// 				return int64(len(object.tmpData)), nil
-// 			}
-// 		} else {
-// 			if object.data != nil {
-// 				return int64(len(object.data)), nil
-// 			}
-// 		}
-// 		return 0, nil
-// 	}
-// 	return 0, &common.NotFound{}
-// }
-
 // MarkObjectDeleted marks the object as deleted
 func (store *InMemoryStorage) MarkObjectDeleted(orgID string, objectType string, objectID string) common.SyncServiceError {
 	store.lock()
