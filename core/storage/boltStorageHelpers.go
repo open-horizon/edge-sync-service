@@ -96,7 +96,10 @@ func (store *BoltStorage) deleteObjectsHelper(match func(boltObject) bool) commo
 			}
 			if match(object) {
 				if object.DataPath != "" {
-					if err := dataURI.DeleteStoredData(object.DataPath); err != nil {
+					if err := dataURI.DeleteStoredData(object.DataPath, false); err != nil {
+						return err
+					}
+					if err := dataURI.DeleteStoredData(object.DataPath, true); err != nil {
 						return err
 					}
 					object.DataPath = ""
@@ -123,7 +126,10 @@ func (store *BoltStorage) deleteObjectsAndNotificationsHelper(match func(boltObj
 			}
 			if match(object) {
 				if object.DataPath != "" {
-					if err := dataURI.DeleteStoredData(object.DataPath); err != nil {
+					if err := dataURI.DeleteStoredData(object.DataPath, false); err != nil {
+						return err
+					}
+					if err := dataURI.DeleteStoredData(object.DataPath, true); err != nil {
 						return err
 					}
 					object.DataPath = ""

@@ -19,6 +19,7 @@ const (
 	webhooks        = "syncWebhooks"
 	organizations   = "syncOrganizations"
 	acls            = "syncACLs"
+	dataInfos       = "fs.files"
 )
 
 // Storage is the interface for stores
@@ -48,13 +49,19 @@ type Storage interface {
 
 	RemoveObjectTempData(orgID string, objectType string, objectID string) common.SyncServiceError
 
-	RetrieveTempObjectData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError)
+	RetrieveObjectTempData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError)
 
 	// Append a chunk of data to the object's data
-	AppendObjectData(orgID string, objectType string, objectID string, dataReader io.Reader, dataLength uint32, offset int64, total int64, isFirstChunk bool, isLastChunk bool) common.SyncServiceError
+	AppendObjectData(orgID string, objectType string, objectID string, dataReader io.Reader, dataLength uint32, offset int64, total int64, isFirstChunk bool, isLastChunk bool, isTempData bool) (bool, common.SyncServiceError)
+
+	// Handles the last data chunk
+	HandleObjectInfoForLastDataChunk(orgID string, objectType string, objectID string, isTempData bool, dataSize int64) (bool, common.SyncServiceError)
 
 	// Update object's status
 	UpdateObjectStatus(orgID string, objectType string, objectID string, status string) common.SyncServiceError
+
+	// UpdateObjectDataVerifiedStatus updates object's dataVerified field
+	UpdateObjectDataVerifiedStatus(orgID string, objectType string, objectID string, verified bool) common.SyncServiceError
 
 	// Update object's source data URI
 	UpdateObjectSourceDataURI(orgID string, objectType string, objectID string, sourceDataURI string) common.SyncServiceError
@@ -107,7 +114,7 @@ type Storage interface {
 	RetrieveObjectAndStatus(orgID string, objectType string, objectID string) (*common.MetaData, string, common.SyncServiceError)
 
 	// Return the object data with the specified parameters
-	RetrieveObjectData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError)
+	RetrieveObjectData(orgID string, objectType string, objectID string, isTempData bool) (io.Reader, common.SyncServiceError)
 
 	// Return the object data with the specified parameters
 	ReadObjectData(orgID string, objectType string, objectID string, size int, offset int64) ([]byte, bool, int, common.SyncServiceError)
@@ -131,7 +138,7 @@ type Storage interface {
 	DeleteStoredObject(orgID string, objectType string, objectID string) common.SyncServiceError
 
 	// Delete the object's data
-	DeleteStoredData(orgID string, objectType string, objectID string) common.SyncServiceError
+	DeleteStoredData(orgID string, objectType string, objectID string, isTempData bool) common.SyncServiceError
 
 	// CleanObjects removes the objects received from the other side.
 	// For persistant storage only partially recieved objects are removed.
@@ -422,7 +429,7 @@ func createDestinationCollectionID(orgID string, destType string, destID string)
 func resendNotification(notification common.Notification, retrieveReceived bool) bool {
 	s := notification.Status
 	return (s == common.Update || s == common.Consumed || s == common.Getdata || s == common.Delete || s == common.Deleted || s == common.Received || s == common.Error ||
-		(retrieveReceived && (s == common.Data || s == common.ReceivedByDestination)))
+		(retrieveReceived && (s == common.Data || s == common.Updated || s == common.ReceivedByDestination)))
 }
 
 func ensureArrayCapacity(data []byte, newCapacity int64) []byte {
@@ -443,20 +450,6 @@ func createDataPath(prefix string, orgID string, objectType string, objectID str
 	strBuilder.WriteString(objectType)
 	strBuilder.WriteByte('-')
 	strBuilder.WriteString(objectID)
-	return strBuilder.String()
-}
-
-func createDataPathForTempData(prefix string, orgID string, objectType string, objectID string) string {
-	var strBuilder strings.Builder
-	strBuilder.Grow(len(prefix) + len(orgID) + len(objectType) + len(objectID) + len("tmp") + 4)
-	strBuilder.WriteString(prefix)
-	strBuilder.WriteString(orgID)
-	strBuilder.WriteByte('-')
-	strBuilder.WriteString(objectType)
-	strBuilder.WriteByte('-')
-	strBuilder.WriteString(objectID)
-	strBuilder.WriteByte('-')
-	strBuilder.WriteString("tmp")
 	return strBuilder.String()
 }
 
@@ -648,7 +641,11 @@ func DeleteStoredObject(store Storage, metaData common.MetaData) common.SyncServ
 	}
 
 	if common.Configuration.NodeType == common.ESS && metaData.DestinationDataURI != "" {
-		if err := dataURI.DeleteStoredData(metaData.DestinationDataURI); err != nil {
+		if err := dataURI.DeleteStoredData(metaData.DestinationDataURI, false); err != nil {
+			return err
+		}
+
+		if err := dataURI.DeleteStoredData(metaData.DestinationDataURI, true); err != nil {
 			return err
 		}
 	}
@@ -659,11 +656,21 @@ func DeleteStoredObject(store Storage, metaData common.MetaData) common.SyncServ
 // DeleteStoredData calls the storage to delete the object's data
 func DeleteStoredData(store Storage, metaData common.MetaData) common.SyncServiceError {
 	if common.Configuration.NodeType == common.ESS && metaData.DestinationDataURI != "" {
-		if err := dataURI.DeleteStoredData(metaData.DestinationDataURI); err != nil {
+		if err := dataURI.DeleteStoredData(metaData.DestinationDataURI, true); err != nil {
+			return err
+		}
+		if err := dataURI.DeleteStoredData(metaData.DestinationDataURI, false); err != nil {
 			return err
 		}
 		return nil
 	}
 
-	return store.DeleteStoredData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+	if err := store.DeleteStoredData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, true); err != nil {
+		return err
+	}
+
+	if err := store.DeleteStoredData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, false); err != nil {
+		return err
+	}
+	return nil
 }

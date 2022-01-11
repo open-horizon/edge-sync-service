@@ -297,7 +297,7 @@ func (store *BoltStorage) StoreObject(metaData common.MetaData, data []byte, sta
 			return nil, err
 		}
 	} else if !metaData.MetaOnly {
-		if err := dataURI.DeleteStoredData(createDataPathFromMeta(store.localDataPath, metaData)); err != nil {
+		if err := dataURI.DeleteStoredData(createDataPathFromMeta(store.localDataPath, metaData), false); err != nil {
 			return nil, err
 		}
 	}
@@ -370,8 +370,8 @@ func (store *BoltStorage) StoreObjectData(orgID string, objectType string, objec
 }
 
 func (store *BoltStorage) StoreObjectTempData(orgID string, objectType string, objectID string, dataReader io.Reader) (bool, common.SyncServiceError) {
-	tmpDataPath := createDataPathForTempData(store.localDataPath, orgID, objectType, objectID)
-	_, err := dataURI.StoreData(tmpDataPath, dataReader, 0)
+	dataPath := createDataPath(store.localDataPath, orgID, objectType, objectID)
+	_, err := dataURI.StoreTempData(dataPath, dataReader, 0)
 	if err != nil {
 		return false, err
 	}
@@ -380,8 +380,8 @@ func (store *BoltStorage) StoreObjectTempData(orgID string, objectType string, o
 }
 
 func (store *BoltStorage) RemoveObjectTempData(orgID string, objectType string, objectID string) common.SyncServiceError {
-	tmpDataPath := createDataPathForTempData(store.localDataPath, orgID, objectType, objectID)
-	if err := dataURI.DeleteStoredData(tmpDataPath); err != nil {
+	dataPath := createDataPath(store.localDataPath, orgID, objectType, objectID)
+	if err := dataURI.DeleteStoredData(dataPath, true); err != nil {
 		if common.IsNotFound(err) {
 			return nil
 		}
@@ -390,10 +390,10 @@ func (store *BoltStorage) RemoveObjectTempData(orgID string, objectType string, 
 	return nil
 }
 
-func (store *BoltStorage) RetrieveTempObjectData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
+func (store *BoltStorage) RetrieveObjectTempData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
 	var dataReader io.Reader
-	tmpDataPath := createDataPathForTempData(store.localDataPath, orgID, objectType, objectID)
-	dataReader, err := dataURI.GetData(tmpDataPath)
+	dataPath := createDataPath(store.localDataPath, orgID, objectType, objectID)
+	dataReader, err := dataURI.GetData(dataPath, true)
 	if err != nil {
 		if common.IsNotFound(err) {
 			return nil, nil
@@ -420,12 +420,12 @@ func (store *BoltStorage) RetrieveObject(orgID string, objectType string, object
 }
 
 // RetrieveObjectData returns the object data with the specified parameters
-func (store *BoltStorage) RetrieveObjectData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
+func (store *BoltStorage) RetrieveObjectData(orgID string, objectType string, objectID string, isTempData bool) (io.Reader, common.SyncServiceError) {
 	var dataReader io.Reader
 	function := func(object boltObject) common.SyncServiceError {
 		var err error
 		if object.DataPath != "" {
-			dataReader, err = dataURI.GetData(object.DataPath)
+			dataReader, err = dataURI.GetData(object.DataPath, isTempData)
 			return err
 		}
 		return nil
@@ -792,7 +792,7 @@ func (store *BoltStorage) GetObjectsToActivate() ([]common.MetaData, common.Sync
 
 // AppendObjectData appends a chunk of data to the object's data
 func (store *BoltStorage) AppendObjectData(orgID string, objectType string, objectID string, dataReader io.Reader, dataLength uint32,
-	offset int64, total int64, isFirstChunk bool, isLastChunk bool) common.SyncServiceError {
+	offset int64, total int64, isFirstChunk bool, isLastChunk bool, isTempData bool) (bool, common.SyncServiceError) {
 
 	dataPath := ""
 	function := func(object boltObject) (boltObject, common.SyncServiceError) {
@@ -807,9 +807,36 @@ func (store *BoltStorage) AppendObjectData(orgID string, objectType string, obje
 		return object, nil
 	}
 	if err := store.updateObjectHelper(orgID, objectType, objectID, function); err != nil {
-		return err
+		return isLastChunk, err
 	}
-	return dataURI.AppendData(dataPath, dataReader, dataLength, offset, total, isFirstChunk, isLastChunk)
+	return dataURI.AppendData(dataPath, dataReader, dataLength, offset, total, isFirstChunk, isLastChunk, isTempData)
+}
+
+// Handles the last data chunk
+func (store *BoltStorage) HandleObjectInfoForLastDataChunk(orgID string, objectType string, objectID string, isTempData bool, dataSize int64) (bool, common.SyncServiceError) {
+	//dataPath := createDataPath(store.localDataPath, orgID, objectType, objectID)
+	function := func(object boltObject) (boltObject, common.SyncServiceError) {
+		if object.Status == common.NotReadyToSend {
+			object.Status = common.ReadyToSend
+		}
+		if object.Status == common.NotReadyToSend || object.Status == common.ReadyToSend {
+			newID := store.getInstanceID()
+			object.Meta.InstanceID = newID
+			object.Meta.DataID = newID
+		}
+
+		//object.DataPath = dataPath
+		object.Meta.ObjectSize = dataSize
+
+		return object, nil
+	}
+	if err := store.updateObjectHelper(orgID, objectType, objectID, function); err != nil {
+		if err == notFound {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // UpdateObjectStatus updates an object's status
@@ -819,6 +846,15 @@ func (store *BoltStorage) UpdateObjectStatus(orgID string, objectType string, ob
 		if status == common.ConsumedByDest {
 			object.ConsumedTimestamp = time.Now()
 		}
+		return object, nil
+	}
+	return store.updateObjectHelper(orgID, objectType, objectID, function)
+}
+
+// UpdateObjectDataVerifiedStatus updates object's dataVerified field
+func (store *BoltStorage) UpdateObjectDataVerifiedStatus(orgID string, objectType string, objectID string, verified bool) common.SyncServiceError {
+	function := func(object boltObject) (boltObject, common.SyncServiceError) {
+		object.Meta.DataVerified = verified
 		return object, nil
 	}
 	return store.updateObjectHelper(orgID, objectType, objectID, function)
@@ -942,7 +978,10 @@ func (store *BoltStorage) ActivateObject(orgID string, objectType string, object
 
 // DeleteStoredObject deletes the object
 func (store *BoltStorage) DeleteStoredObject(orgID string, objectType string, objectID string) common.SyncServiceError {
-	if err := store.DeleteStoredData(orgID, objectType, objectID); err != nil {
+	if err := store.DeleteStoredData(orgID, objectType, objectID, false); err != nil {
+		return nil
+	}
+	if err := store.DeleteStoredData(orgID, objectType, objectID, true); err != nil {
 		return nil
 	}
 	id := createObjectCollectionID(orgID, objectType, objectID)
@@ -954,18 +993,25 @@ func (store *BoltStorage) DeleteStoredObject(orgID string, objectType string, ob
 }
 
 // DeleteStoredData deletes the object's data
-func (store *BoltStorage) DeleteStoredData(orgID string, objectType string, objectID string) common.SyncServiceError {
+func (store *BoltStorage) DeleteStoredData(orgID string, objectType string, objectID string, isTempData bool) common.SyncServiceError {
 	function := func(object boltObject) (boltObject, common.SyncServiceError) {
 		if object.DataPath == "" {
 			return object, nil
 		}
-		if err := dataURI.DeleteStoredData(object.DataPath); err != nil {
+		if err := dataURI.DeleteStoredData(object.DataPath, isTempData); err != nil {
 			return object, err
 		}
-		object.DataPath = ""
+		if !isTempData {
+			object.DataPath = ""
+		}
 		return object, nil
 	}
-	return store.updateObjectHelper(orgID, objectType, objectID, function)
+
+	err := store.updateObjectHelper(orgID, objectType, objectID, function)
+	if err != nil && err != notFound {
+		return err
+	}
+	return nil
 }
 
 // CleanObjects removes the objects received from the other side.

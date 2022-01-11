@@ -171,6 +171,15 @@ func (communication *Wrapper) GetData(metaData common.MetaData, offset int64) co
 	return comm.GetData(metaData, offset)
 }
 
+// PushData uploade data to from ESS to CSS
+func (communication *Wrapper) PushData(metaData *common.MetaData, offset int64) common.SyncServiceError {
+	comm, err := communication.selectCommunicator("", metaData.DestOrgID, metaData.OriginType, metaData.OriginID)
+	if err != nil {
+		return err
+	}
+	return comm.PushData(metaData, offset)
+}
+
 // SendData sends data from the CSS to the ESS or from the ESS to the CSS
 func (communication *Wrapper) SendData(orgID string, destType string, destID string, message []byte, chunked bool) common.SyncServiceError {
 	comm, err := communication.selectCommunicator("", orgID, destType, destID)
