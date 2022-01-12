@@ -145,6 +145,8 @@ func SendErrorResponse(writer http.ResponseWriter, err error, message string, st
 			statusCode = http.StatusServiceUnavailable
 		case *ignoredByHandler:
 			statusCode = http.StatusConflict
+		case *common.IgnoredRequest:
+			statusCode = http.StatusTemporaryRedirect
 		case *Error:
 			// Don't return an error if it's a communication error
 			statusCode = http.StatusNoContent
@@ -197,6 +199,9 @@ func IsTransportError(pResp *http.Response, err error) bool {
 			return true
 		} else if pResp.StatusCode == http.StatusTooManyRequests {
 			// 429: too many requests
+			return true
+		} else if pResp.StatusCode == http.StatusTemporaryRedirect {
+			// 307: Temporary Redirect
 			return true
 		}
 	}
