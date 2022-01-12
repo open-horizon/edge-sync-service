@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-horizon/edge-sync-service/core/leader"
 	"github.com/open-horizon/edge-sync-service/core/security"
 
 	"github.com/open-horizon/edge-sync-service/common"
@@ -2162,21 +2163,29 @@ func handleObjectPutData(orgID string, objectType string, objectID string, write
 			return
 		}
 
+		uploadOwner := common.GetMMSUploadOwnerHeader(request)
+
 		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("In handleObjectPutData. TotalSize: %d, startOffset: %d, endOffset: %d\n", totalSize, startOffset, endOffset)
+			trace.Debug("In handleObjectPutData. TotalSize: %d, startOffset: %d, endOffset: %d, upload owner: %s\n", totalSize, startOffset, endOffset, uploadOwner)
 		}
 
 		var found bool
+		var chunkUpload bool
 		if totalSize == 0 && startOffset == -1 && endOffset == -1 {
 			found, err = PutObjectAllData(orgID, objectType, objectID, request.Body)
+			chunkUpload = false
 		} else {
-			found, err = PutObjectChunkData(orgID, objectType, objectID, request.Body, startOffset, endOffset, totalSize)
+			found, err = PutObjectChunkData(orgID, objectType, objectID, request.Body, startOffset, endOffset, totalSize, uploadOwner)
+			chunkUpload = true
 		}
 
 		if err == nil {
 			if !found {
 				writer.WriteHeader(http.StatusNotFound)
 			} else {
+				if chunkUpload {
+					writer.Header().Add("MMS-Upload-Owner", leader.GetLeaderID())
+				}
 				writer.WriteHeader(http.StatusNoContent)
 			}
 		} else {

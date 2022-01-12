@@ -64,6 +64,10 @@ func initializeLeadership() {
 	}
 }
 
+func GetLeaderID() string {
+	return leaderID.String()
+}
+
 // CheckIfLeader checks if the current process is the leader
 func CheckIfLeader() bool {
 	if common.Configuration.NodeType != common.CSS || common.Configuration.StorageProvider != common.Mongo {
@@ -91,7 +95,7 @@ func SetUnsubcribeCallback(callback func() common.SyncServiceError) {
 }
 
 func startLeadershipPeriodicUpdate() {
-	leaderTicker = time.NewTicker(time.Second * time.Duration(common.Configuration.LeadershipTimeout) / 5)
+	leaderTicker = time.NewTicker(time.Second * time.Duration(common.Configuration.LeadershipTimeout) / 2)
 	go func() {
 		common.GoRoutineStarted()
 		keepRunning := true
