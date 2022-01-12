@@ -1930,17 +1930,25 @@ func (store *MongoStorage) InsertInitialLeader(leaderID string) (bool, common.Sy
 
 // LeaderPeriodicUpdate does the periodic update of the leader document by the leader
 func (store *MongoStorage) LeaderPeriodicUpdate(leaderID string) (bool, common.SyncServiceError) {
-	err := store.update(leader,
-		bson.M{"_id": 1, "uuid": leaderID},
-		bson.M{"$currentDate": bson.M{"last-heartbeat-ts": bson.M{"$type": "timestamp"}}},
-	)
-	if err != nil {
-		if mgo.ErrNotFound != err {
+	var err common.SyncServiceError
+	for i := 0; i < maxUpdateTries; i++ {
+		err = store.update(leader,
+			bson.M{"_id": 1, "uuid": leaderID},
+			bson.M{"$currentDate": bson.M{"last-heartbeat-ts": bson.M{"$type": "timestamp"}}},
+		)
+		if err != nil {
+			if err == mgo.ErrNotFound {
+				time.Sleep(time.Duration(sleepInMS) * time.Millisecond)
+				continue
+			}
 			return false, &Error{fmt.Sprintf("Failed to update the document in the syncLeaderElection collection. Error: %s\n", err)}
 		}
-		return false, nil
+		return true, nil
 	}
 
+	if err != nil {
+		return false, nil
+	}
 	return true, nil
 }
 

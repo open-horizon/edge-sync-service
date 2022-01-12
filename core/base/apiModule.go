@@ -16,6 +16,7 @@ import (
 	"github.com/open-horizon/edge-sync-service/core/communications"
 	"github.com/open-horizon/edge-sync-service/core/dataURI"
 	"github.com/open-horizon/edge-sync-service/core/dataVerifier"
+	"github.com/open-horizon/edge-sync-service/core/leader"
 	"github.com/open-horizon/edge-sync-service/core/storage"
 	"github.com/open-horizon/edge-utilities/logger"
 	"github.com/open-horizon/edge-utilities/logger/log"
@@ -677,10 +678,28 @@ func PutObjectAllData(orgID string, objectType string, objectID string, dataRead
 	return true, nil
 }
 
-func PutObjectChunkData(orgID string, objectType string, objectID string, dataReader io.Reader, startOffset int64, endOffset int64, totalSize int64) (bool, common.SyncServiceError) {
+func PutObjectChunkData(orgID string, objectType string, objectID string, dataReader io.Reader, startOffset int64, endOffset int64, totalSize int64, uploadOwnerID string) (bool, common.SyncServiceError) {
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("In PutObjectChunkData. Update data %s %s %s, startOffset: %d, endOffset: %d\n", orgID, objectType, objectID, startOffset, endOffset)
+		trace.Debug("In PutObjectChunkData. Update data %s %s %s, startOffset: %d, endOffset: %d. Check if is leader: %t. UploadOwnerID: %s, current CSS ID: %s\n", orgID, objectType, objectID, startOffset, endOffset, leader.CheckIfLeader(), uploadOwnerID, leader.GetLeaderID())
 	}
+
+	if !leader.CheckIfLeader() {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectChunkData. This is not leader, ignore...")
+		}
+		return false, &common.IgnoredRequest{Message: "Request Ignored by non-leader"}
+	}
+
+	if uploadOwnerID != "" && uploadOwnerID != leader.GetLeaderID() {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("Failed to put chunk data for %s %s %s. It is leader, but uploadOwnerID (%s) != CSSID (%s)", orgID, objectType, objectID, uploadOwnerID, leader.GetLeaderID())
+		}
+		return false, &common.InternalError{Message: "leader changed during the chunk uploading"}
+	}
+
+	// 2 situations when reach here:
+	// It is leader && uploadOwnerID == leader.GetLeaderID()
+	// It is leader && uploadOwnerID == ""
 
 	common.HealthStatus.ClientRequestReceived()
 
@@ -755,8 +774,8 @@ func PutObjectChunkData(orgID string, objectType string, objectID string, dataRe
 					apiObjectLocks.Unlock(lockIndex)
 					return false, &common.InvalidRequest{Message: "Failed to get temp data for data verify, Error: " + err.Error()}
 				} else if success, err := dataVf.VerifyDataSignature(dr, orgID, objectType, objectID, ""); !success || err != nil {
-					if trace.IsLogging(logger.ERROR) {
-						trace.Error("Failed to verify data for object %s %s, remove unverified data\n", objectType, objectID)
+					if log.IsLogging(logger.ERROR) {
+						log.Error("Failed to verify data for object %s %s, remove unverified data\n", objectType, objectID)
 					}
 					dataVf.RemoveUnverifiedData(*metaData)
 					common.ObjectLocks.Unlock(lockIndex)
@@ -764,7 +783,7 @@ func PutObjectChunkData(orgID string, objectType string, objectID string, dataRe
 					errMsg := ""
 					if err != nil && trace.IsLogging(logger.ERROR) {
 						errMsg = err.Error()
-						trace.Error("Failed to verify data for object %s %s, Error: %s\n", objectType, objectID, errMsg)
+						log.Error("Failed to verify data for object %s %s, Error: %s\n", objectType, objectID, errMsg)
 					}
 
 					return false, &common.InvalidRequest{Message: "Failed to verify and store data, Error: " + errMsg}

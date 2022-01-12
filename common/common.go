@@ -102,6 +102,22 @@ func IsNotFound(err error) bool {
 	return ok
 }
 
+// InvalidRequest is the error for invalid reguests
+// swagger:ignore
+type IgnoredRequest struct {
+	Message string
+}
+
+func (e *IgnoredRequest) Error() string {
+	return e.Message
+}
+
+// IsInvalidRequest returns true if the error passed in is the common.InvalidRequest error
+func IsIgnoredRequest(err error) bool {
+	_, ok := err.(*IgnoredRequest)
+	return ok
+}
+
 // Destination describes a sync service node.
 // Each sync service edge node (ESS) has an address that is composed of the node's ID, Type, and Organization.
 // An ESS node communicates with the CSS using either MQTT or HTTP.
@@ -334,6 +350,11 @@ func GetStartAndEndRangeFromContentRangeHeader(request *http.Request) (int64, in
 	}
 
 	return totalSize, startOffset, endOffset, nil
+}
+
+func GetMMSUploadOwnerHeader(request *http.Request) string {
+	uploadOwner := request.Header.Get("MMS-Upload-Owner")
+	return uploadOwner
 }
 
 // MetaData is the metadata that identifies and defines the sync service object.
