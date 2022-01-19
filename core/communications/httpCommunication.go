@@ -18,6 +18,7 @@ import (
 	"github.com/open-horizon/edge-sync-service/common"
 	"github.com/open-horizon/edge-sync-service/core/dataURI"
 	"github.com/open-horizon/edge-sync-service/core/dataVerifier"
+	"github.com/open-horizon/edge-sync-service/core/leader"
 	"github.com/open-horizon/edge-sync-service/core/security"
 	"github.com/open-horizon/edge-utilities/logger"
 	"github.com/open-horizon/edge-utilities/logger/log"
@@ -1509,6 +1510,14 @@ func (communication *HTTP) handlePutAllData(metaData common.MetaData, request *h
 }
 
 func (communication *HTTP) handlePutChunkedData(metaData common.MetaData, request *http.Request, startOffset int64, endOffset int64, totalSize int64) (bool, common.SyncServiceError) {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("Inside handlePutChunkedData for %s %s %s, is leader: %t\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, leader.CheckIfLeader())
+	}
+
+	if !leader.CheckIfLeader() {
+		trace.Debug("Inside handlePutChunkedData for %s %s %s, this is not leader, ignored...\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+		return false, &common.IgnoredRequest{}
+	}
 
 	isFirstChunk := startOffset == 0
 	isLastChunk := false
@@ -1825,7 +1834,6 @@ func (communication *HTTP) pushDataByChunk(metaData *common.MetaData, offset int
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In pushDataByChunk: notification status %s", n.Status)
 		}
-
 	}
 
 	if err := updatePushDataNotification(*metaData, metaData.OriginType, metaData.OriginID, offset); err != nil {
@@ -1908,10 +1916,17 @@ func (communication *HTTP) pushDataByChunk(metaData *common.MetaData, offset int
 	}
 
 	if IsTransportError(response, err) {
-		if log.IsLogging(logger.ERROR) {
-			log.Error("In interrupted network, will try again to upload data for this chunk for %s %s\n", metaData.ObjectType, metaData.ObjectID)
+		msg := fmt.Sprintf("In interrupted network during pushDataByChunk, for %s %s, offset: %d\n", metaData.ObjectType, metaData.ObjectID, offset)
+		if err != nil {
+			msg = fmt.Sprintf("%s. Error: %s", msg, err.Error())
 		}
-		msg := "Timeout in pushDataByChunk: failed to receive data from the other side."
+
+		if response != nil {
+			msg = fmt.Sprintf("%s. Response code: %d", msg, response.StatusCode)
+		}
+		if log.IsLogging(logger.ERROR) {
+			log.Error("%s", msg)
+		}
 		return &dataTransportTimeOutError{msg}
 	} else if err != nil {
 		return &Error{"Failed to send data over HTTP request. Error: " + err.Error()}
