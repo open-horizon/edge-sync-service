@@ -99,7 +99,7 @@ func testVerifyDataSignature(hashAlgo string, t *testing.T) {
 		HashAlgorithm: hashAlgo,
 		PublicKey:     publicKey,
 		Signature:     signature,
-		DataVerified:  false,
+		//DataVerified:  false,
 	}
 
 	// Store object metadata
@@ -121,9 +121,9 @@ func testVerifyDataSignature(hashAlgo string, t *testing.T) {
 		t.Errorf("Error verifying data, data should pass verification. verified: %t, error: %s\n", verified, err.Error())
 	}
 
-	if err = Store.UpdateObjectDataVerifiedStatus(orgID, objectType, objectID, true); err != nil {
-		t.Errorf("Failed to update DataVerified to true, error: %s\n", err.Error())
-	}
+	// if err = Store.UpdateObjectDataVerifiedStatus(orgID, objectType, objectID, true); err != nil {
+	// 	t.Errorf("Failed to update DataVerified to true, error: %s\n", err.Error())
+	// }
 
 	var reader io.Reader
 	if reader, err = Store.RetrieveObjectData(orgID, objectType, objectID, false); err != nil {
@@ -219,8 +219,9 @@ func setupObjectForVerify(objectID string, publicKey string, signature string, h
 		HashAlgorithm:      hashAlgo,
 		PublicKey:          publicKey,
 		Signature:          signature,
-		DataVerified:       false,
 		DestinationDataURI: destinationURI,
+		//DataVerified:       false,
+
 	}
 
 	// Store object metadata

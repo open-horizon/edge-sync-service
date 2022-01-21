@@ -1,7 +1,8 @@
-package communications
+package base
 
 import (
 	"github.com/open-horizon/edge-sync-service/common"
+	"github.com/open-horizon/edge-sync-service/core/communications"
 	"github.com/open-horizon/edge-utilities/logger"
 	"github.com/open-horizon/edge-utilities/logger/trace"
 )
@@ -41,13 +42,13 @@ func (q *ObjectWorkQueue) run() {
 						if trace.IsLogging(logger.TRACE) {
 							trace.Trace("Prepare update notifications for %s/%s/%s", meta.DestOrgID, meta.ObjectType, meta.ObjectID)
 						}
-						notificationsInfo, _ = PrepareObjectNotifications(meta)
+						notificationsInfo, _ = communications.PrepareObjectNotifications(meta)
 					} else if i.NotificationType == common.TypeDestination {
 						if trace.IsLogging(logger.TRACE) {
 							trace.Trace("For object %s/%s/%s, prepare update destination notifications for destinations %s", meta.DestOrgID, meta.ObjectType, meta.ObjectID, i.Destinations)
 						}
 						if len(i.Destinations) > 0 {
-							notificationsInfo, _ = PrepareNotificationsForDestinations(meta, i.Destinations, common.Update)
+							notificationsInfo, _ = communications.PrepareNotificationsForDestinations(meta, i.Destinations, common.Update)
 						}
 					}
 
@@ -56,18 +57,18 @@ func (q *ObjectWorkQueue) run() {
 						if trace.IsLogging(logger.TRACE) {
 							trace.Trace("Prepare delete notifications for %s/%s/%s", meta.DestOrgID, meta.ObjectType, meta.ObjectID)
 						}
-						notificationsInfo, _ = PrepareDeleteNotifications(meta)
+						notificationsInfo, _ = communications.PrepareDeleteNotifications(meta)
 					} else if i.NotificationType == common.TypeDestination {
 						if trace.IsLogging(logger.TRACE) {
 							trace.Trace("For object %s/%s/%s, prepare delete destination notifications for destinations %s", meta.DestOrgID, meta.ObjectType, meta.ObjectID, i.Destinations)
 						}
 						if len(i.Destinations) > 0 {
-							notificationsInfo, _ = PrepareNotificationsForDestinations(meta, i.Destinations, common.Delete)
+							notificationsInfo, _ = communications.PrepareNotificationsForDestinations(meta, i.Destinations, common.Delete)
 						}
 					}
 				}
 
-				SendNotifications(notificationsInfo)
+				communications.SendNotifications(notificationsInfo)
 
 				if trace.IsLogging(logger.TRACE) {
 					trace.Trace("Sent notifications for %s/%s/%s", meta.DestOrgID, meta.ObjectType, meta.ObjectID)

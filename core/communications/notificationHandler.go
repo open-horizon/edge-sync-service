@@ -418,16 +418,16 @@ func handleUpdate(metaData common.MetaData, maxInflightChunks int) common.SyncSe
 
 	// check if object is already exist, and if it is created from other side, return with error
 	_, existingObjStatus, _ := Store.RetrieveObjectAndStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
-	if existingObjStatus == common.ReadyToSend || existingObjStatus == common.NotReadyToSend {
+	if existingObjStatus == common.ReadyToSend || existingObjStatus == common.NotReadyToSend || existingObjStatus == common.Verifying || existingObjStatus == common.VerificationFailed {
 		common.ObjectLocks.Unlock(lockIndex)
 		return &notificationHandlerError{"Error in handleUpdate: cannot update object from the receiver side."}
 	}
 
 	// If has data, and need to verifiy data, set DataVerified to false
-	metaData.DataVerified = true
-	if status == common.PartiallyReceived && common.NeedDataVerification(metaData) {
-		metaData.DataVerified = false
-	}
+	// metaData.DataVerified = true
+	// if status == common.PartiallyReceived && common.NeedDataVerification(metaData) {
+	// 	metaData.DataVerified = false
+	// }
 
 	// Store the object. Now change the receiver status to "PartiallyReceived" or "CompletelyReceived"
 	if _, err := Store.StoreObject(metaData, nil, status); err != nil {

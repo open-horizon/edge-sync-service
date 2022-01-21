@@ -37,7 +37,9 @@ func (store *MongoStorage) checkObjects() {
 			bson.M{"metadata.expiration": bson.M{"$lte": currentTime}},
 			bson.M{"$or": []bson.M{
 				bson.M{"status": common.NotReadyToSend},
-				bson.M{"status": common.ReadyToSend}}}},
+				bson.M{"status": common.ReadyToSend},
+				bson.M{"status": common.Verifying},
+				bson.M{"status": common.VerificationFailed}}}},
 	}
 
 	selector := bson.M{"metadata": bson.ElementDocument, "last-update": bson.ElementTimestamp}
