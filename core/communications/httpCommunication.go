@@ -797,12 +797,29 @@ func (communication *HTTP) GetAllData(metaData common.MetaData, offset int64) co
 
 	var dataVf *dataVerifier.DataVerifier
 	if common.NeedDataVerification(metaData) {
+		// Set object status from "partiallyReceived" to "receiverVerifying"
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("Updating ESS object status to %s for %s %s %s...", common.ReceiverVerifying, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+		}
+		if err := Store.UpdateObjectStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, common.ReceiverVerifying); err != nil {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("Failed to update object status to %s for object %s/%s/%s", common.ReceiverVerifying, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+			}
+			common.ObjectLocks.Unlock(lockIndex)
+			return err
+		}
 		dataVf = dataVerifier.NewDataVerifier(metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature)
 		if dataVerified, err := dataVf.VerifyDataSignature(response.Body, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI); !dataVerified || err != nil {
 			if log.IsLogging(logger.ERROR) {
 				log.Error("Failed to verify data for object %s %s, remove temp data\n", metaData.ObjectType, metaData.ObjectID)
 			}
 			dataVf.RemoveUnverifiedData(metaData)
+
+			if updateErr := Store.UpdateObjectStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, common.ReceiverVerificationFailed); updateErr != nil {
+				if log.IsLogging(logger.ERROR) {
+					log.Error("Failed to update object status to %s for object %s/%s/%s. Error: %s", common.ReceiverVerificationFailed, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, updateErr.Error())
+				}
+			}
 			common.ObjectLocks.Unlock(lockIndex)
 			return err
 		}
@@ -825,17 +842,7 @@ func (communication *HTTP) GetAllData(metaData common.MetaData, offset int64) co
 		}
 	}
 
-	// set metadata.DataVerified = true
-	if err = Store.UpdateObjectDataVerifiedStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, true); err != nil {
-		if log.IsLogging(logger.ERROR) {
-			log.Error("Failed to update metadata.DataVerified to true for object %s %s\n", metaData.ObjectType, metaData.ObjectID)
-		}
-		common.ObjectLocks.Unlock(lockIndex)
-		return err
-	}
-
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("Updated object DataVerified to true for %s %s %s", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 		trace.Debug("Updating ESS object status to completelyReceived for %s %s %s...", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 	}
 	if err := Store.UpdateObjectStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, common.CompletelyReceived); err != nil {
@@ -1053,25 +1060,54 @@ func (communication *HTTP) GetDataByChunk(metaData common.MetaData, offset int64
 
 		if isLastChunk && isTempData {
 			// verify data
-			dataVf := dataVerifier.NewDataVerifier(metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature)
-			if dr, err := dataVf.GetTempData(metaData); err != nil {
+			// Set object status from "partiallyReceived" to "receiverVerifying"
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("Updating ESS object status to %s for %s %s %s...", common.ReceiverVerifying, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+			}
+			if err = Store.UpdateObjectStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, common.ReceiverVerifying); err != nil {
+				if log.IsLogging(logger.ERROR) {
+					log.Error("Failed to update object status to %s for object %s/%s/%s", common.ReceiverVerifying, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+				}
 				common.ObjectLocks.Unlock(lockIndex)
 				return err
-			} else if success, err := dataVf.VerifyDataSignature(dr, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI); !success || err != nil {
+			}
+			objectVerifyStatus := ""
+			dataVf := dataVerifier.NewDataVerifier(metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature)
+			if dr, getDataErr := dataVf.GetTempData(metaData); getDataErr != nil {
+				if log.IsLogging(logger.ERROR) {
+					log.Error("Failed to get temp data for data verify for object %s/%s/%s. Error: %s", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, getDataErr.Error())
+				}
+				objectVerifyStatus = common.ReceiverVerificationFailed
+				err = getDataErr
+			} else if success, verifyErr := dataVf.VerifyDataSignature(dr, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI); !success || verifyErr != nil {
+				if log.IsLogging(logger.ERROR) {
+					log.Error("Failed to verify data for object %s/%s/%s, remove unverified data", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+					if verifyErr != nil {
+						log.Error("Error: %s", verifyErr.Error())
+					}
+				}
 				// remove temp data
 				dataVf.RemoveUnverifiedData(metaData)
+				objectVerifyStatus = common.ReceiverVerificationFailed
+				err = verifyErr
+			}
+
+			if objectVerifyStatus == common.ReceiverVerificationFailed {
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Debug("Updating ESS object status to %s for %s %s %s", objectVerifyStatus, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+				}
+				if updateErr := Store.UpdateObjectStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, objectVerifyStatus); updateErr != nil {
+					if log.IsLogging(logger.ERROR) {
+						log.Error("Failed to update object status to %s for object %s/%s/%s. Error: %s", objectVerifyStatus, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, updateErr.Error())
+					}
+					common.ObjectLocks.Unlock(lockIndex)
+					return updateErr
+				}
 				common.ObjectLocks.Unlock(lockIndex)
 				return err
 			}
-
-			// set metadata.DataVerified = true
 			if trace.IsLogging(logger.DEBUG) {
-				trace.Debug("Updated object DataVerified to true for %s %s %s", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
-			}
-
-			if err = Store.UpdateObjectDataVerifiedStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, true); err != nil {
-				common.ObjectLocks.Unlock(lockIndex)
-				return err
+				trace.Debug("Data verified for object %s/%s/%s", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 			}
 		}
 	}
@@ -1481,24 +1517,39 @@ func (communication *HTTP) handlePutData(orgID string, objectType string, object
 func (communication *HTTP) handlePutAllData(metaData common.MetaData, request *http.Request) (bool, common.SyncServiceError) {
 	var dataVf *dataVerifier.DataVerifier
 	if common.NeedDataVerification(metaData) {
+		// Set object status from "partiallyReceived" to "receiverVerifying"
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("Need data verification, set object status to %s for %s %s %s...", common.ReceiverVerifying, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+		}
+		if err := Store.UpdateObjectStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, common.ReceiverVerifying); err != nil {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("Failed to update object status to %s for object %s/%s/%s", common.ReceiverVerifying, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+			}
+			return true, err
+		}
+
 		dataVf = dataVerifier.NewDataVerifier(metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature)
 		if dataVerified, err := dataVf.VerifyDataSignature(request.Body, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI); !dataVerified || err != nil {
 			if log.IsLogging(logger.ERROR) {
-				log.Error("Failed to verify data for object %s %s, remove unverified data\n", metaData.ObjectType, metaData.ObjectID)
+				log.Error("Failed to verify data for object %s/%s/%s, remove unverified data", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 			}
 			dataVf.RemoveUnverifiedData(metaData)
+			if updateErr := Store.UpdateObjectStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, common.ReceiverVerificationFailed); updateErr != nil {
+				if log.IsLogging(logger.ERROR) {
+					log.Error("Failed to update object status to %s for object %s/%s/%s. Error: %s", common.ReceiverVerificationFailed, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, updateErr.Error())
+				}
+			}
+			if err == nil {
+				return true, &common.InternalError{Message: "Failed to verify object data"}
+			}
 			return true, err
 		}
-	}
-
-	if dataVf != nil {
-		if err := Store.UpdateObjectDataVerifiedStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, true); err != nil {
+	} else {
+		if found, err := Store.StoreObjectData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, request.Body); err != nil { // No data verification applied, then store data directly
 			return true, err
+		} else if !found {
+			return true, &common.InvalidRequest{Message: "Failed to find object to set data"}
 		}
-	} else if found, err := Store.StoreObjectData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, request.Body); err != nil { // No data verification applied, then store data directly
-		return true, err
-	} else if !found {
-		return true, &common.InvalidRequest{Message: "Failed to find object to set data"}
 	}
 
 	if err := Store.UpdateObjectStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, common.CompletelyReceived); err != nil {
@@ -1554,28 +1605,61 @@ func (communication *HTTP) handlePutChunkedData(metaData common.MetaData, reques
 	}
 
 	if isLastChunk && isTempData {
+		// Set object status from "partiallyReceived" to "receiverVerifying"
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("Updating object status to %s for %s %s %s...", common.ReceiverVerifying, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+		}
+		if err := Store.UpdateObjectStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, common.ReceiverVerifying); err != nil {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("Failed to update object status to %s for object %s/%s/%s", common.ReceiverVerifying, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+			}
+			return isLastChunk, err
+		}
+
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("Start data verification for %s %s %s\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 		}
 
 		// verify
+		objectVerifyStatus := ""
 		dataVf := dataVerifier.NewDataVerifier(metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature)
-		if dr, err := dataVf.GetTempData(metaData); err != nil {
-			return isLastChunk, err
-		} else if success, err := dataVf.VerifyDataSignature(dr, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI); !success || err != nil {
+		if dr, getDataErr := dataVf.GetTempData(metaData); getDataErr != nil {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("Failed to get temp data for data verify for object %s/%s/%s. Error: %s", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, getDataErr.Error())
+			}
+			objectVerifyStatus = common.ReceiverVerificationFailed
+			err = getDataErr
+		} else if success, verifyErr := dataVf.VerifyDataSignature(dr, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.DestinationDataURI); !success || verifyErr != nil {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("Failed to verify data for object %s/%s/%s, remove unverified data", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+				if verifyErr != nil {
+					log.Error("Error: %s", verifyErr.Error())
+				}
+			}
 			// remove temp data
 			dataVf.RemoveUnverifiedData(metaData)
+			objectVerifyStatus = common.ReceiverVerificationFailed
+			err = verifyErr
+		}
+
+		// Failed during verification, err could be nil
+		if objectVerifyStatus == common.ReceiverVerificationFailed {
+			if trace.IsLogging(logger.DEBUG) {
+				trace.Debug("Updating object status to %s for %s %s %s", objectVerifyStatus, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+			}
+			if updateErr := Store.UpdateObjectStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, objectVerifyStatus); updateErr != nil {
+				if log.IsLogging(logger.ERROR) {
+					log.Error("Failed to update object status to %s for object %s/%s/%s. Error: %s", objectVerifyStatus, metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, updateErr.Error())
+				}
+				return isLastChunk, updateErr
+			}
 			return isLastChunk, err
 		}
 
-		// set metadata.DataVerified = true
 		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("Updated object DataVerified to true for %s %s %s", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+			trace.Debug("Data verified for object %s/%s/%s", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 		}
 
-		if err := Store.UpdateObjectDataVerifiedStatus(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, true); err != nil {
-			return isLastChunk, err
-		}
 	}
 
 	if isLastChunk {

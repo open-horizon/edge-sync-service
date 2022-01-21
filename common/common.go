@@ -502,10 +502,6 @@ type MetaData struct {
 	// Optional field, default is false (not visiable to all users)
 	Public bool `json:"public" bson:"public"`
 
-	// DataVerified is an internal field set by ESS after ESS downloads data from CSS or by CSS after ESS uploads data
-	// Data can be obtained only when DataVerified field is true
-	DataVerified bool `json:"dataVerified" bson:"data-verified"`
-
 	// OwnerID is an internal field indicating who creates the object
 	// This field should not be set by users
 	OwnerID string `json:"ownerID" bson:"owner-id"`
@@ -678,6 +674,10 @@ type DestinationRequestInQueue struct {
 	Destination Destination
 }
 
+type ObjectInVerifyQueue struct {
+	Object MetaData
+}
+
 // ACLentry contains ACL information about each user
 type ACLentry struct {
 	Username    string
@@ -687,14 +687,20 @@ type ACLentry struct {
 
 // Object status
 const (
+	// status at sender side
 	NotReadyToSend     = "notReady"           // The object is not ready to be sent to the other side
+	Verifying          = "verifying"          // The object data is in the process of verification
+	VerificationFailed = "verificationFailed" // The data verification is failed
 	ReadyToSend        = "ready"              // The object is ready to be sent to the other side
-	PartiallyReceived  = "partiallyreceived"  // Received the object from the other side, waiting for its data
-	CompletelyReceived = "completelyReceived" // The object was received completely from the other side
-	ObjConsumed        = "objconsumed"        // The object was consumed by the app
-	ObjDeleted         = "objdeleted"         // The object was deleted by the other side
-	ObjReceived        = "objreceived"        // The object was received by the app
-	ConsumedByDest     = "consumedByDest"     // The object was consumed by the other side (ESS only)
+	// status at receiver side
+	PartiallyReceived          = "partiallyreceived"          // Received the object from the other side, waiting for its data
+	ReceiverVerifying          = "receiverVerifying"          // The object data at receiver side is in the process of verification
+	ReceiverVerificationFailed = "receiverVerificationFailed" // The data verification is failed at receiver side
+	CompletelyReceived         = "completelyReceived"         // The object was received completely from the other side
+	ObjConsumed                = "objconsumed"                // The object was consumed by the app
+	ObjDeleted                 = "objdeleted"                 // The object was deleted by the other side
+	ObjReceived                = "objreceived"                // The object was received by the app
+	ConsumedByDest             = "consumedByDest"             // The object was consumed by the other side (ESS only)
 )
 
 // Notification status and type

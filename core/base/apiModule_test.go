@@ -77,7 +77,7 @@ func setupDataSignature(data []byte, hashAlgo string) (string, string, error) {
 }
 
 func setupObjectQueue() {
-	objectQueue = communications.NewObjectWorkQueue(40)
+	objectQueue = NewObjectWorkQueue(40)
 }
 
 func teardownObjectQueue() {
