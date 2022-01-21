@@ -90,10 +90,10 @@ func (store *InMemoryStorage) StoreObject(metaData common.MetaData, data []byte,
 	defer store.unLock()
 
 	id := getObjectCollectionID(metaData)
-	// If the object was receieved from a service (status NotReadyToSend/ReadyToSend), i.e. this node is the origin of the object,
+	// If the object was receieved from a service (status NotReadyToSend/ReadyToSend/Verifying/VerificationFailed), i.e. this node is the origin of the object,
 	// set instance id. If the object was received from the other side, this node is the receiver of the object:
 	// keep the instance id of the meta data.
-	if status == common.NotReadyToSend || status == common.ReadyToSend {
+	if status == common.NotReadyToSend || status == common.ReadyToSend || status == common.Verifying || status == common.VerificationFailed {
 		newID := store.getInstanceID()
 		metaData.InstanceID = newID
 		if data != nil && !metaData.NoData && !metaData.MetaOnly {
@@ -147,7 +147,7 @@ func (store *InMemoryStorage) StoreObjectData(orgID string, objectType string, o
 		if object.status == common.NotReadyToSend {
 			object.status = common.ReadyToSend
 		}
-		if object.status == common.NotReadyToSend || object.status == common.ReadyToSend {
+		if object.status == common.NotReadyToSend || object.status == common.ReadyToSend || object.status == common.Verifying {
 			newID := store.getInstanceID()
 			object.meta.InstanceID = newID
 			object.meta.DataID = newID
@@ -313,21 +313,6 @@ func (store *InMemoryStorage) UpdateObjectStatus(orgID string, objectType string
 		if status == common.ConsumedByDest {
 			object.consumedTimestamp = time.Now()
 		}
-		store.objects[id] = object
-		return nil
-	}
-
-	return &NotFound{"Object not found"}
-}
-
-// UpdateObjectDataVerifiedStatus updates object's dataVerified field
-func (store *InMemoryStorage) UpdateObjectDataVerifiedStatus(orgID string, objectType string, objectID string, verified bool) common.SyncServiceError {
-	store.lock()
-	defer store.unLock()
-
-	id := createObjectCollectionID(orgID, objectType, objectID)
-	if object, ok := store.objects[id]; ok {
-		object.meta.DataVerified = verified
 		store.objects[id] = object
 		return nil
 	}
@@ -635,7 +620,7 @@ func (store *InMemoryStorage) GetObjectsToActivate() ([]common.MetaData, common.
 	currentTime := time.Now().UTC().Format(time.RFC3339)
 	result := make([]common.MetaData, 0)
 	for _, obj := range store.objects {
-		if (obj.status == common.NotReadyToSend || obj.status == common.ReadyToSend) &&
+		if (obj.status == common.NotReadyToSend || obj.status == common.ReadyToSend || obj.status == common.Verifying || obj.status == common.VerificationFailed) &&
 			obj.meta.Inactive && obj.meta.ActivationTime != "" && obj.meta.ActivationTime <= currentTime {
 			result = append(result, obj.meta)
 		}
@@ -737,7 +722,7 @@ func (store *InMemoryStorage) DeleteObjectDestinations(orgID string, objectType 
 func (store *InMemoryStorage) GetNumberOfStoredObjects() (uint32, common.SyncServiceError) {
 	var count uint32
 	for _, object := range store.objects {
-		if object.status == common.ReadyToSend || object.status == common.NotReadyToSend {
+		if object.status == common.ReadyToSend || object.status == common.NotReadyToSend || object.status == common.Verifying || object.status == common.VerificationFailed {
 			count++
 		}
 	}

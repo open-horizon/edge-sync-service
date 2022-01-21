@@ -292,7 +292,9 @@ func (store *MongoStorage) GetObjectsToActivate() ([]common.MetaData, common.Syn
 	currentTime := time.Now().UTC().Format(time.RFC3339)
 	query := bson.M{"$or": []bson.M{
 		bson.M{"status": common.NotReadyToSend},
-		bson.M{"status": common.ReadyToSend}},
+		bson.M{"status": common.ReadyToSend},
+		bson.M{"status": common.Verifying},
+		bson.M{"status": common.VerificationFailed}},
 		"metadata.inactive": true,
 		"$and": []bson.M{
 			bson.M{"metadata.activation-time": bson.M{"$ne": ""}},
@@ -328,7 +330,7 @@ func (store *MongoStorage) StoreObject(metaData common.MetaData, data []byte, st
 
 	var dests []common.StoreDestinationStatus
 	var deletedDests []common.StoreDestinationStatus
-	if status == common.NotReadyToSend || status == common.ReadyToSend {
+	if status == common.NotReadyToSend || status == common.ReadyToSend || status == common.Verifying || status == common.VerificationFailed {
 		// The object was receieved from a service, i.e. this node is the origin of the object:
 		// set its instance id and create destinations array
 		newID := store.getInstanceID()
@@ -1084,10 +1086,12 @@ func (store *MongoStorage) StoreObjectData(orgID string, objectType string, obje
 		}
 	}
 
+	// If it is called by dataVerifier, the status is verifying. The object status will not changed to "ready".
+	// This is because at this moment, the data is not yet verified.
 	if result.Status == common.NotReadyToSend {
 		store.UpdateObjectStatus(orgID, objectType, objectID, common.ReadyToSend)
 	}
-	if result.Status == common.NotReadyToSend || result.Status == common.ReadyToSend {
+	if result.Status == common.NotReadyToSend || result.Status == common.ReadyToSend || result.Status == common.Verifying {
 		newID := store.getInstanceID()
 		if err := store.update(objects, bson.M{"_id": id},
 			bson.M{
@@ -1097,7 +1101,6 @@ func (store *MongoStorage) StoreObjectData(orgID string, objectType string, obje
 			return false, &Error{fmt.Sprintf("Failed to set instance id. Error: %s.", err)}
 		}
 	}
-
 	_, size, err := store.copyDataToFile(id, dataReader, true, true)
 	if err != nil {
 		return false, err
@@ -1256,7 +1259,7 @@ func (store *MongoStorage) AppendObjectData(orgID string, objectType string, obj
 	return updatedLastChunk, nil
 }
 
-// Handles the last data chunk
+// Handles the last data chunk when no data verification needed
 func (store *MongoStorage) HandleObjectInfoForLastDataChunk(orgID string, objectType string, objectID string, isTempData bool, dataSize int64) (bool, common.SyncServiceError) {
 	if isTempData {
 		return false, nil
@@ -1305,19 +1308,6 @@ func (store *MongoStorage) UpdateObjectStatus(orgID string, objectType string, o
 			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
 		}); err != nil {
 		return &Error{fmt.Sprintf("Failed to update object's status. Error: %s.", err)}
-	}
-	return nil
-}
-
-// UpdateObjectDataVerifiedStatus updates object's dataVerified field
-func (store *MongoStorage) UpdateObjectDataVerifiedStatus(orgID string, objectType string, objectID string, verified bool) common.SyncServiceError {
-	id := createObjectCollectionID(orgID, objectType, objectID)
-	if err := store.update(objects, bson.M{"_id": id},
-		bson.M{
-			"$set":         bson.M{"metadata.data-verified": verified},
-			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
-		}); err != nil {
-		return &Error{fmt.Sprintf("Failed to update object's data-verified status. Error: %s.", err)}
 	}
 	return nil
 }
@@ -1405,6 +1395,8 @@ func (store *MongoStorage) GetNumberOfStoredObjects() (uint32, common.SyncServic
 		"$or": []bson.M{
 			bson.M{"status": common.ReadyToSend},
 			bson.M{"status": common.NotReadyToSend},
+			bson.M{"status": common.Verifying},
+			bson.M{"status": common.VerificationFailed},
 		}}
 	return store.count(objects, query)
 }

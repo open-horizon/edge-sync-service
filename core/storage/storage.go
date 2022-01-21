@@ -60,9 +60,6 @@ type Storage interface {
 	// Update object's status
 	UpdateObjectStatus(orgID string, objectType string, objectID string, status string) common.SyncServiceError
 
-	// UpdateObjectDataVerifiedStatus updates object's dataVerified field
-	UpdateObjectDataVerifiedStatus(orgID string, objectType string, objectID string, verified bool) common.SyncServiceError
-
 	// Update object's source data URI
 	UpdateObjectSourceDataURI(orgID string, objectType string, objectID string, sourceDataURI string) common.SyncServiceError
 
