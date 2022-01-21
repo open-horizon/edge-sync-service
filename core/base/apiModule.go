@@ -807,6 +807,7 @@ func PutObjectChunkData(orgID string, objectType string, objectID string, dataRe
 		apiObjectLocks.Unlock(lockIndex)
 
 		return true, nil
+
 	} else if isTempData {
 		// Is lastChunk and need data verification:
 		// send object to queue for data verification, and return

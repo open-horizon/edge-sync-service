@@ -1942,23 +1942,19 @@ func (store *MongoStorage) LeaderPeriodicUpdate(leaderID string) (bool, common.S
 			bson.M{"$currentDate": bson.M{"last-heartbeat-ts": bson.M{"$type": "timestamp"}}},
 		)
 		if err != nil {
-			if mgo.ErrNotFound != err {
-				return false, &Error{fmt.Sprintf("Failed to update the document in the syncLeaderElection collection. Error: %s\n", err)}
-			} else {
-				if i == maxUpdateTries-1 {
-					return false, nil
-				} else {
-					if trace.IsLogging(logger.TRACE) {
-						trace.Trace(" Lily - Get error during LeaderPeriodicUpdate for leaderID %s, Error: %s. Retrying...\n", leaderID, err.Error())
-					}
-					time.Sleep(time.Duration(sleepInMS) * time.Millisecond)
-					continue
-				}
 
+			if err == mgo.ErrNotFound {
+				time.Sleep(time.Duration(sleepInMS) * time.Millisecond)
+				continue
 			}
+			return false, &Error{fmt.Sprintf("Failed to update the document in the syncLeaderElection collection. Error: %s\n", err)}
 		}
+		return true, nil
 	}
 
+	if err != nil {
+		return false, nil
+	}
 	return true, nil
 }
 
