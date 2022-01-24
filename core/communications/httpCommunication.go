@@ -1181,7 +1181,7 @@ func (communication *HTTP) Poll() bool {
 		switch message.Type {
 		case common.Update:
 			// For httpCommunication, we don't need maxInFlightChunks to control data chunk, so give it a large number
-			httpMaxInFlightChunks := math.MaxInt64
+			httpMaxInFlightChunks := math.MaxInt32
 			if err = handleUpdate(message.MetaData, httpMaxInFlightChunks); err != nil {
 				if isIgnoredByHandler(err) {
 					if log.IsLogging(logger.DEBUG) {
