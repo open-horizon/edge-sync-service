@@ -99,11 +99,6 @@ func (store *Cache) UpdateObjectStatus(orgID string, objectType string, objectID
 	return store.Store.UpdateObjectStatus(orgID, objectType, objectID, status)
 }
 
-// UpdateObjectDataVerifiedStatus updates object's dataVerified field
-func (store *Cache) UpdateObjectDataVerifiedStatus(orgID string, objectType string, objectID string, verified bool) common.SyncServiceError {
-	return store.Store.UpdateObjectDataVerifiedStatus(orgID, objectType, objectID, verified)
-}
-
 // UpdateObjectSourceDataURI pdates object's source data URI
 func (store *Cache) UpdateObjectSourceDataURI(orgID string, objectType string, objectID string, sourceDataURI string) common.SyncServiceError {
 	return store.Store.UpdateObjectSourceDataURI(orgID, objectType, objectID, sourceDataURI)

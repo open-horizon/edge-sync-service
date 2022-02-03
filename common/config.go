@@ -117,6 +117,10 @@ type Config struct {
 	//  For the ESS, default value is 2
 	ObjectQueueBufferSize uint64 `env:"OBJECT_QUEUE_BUFFER_SIZE"`
 
+	// Buffer size of Object Queue to verify object data
+	//  Default size is 500
+	VerifyQueueBufferSize uint64 `env:"VERIFY_QUEUE_BUFFER_SIZE"`
+
 	// CommunicationProtocol is a comma separated list of protocols to be used for communication between CSS and ESS
 	//  The elements of the list can be 'http', 'mqtt', and 'wiotp'
 	//  wiotp indicates MQTT communication via the Watson IoT Platform and mqtt indicates direct MQTT communication to a broker
@@ -690,6 +694,10 @@ func ValidateConfig() error {
 		}
 	}
 
+	if Configuration.VerifyQueueBufferSize == 0 {
+		Configuration.VerifyQueueBufferSize = 500
+	}
+
 	return nil
 }
 
@@ -705,6 +713,7 @@ func SetDefaultConfig(config *Config) {
 	config.SecureListeningPort = 8443
 	config.UnsecureListeningPort = 8080
 	config.LeadershipTimeout = 30
+	config.VerifyQueueBufferSize = 500
 	config.AuthenticationHandler = "dummy"
 	config.CSSOnWIoTP = false
 	config.UsingEdgeConnector = false

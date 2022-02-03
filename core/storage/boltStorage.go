@@ -179,7 +179,7 @@ func (store *BoltStorage) PerformMaintenance() {
 
 		function := func(object boltObject) bool {
 			if object.Meta.Expiration != "" && object.Meta.Expiration <= currentTime &&
-				(object.Status == common.ReadyToSend || object.Status == common.NotReadyToSend) {
+				(object.Status == common.ReadyToSend || object.Status == common.NotReadyToSend || object.Status == common.Verifying || object.Status == common.VerificationFailed) {
 				return true
 			}
 			return false
@@ -236,10 +236,10 @@ func (store *BoltStorage) StoreObject(metaData common.MetaData, data []byte, sta
 	var dests []common.StoreDestinationStatus
 	var deletedDests []common.StoreDestinationStatus
 
-	// If the object was receieved from a service (status NotReadyToSend/ReadyToSend), i.e. this node is the origin of the object,
+	// If the object was receieved from a service (status NotReadyToSend/ReadyToSend/Verifying/VerificationFailed), i.e. this node is the origin of the object,
 	// set instance id. If the object was received from the other side, this node is the receiver of the object:
 	// keep the instance id of the meta data.
-	if status == common.NotReadyToSend || status == common.ReadyToSend {
+	if status == common.NotReadyToSend || status == common.ReadyToSend || status == common.Verifying || status == common.VerificationFailed {
 		newID := store.getInstanceID()
 		metaData.InstanceID = newID
 		if data != nil && !metaData.NoData && !metaData.MetaOnly {
@@ -345,10 +345,12 @@ func (store *BoltStorage) StoreObjectData(orgID string, objectType string, objec
 	}
 
 	function := func(object boltObject) (boltObject, common.SyncServiceError) {
+		// If it is called by dataVerifier, the status is verifying. The object status will not changed to "ready".
+		// This is because at this moment, the data is not yet verified.
 		if object.Status == common.NotReadyToSend {
 			object.Status = common.ReadyToSend
 		}
-		if object.Status == common.NotReadyToSend || object.Status == common.ReadyToSend {
+		if object.Status == common.NotReadyToSend || object.Status == common.ReadyToSend || object.Status == common.Verifying {
 			newID := store.getInstanceID()
 			object.Meta.InstanceID = newID
 			object.Meta.DataID = newID
@@ -777,7 +779,7 @@ func (store *BoltStorage) GetObjectsToActivate() ([]common.MetaData, common.Sync
 	currentTime := time.Now().UTC().Format(time.RFC3339)
 	result := make([]common.MetaData, 0)
 	function := func(object boltObject) {
-		if (object.Status == common.NotReadyToSend || object.Status == common.ReadyToSend) &&
+		if (object.Status == common.NotReadyToSend || object.Status == common.ReadyToSend || object.Status == common.Verifying || object.Status == common.VerificationFailed) &&
 			object.Meta.Inactive && object.Meta.ActivationTime != "" && object.Meta.ActivationTime <= currentTime {
 			result = append(result, object.Meta)
 		}
@@ -812,7 +814,7 @@ func (store *BoltStorage) AppendObjectData(orgID string, objectType string, obje
 	return dataURI.AppendData(dataPath, dataReader, dataLength, offset, total, isFirstChunk, isLastChunk, isTempData)
 }
 
-// Handles the last data chunk
+// Handles the last data chunk when no data verification needed
 func (store *BoltStorage) HandleObjectInfoForLastDataChunk(orgID string, objectType string, objectID string, isTempData bool, dataSize int64) (bool, common.SyncServiceError) {
 	//dataPath := createDataPath(store.localDataPath, orgID, objectType, objectID)
 	function := func(object boltObject) (boltObject, common.SyncServiceError) {
@@ -846,15 +848,6 @@ func (store *BoltStorage) UpdateObjectStatus(orgID string, objectType string, ob
 		if status == common.ConsumedByDest {
 			object.ConsumedTimestamp = time.Now()
 		}
-		return object, nil
-	}
-	return store.updateObjectHelper(orgID, objectType, objectID, function)
-}
-
-// UpdateObjectDataVerifiedStatus updates object's dataVerified field
-func (store *BoltStorage) UpdateObjectDataVerifiedStatus(orgID string, objectType string, objectID string, verified bool) common.SyncServiceError {
-	function := func(object boltObject) (boltObject, common.SyncServiceError) {
-		object.Meta.DataVerified = verified
 		return object, nil
 	}
 	return store.updateObjectHelper(orgID, objectType, objectID, function)
@@ -1241,7 +1234,7 @@ func (store *BoltStorage) UpdateObjectDelivering(orgID string, objectType string
 func (store *BoltStorage) GetNumberOfStoredObjects() (uint32, common.SyncServiceError) {
 	var count uint32
 	function := func(object boltObject) {
-		if object.Status == common.ReadyToSend || object.Status == common.NotReadyToSend {
+		if object.Status == common.ReadyToSend || object.Status == common.NotReadyToSend || object.Status == common.Verifying || object.Status == common.VerificationFailed {
 			count++
 		}
 	}
