@@ -414,6 +414,14 @@ func handleObjects(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	if len(request.URL.Path) != 0 {
+		/* Note: request.URL.Path is the parts after /api/vi/objects,
+		 * ESS URLs following /api/v1/objects?xxx=xxx will not be handled in this if section and 400 will be returned.
+		 * eg:
+		 *   GET     /api/v1/objects/orgID?destination_policy=true
+		 *   GET     /api/v1/objects/orgID?filters=true
+		 *   GET     /api/v1/objects/orgID?list_object_type=true
+		 */
+
 		parts := strings.Split(request.URL.Path, "/")
 		var orgID string
 		if common.Configuration.NodeType == common.CSS {
@@ -426,6 +434,7 @@ func handleObjects(writer http.ResponseWriter, request *http.Request) {
 		if len(parts) == 0 {
 			// GET     /api/v1/objects/orgID?destination_policy=true
 			// GET     /api/v1/objects/orgID?filters=true
+			// GET     /api/v1/objects/orgID?list_object_type=true
 			if request.Method != http.MethodGet {
 				writer.WriteHeader(http.StatusMethodNotAllowed)
 				return
@@ -437,6 +446,9 @@ func handleObjects(writer http.ResponseWriter, request *http.Request) {
 
 			objectFilterString := request.URL.Query().Get("filters")
 			objectFilter := false
+
+			listObjTypeString := request.URL.Query().Get("list_object_type")
+			listObjType := false
 			var err error
 			if destPolicyString != "" {
 				destPolicy, err = strconv.ParseBool(destPolicyString)
@@ -452,6 +464,14 @@ func handleObjects(writer http.ResponseWriter, request *http.Request) {
 					handleListObjectsWithFilters(orgID, writer, request)
 					return
 				}
+			} else if listObjTypeString != "" {
+				// GET     /api/v1/objects/orgID?list_object_type=true
+				listObjType, err = strconv.ParseBool(listObjTypeString)
+				if err == nil && listObjType {
+					handleListObjectTypes(orgID, writer, request)
+					return
+				}
+
 			}
 			writer.WriteHeader(http.StatusBadRequest)
 			return
@@ -1040,6 +1060,101 @@ func handleListObjectsWithFilters(orgID string, writer http.ResponseWriter, requ
 	}
 }
 
+// swagger:operation GET /api/v1/objects/{orgID}?list_object_type=true handleListObjectTypes
+//
+// Get objects types
+//
+// Get the list of objects types under a given org
+// This is a CSS only API.
+//
+// ---
+//
+// tags:
+// - CSS
+//
+// produces:
+// - application/json
+// - text/plain
+//
+// parameters:
+// - name: orgID
+//   in: path
+//   description: The orgID of the object types to retrieve
+//   required: true
+//   type: string
+// - name: list_object_type
+//   in: query
+//   description: Must be true to indicate that object types are to be retrieved
+//   required: true
+//   type: boolean
+
+//
+// responses:
+//   '200':
+//     description: Objects response
+//     schema:
+//       type: array
+//       items:
+//         type: string
+//   '404':
+//     description: No objects found
+//     schema:
+//       type: string
+//   '500':
+//     description: Failed to retrieve the object types
+//     schema:
+//       type: string
+func handleListObjectTypes(orgID string, writer http.ResponseWriter, request *http.Request) {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In handleListObjectTypes")
+	}
+
+	// We need to check XSS for orgID before sending the value to security component
+	if pathParamValid := validatePathParam(writer, orgID, "", "", "", ""); !pathParamValid {
+		// header and message are set in function validatePathParam
+		return
+	}
+
+	// only allow AuthSyncAdmin, AuthAdmin, AuthUser and AuthNodeUser to access, it is okay if orgID != userOrgID to display "public" object
+	code, userOrgID, userID := security.Authenticate(request)
+	if code == security.AuthFailed || (code != security.AuthSyncAdmin && code != security.AuthAdmin && code != security.AuthUser && code != security.AuthNodeUser) {
+		writer.WriteHeader(http.StatusForbidden)
+		writer.Write(unauthorizedBytes)
+		return
+	}
+
+	var objects []common.MetaData
+	var objTypes []string
+	var err error
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In handleListObjectTypes, get objects types under %s\n", orgID)
+	}
+
+	if objects, err = ListObjectsWithFilters(orgID, nil, "", "", "", int64(0), "", "", "", "", nil, "", nil); err != nil {
+		communications.SendErrorResponse(writer, err, "Failed to fetch the list of objects with given conditions. Error: ", 0)
+	} else {
+		if len(objects) == 0 {
+			writer.WriteHeader(http.StatusNotFound)
+		} else {
+			if accessibleObjects, err := GetAccessibleObjects(code, orgID, userOrgID, userID, objects); err != nil {
+				communications.SendErrorResponse(writer, err, "Failed to get accessible object. Error: ", 0)
+			} else {
+				objTypes = GetListOfObjTypes(accessibleObjects)
+				if data, err := json.MarshalIndent(objTypes, "", "  "); err != nil {
+					communications.SendErrorResponse(writer, err, "Failed to marshal the list of object types. Error: ", 0)
+				} else {
+					writer.Header().Add(contentType, applicationJSON)
+					writer.WriteHeader(http.StatusOK)
+					if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+						log.Error("Failed to write response body, error: " + err.Error())
+					}
+				}
+			}
+		}
+	}
+}
+
 func handleObjectOperation(operation string, orgID string, objectType string, objectID string, writer http.ResponseWriter, request *http.Request) {
 	var canAccessAllObjects bool
 	var code int
@@ -1209,7 +1324,6 @@ func handleObjectConsumed(orgID string, objectType string, objectID string, writ
 //
 // tags:
 // - CSS
-// - ESS
 //
 // produces:
 // - text/plain
@@ -1220,6 +1334,45 @@ func handleObjectConsumed(orgID string, objectType string, objectID string, writ
 //   description: The orgID of the object to confirm its deletion. Present only when working with a CSS, removed from the path when working with an ESS
 //   required: true
 //   type: string
+// - name: objectType
+//   in: path
+//   description: The object type of the object to confirm its deletion
+//   required: true
+//   type: string
+// - name: objectID
+//   in: path
+//   description: The object ID of the object to confirm its deletion
+//   required: true
+//   type: string
+//
+// responses:
+//   '204':
+//     description: Object's deletion confirmed
+//     schema:
+//       type: string
+//   '500':
+//     description: Failed to confirm the object's deletion
+//     schema:
+//       type: string
+
+// ======================================================================================
+
+// swagger:operation PUT /api/v1/objects/{objectType}/{objectID}/deleted handleObjectDeleted
+//
+// The service confirms object deletion.
+//
+// Confirm the deletion of the object of the specified object type and object ID by the application.
+// The application should invoke this API after it completed the actions associated with deleting the object.
+//
+// ---
+//
+// tags:
+// - ESS
+//
+// produces:
+// - text/plain
+//
+// parameters:
 // - name: objectType
 //   in: path
 //   description: The object type of the object to confirm its deletion
@@ -3907,6 +4060,18 @@ func GetAccessibleObjectsDestinationPolicy(code int, orgID string, userOrgID str
 	}
 	// else, accessibleObjects is empty
 	return accessibleObjects, nil
+}
+
+func GetListOfObjTypes(objMetaList []common.MetaData) []string {
+	objTypeList := make([]string, 0)
+
+	for _, objMeta := range objMetaList {
+		if !common.StringListContains(objTypeList, objMeta.ObjectType) {
+			objTypeList = append(objTypeList, objMeta.ObjectType)
+		}
+	}
+
+	return objTypeList
 }
 
 // swagger:model

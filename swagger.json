@@ -592,6 +592,49 @@
         }
       }
     },
+    "/api/v1/objects/{objectType}/{objectID}/deleted": {
+      "put": {
+        "description": "Confirm the deletion of the object of the specified object type and object ID by the application.\nThe application should invoke this API after it completed the actions associated with deleting the object.",
+        "produces": [
+          "text/plain"
+        ],
+        "tags": [
+          "ESS"
+        ],
+        "summary": "The service confirms object deletion.",
+        "operationId": "handleObjectDeleted",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The object type of the object to confirm its deletion",
+            "name": "objectType",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "The object ID of the object to confirm its deletion",
+            "name": "objectID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Object's deletion confirmed",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "500": {
+            "description": "Failed to confirm the object's deletion",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
     "/api/v1/objects/{objectType}/{objectID}/received": {
       "put": {
         "description": "Mark the object of the specified object type and object ID as having been received by the application.\nAfter the object is marked as received it will only be delivered to the application again if specified in the objects request.",
@@ -1238,8 +1281,7 @@
           "text/plain"
         ],
         "tags": [
-          "CSS",
-          "ESS"
+          "CSS"
         ],
         "summary": "The service confirms object deletion.",
         "operationId": "handleObjectDeleted",
@@ -1865,6 +1907,36 @@
             }
           }
         }
+      }
+    },
+    "/api/v1/objects/{orgID}?list_object_type=true": {
+      "get": {
+        "description": "Get the list of objects types under a given org\nThis is a CSS only API.",
+        "produces": [
+          "application/json",
+          "text/plain"
+        ],
+        "tags": [
+          "CSS"
+        ],
+        "summary": "Get objects types",
+        "operationId": "handleListObjectTypes",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "The orgID of the object types to retrieve",
+            "name": "orgID",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "boolean",
+            "description": "Must be true to indicate that object types are to be retrieved",
+            "name": "list_object_type",
+            "in": "query",
+            "required": true
+          }
+        ]
       }
     },
     "/api/v1/objects?destination_policy=true": {
