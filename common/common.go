@@ -268,6 +268,19 @@ func StringListContains(stringList []string, str string) bool {
 	return false
 }
 
+// StringListEqual returns true if sList1 and sList2 contain same strings
+func StringListEqual(sList1 []string, sList2 []string) bool {
+	if len(sList1) != len(sList2) {
+		return false
+	}
+	for _, s1 := range sList1 {
+		if !StringListContains(sList2, s1) {
+			return false
+		}
+	}
+	return true
+}
+
 // GetHash returns the hash object and crypto hash algo name (used by rsa.VerifyPSS() func) of specified hash algorithm
 func GetHash(hashAlgo string) (hash.Hash, crypto.Hash, SyncServiceError) {
 	if hashAlgo == Sha1 {

@@ -813,6 +813,49 @@ func testHandleObjectHelper(nodeType string, storageType string, t *testing.T) {
 		}
 	}
 
+	testsToGetObjectType := []struct {
+		appKey             string // eg: user@org
+		objectOrg          string // retrieve object types of the org
+		expectedHTTPStatus int
+		expectedReturnList []string
+		testID             string
+	}{
+		{"testerAdmin@myorg222", "myorg222", http.StatusOK, []string{"type1", "type2", "type3", "type4", "type5"}, "testGetObjectType1"},
+		{"testerAdmin@myorg222", "publicOrg", http.StatusOK, []string{"type_public"}, "testGetObjectType2"},
+		{"testerUser@myorg222", "myorg222", http.StatusOK, []string{"type2", "type3"}, "testGetObjectType3"},
+		{"testerUser1@myorg222", "myorg222", http.StatusOK, []string{"type1", "type2", "type3", "type4", "type5"}, "testGetObjectType4"},
+	}
+
+	if nodeType == common.CSS {
+		for _, test := range testsToGetObjectType {
+			urlString := fmt.Sprintf("%s?list_object_type=true", test.objectOrg)
+			writer := newAPIServerTestResponseWriter()
+			request, _ := http.NewRequest(http.MethodGet, urlString, nil)
+			request.SetBasicAuth(test.appKey, "")
+
+			handleObjects(writer, request)
+			if writer.statusCode != test.expectedHTTPStatus {
+				t.Errorf("handleObjects of %s returned a status of %d instead of %d for test %s under %s and %s database\n",
+					urlString, writer.statusCode, test.expectedHTTPStatus, test.testID, test.appKey, storageType)
+			}
+			if writer.statusCode == http.StatusOK {
+				decoder := json.NewDecoder(&writer.body)
+				var data []string
+				if err := decoder.Decode(&data); err != nil {
+					t.Errorf("Failed to unmarshall objects. Error: %s\n", err)
+				} else {
+					if !common.StringListEqual(data, test.expectedReturnList) {
+						t.Errorf("Unexpected object types returned for test %s",
+							test.testID)
+					}
+
+				}
+			}
+		}
+
+	}
+
+	// Clean up acl
 	for _, info := range aclInfo {
 		if err := store.RemoveUsersFromACL(info.aclType, "myorg222", info.key, []common.ACLentry{info.user}); err != nil {
 			t.Errorf("Failed to cleanup %s ACL. Error: %s\n", info.aclType, err.Error())

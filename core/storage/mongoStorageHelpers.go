@@ -789,15 +789,21 @@ func (store *MongoStorage) retrieveObjOrDestTypeForGivenACLUserHelper(collection
 		subquery = bson.M{
 			"$elemMatch": bson.M{
 				"aclusertype": aclUserType,
-				"username":    aclUsername,
+				"$or": []bson.M{
+					bson.M{"username": aclUsername},
+					bson.M{"username": "*"},
+				},
 			},
 		}
 	} else {
 		subquery = bson.M{
 			"$elemMatch": bson.M{
 				"aclusertype": aclUserType,
-				"username":    aclUsername,
 				"aclrole":     aclRole,
+				"$or": []bson.M{
+					bson.M{"username": aclUsername},
+					bson.M{"username": "*"},
+				},
 			},
 		}
 

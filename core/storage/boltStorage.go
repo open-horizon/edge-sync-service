@@ -2089,11 +2089,11 @@ func (store *BoltStorage) RetrieveObjOrDestTypeForGivenACLUser(aclType string, o
 		if acl.ACLType == aclType && acl.OrgID == orgID {
 			for _, user := range acl.Users {
 				if aclRole == "" || aclRole == "*" {
-					if aclUserType == user.ACLUserType && aclUsername == user.Username {
+					if aclUserType == user.ACLUserType && (aclUsername == user.Username || "*" == user.Username) {
 						result = append(result, acl.Key)
 					}
 				} else {
-					if aclUserType == user.ACLUserType && aclUsername == user.Username && aclRole == user.ACLRole {
+					if aclUserType == user.ACLUserType && (aclUsername == user.Username || "*" == user.Username) && aclRole == user.ACLRole {
 						result = append(result, acl.Key)
 					}
 				}
