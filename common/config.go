@@ -712,7 +712,7 @@ func SetDefaultConfig(config *Config) {
 	config.ListeningAddress = ""
 	config.SecureListeningPort = 8443
 	config.UnsecureListeningPort = 8080
-	config.LeadershipTimeout = 30
+	config.LeadershipTimeout = 45
 	config.VerifyQueueBufferSize = 500
 	config.AuthenticationHandler = "dummy"
 	config.CSSOnWIoTP = false
