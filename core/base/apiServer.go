@@ -1090,7 +1090,7 @@ func handleObjectOperation(operation string, orgID string, objectType string, ob
 	case "data":
 		switch request.Method {
 		case http.MethodGet:
-			handleObjectGetData(orgID, objectType, objectID, canAccessAllObjects, writer)
+			handleObjectGetData(orgID, objectType, objectID, canAccessAllObjects, writer, request)
 
 		case http.MethodPut:
 			handleObjectPutData(orgID, objectType, objectID, writer, request)
@@ -1990,7 +1990,7 @@ func handleObjectDestinations(orgID string, objectType string, objectID string, 
 //     description: Failed to retrieve the object's data
 //     schema:
 //       type: string
-func handleObjectGetData(orgID string, objectType string, objectID string, canAccessAllObjects bool, writer http.ResponseWriter) {
+func handleObjectGetData(orgID string, objectType string, objectID string, canAccessAllObjects bool, writer http.ResponseWriter, request *http.Request) {
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In handleObjects. Get data %s %s, canAccessAllObjects %t\n", objectType, objectID, canAccessAllObjects)
 	}
@@ -2001,19 +2001,49 @@ func handleObjectGetData(orgID string, objectType string, objectID string, canAc
 			communications.SendErrorResponse(writer, err, "", 0)
 			return
 		} else if metaData == nil || !metaData.Public {
-			communications.SendErrorResponse(writer, nil, fmt.Sprintf("Unauthorized. The object may not exist or be public."), http.StatusForbidden)
+			communications.SendErrorResponse(writer, nil, "Unauthorized. The object may not exist or be public.", http.StatusForbidden)
 			return
 		}
 	}
 
-	if dataReader, err := GetObjectData(orgID, objectType, objectID); err != nil {
+	// Get range from the header "Range:bytes={startOffset}-{endOffset}"
+	var dataReader io.Reader
+	var eof bool
+	var objSize int64
+	startOffset, endOffset, err := common.GetStartAndEndRangeFromRangeHeader(request)
+	if err != nil {
+		communications.SendErrorResponse(writer, err, "", 0)
+	}
+
+	var requestPartialData bool
+	if startOffset == -1 && endOffset == -1 {
+		// Range header not specified, will get all data
+		requestPartialData = false
+		dataReader, err = GetObjectData(orgID, objectType, objectID)
+	} else {
+		requestPartialData = true
+		objSize, dataReader, eof, _, err = GetObjectDataByChunk(orgID, objectType, objectID, startOffset, endOffset)
+	}
+
+	if err != nil {
 		communications.SendErrorResponse(writer, err, "", 0)
 	} else {
 		if dataReader == nil {
 			writer.WriteHeader(http.StatusNotFound)
 		} else {
 			writer.Header().Add(contentType, "application/octet-stream")
-			writer.WriteHeader(http.StatusOK)
+			if requestPartialData {
+				if eof {
+					endOffset = objSize - 1
+				}
+				writer.Header().Add("Content-Range", fmt.Sprintf("bytes %d-%d/%d", startOffset, endOffset, objSize))
+			}
+
+			if requestPartialData && !eof {
+				writer.WriteHeader(http.StatusPartialContent)
+			} else {
+				writer.WriteHeader(http.StatusOK)
+			}
 			if _, err := io.Copy(writer, dataReader); err != nil {
 				communications.SendErrorResponse(writer, err, "", 0)
 			}
