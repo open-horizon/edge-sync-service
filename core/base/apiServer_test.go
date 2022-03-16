@@ -755,30 +755,68 @@ func testHandleObjectHelper(nodeType string, storageType string, t *testing.T) {
 		handleObjects(writer, request)
 		if writer.statusCode == test.expectedHTTPStatus {
 			if test.data != nil {
-				if common.Configuration.NodeType == common.CSS {
-					urlString = test.orgID + "/"
-				} else {
-					urlString = ""
-				}
-				urlString = urlString + test.objectType + "/" + test.objectID + "/data"
-				var buffer bytes.Buffer
-				if test.method == http.MethodPut {
-					buffer.Write(test.data)
-				}
-				writer := newAPIServerTestResponseWriter()
-				request, _ := http.NewRequest(test.method, urlString, ioutil.NopCloser(&buffer))
-				request.SetBasicAuth(test.appKey, "")
-
-				handleObjects(writer, request)
-				if writer.statusCode == test.expectedHTTPStatus {
-					if test.method == http.MethodGet && test.expectedHTTPStatus == http.StatusOK {
-						if bytes.Compare(test.data, writer.body.Bytes()) != 0 {
-							t.Errorf("handleObjects of %s returned \"%s\" instead of \"%s\"\n", urlString, string(writer.body.Bytes()), string(test.data))
-						}
+				if test.method == http.MethodGet && test.objectType == "type1" && test.expectedHTTPStatus == http.StatusOK {
+					if common.Configuration.NodeType == common.CSS {
+						urlString = test.orgID + "/"
+					} else {
+						urlString = ""
 					}
-				} else if nodeType != common.ESS && test.method != "destinations" {
-					t.Errorf("handleObjects of %s returned a status of %d instead of %d for test %d and %s\n", urlString,
-						writer.statusCode, test.expectedHTTPStatus, test.testID, nodeType)
+					urlString = urlString + test.objectType + "/" + test.objectID + "/data"
+					writer := newAPIServerTestResponseWriter()
+					request, _ := http.NewRequest(test.method, urlString, nil)
+					request.SetBasicAuth(test.appKey, "")
+
+					handleObjects(writer, request)
+					if test.method == http.MethodGet && writer.statusCode == http.StatusOK {
+						if !bytes.Equal(test.data, writer.body.Bytes()) {
+							t.Errorf("handleObjects of %s returned \"%s\" instead of \"%s\"\n", urlString, writer.body.String(), string(test.data))
+						}
+					} else {
+						t.Errorf("handleObjects of %s returned a status of %d instead of %d for test %d and %s\n", urlString,
+							writer.statusCode, test.expectedHTTPStatus, test.testID, nodeType)
+					}
+
+					writer = newAPIServerTestResponseWriter()
+					request, _ = http.NewRequest(test.method, urlString, nil)
+					request.SetBasicAuth(test.appKey, "")
+					request.Header.Add("Range", "bytes=0-1")
+
+					handleObjects(writer, request)
+					if writer.statusCode == http.StatusPartialContent {
+						if !bytes.Equal(test.data[0:2], writer.body.Bytes()) {
+							t.Errorf("handleObjects of %s returned \"%s\" instead of \"%s\" for storage %s\n", urlString, writer.body.String(), string(test.data[0:2]), storageType)
+						}
+					} else {
+						t.Errorf("handleObjects of %s returned a status of %d instead of %d for test %d and %s\n", urlString,
+							writer.statusCode, test.expectedHTTPStatus, test.testID, nodeType)
+					}
+				} else {
+					// if test.method == http.MethodPut || test.objectType != "type1"
+					if common.Configuration.NodeType == common.CSS {
+						urlString = test.orgID + "/"
+					} else {
+						urlString = ""
+					}
+					urlString = urlString + test.objectType + "/" + test.objectID + "/data"
+					var buffer bytes.Buffer
+					if test.method == http.MethodPut {
+						buffer.Write(test.data)
+					}
+					writer := newAPIServerTestResponseWriter()
+					request, _ := http.NewRequest(test.method, urlString, ioutil.NopCloser(&buffer))
+					request.SetBasicAuth(test.appKey, "")
+
+					handleObjects(writer, request)
+					if writer.statusCode == test.expectedHTTPStatus {
+						if test.method == http.MethodGet && test.expectedHTTPStatus == http.StatusOK {
+							if !bytes.Equal(test.data, writer.body.Bytes()) {
+								t.Errorf("handleObjects of %s returned \"%s\" instead of \"%s\"\n", urlString, writer.body.String(), string(test.data))
+							}
+						}
+					} else if nodeType != common.ESS && test.method != "destinations" {
+						t.Errorf("handleObjects of %s returned a status of %d instead of %d for test %d and %s\n", urlString,
+							writer.statusCode, test.expectedHTTPStatus, test.testID, nodeType)
+					}
 				}
 			} else if test.objectType == "testESS" {
 				// only for ESS

@@ -553,6 +553,53 @@ func GetObjectData(orgID string, objectType string, objectID string) (io.Reader,
 	return store.RetrieveObjectData(orgID, objectType, objectID, false)
 }
 
+// GetObjectDataByChunk delivers object partial data to the app
+// Call the storage module to get the object's data within range and send it to the app
+func GetObjectDataByChunk(orgID string, objectType string, objectID string, startOffset int64, endOffset int64) (int64, io.Reader, bool, int, common.SyncServiceError) {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In GetObjectDataByChunk. Get data %s %s in range %d-%d\n", objectType, objectID, startOffset, endOffset)
+	}
+
+	common.HealthStatus.ClientRequestReceived()
+
+	lockIndex := common.HashStrings(orgID, objectType, objectID)
+	apiObjectLocks.RLock(lockIndex)
+	defer apiObjectLocks.RUnlock(lockIndex)
+
+	dataLength := int(endOffset - startOffset + 1)
+	metaData, status, err := store.RetrieveObjectAndStatus(orgID, objectType, objectID)
+	if err != nil {
+		return 0, nil, false, 0, err
+	}
+	if metaData == nil || status == common.NotReadyToSend || status == common.Verifying || status == common.VerificationFailed || status == common.ReceiverVerifying || status == common.ReceiverVerificationFailed || status == common.PartiallyReceived {
+		return 0, nil, false, 0, nil
+	}
+
+	var dataChunk []byte
+	var eof bool
+	var nofBytes int
+	if metaData.DestinationDataURI != "" && status == common.CompletelyReceived {
+		dataChunk, eof, nofBytes, err = dataURI.GetDataChunk(metaData.DestinationDataURI, dataLength, startOffset)
+	} else if metaData.SourceDataURI != "" && status == common.ReadyToSend {
+		dataChunk, eof, nofBytes, err = dataURI.GetDataChunk(metaData.SourceDataURI, dataLength, startOffset)
+	} else {
+		dataChunk, eof, nofBytes, err = store.ReadObjectData(orgID, objectType, objectID, dataLength, startOffset)
+	}
+
+	if err != nil {
+		return 0, nil, eof, nofBytes, err
+	}
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In GetObjectDataByChunk. Get data %s %s in range %d-%d, eof: %t, nofBytes: %d\n", objectType, objectID, startOffset, endOffset, eof, nofBytes)
+	}
+
+	if len(dataChunk) == 0 {
+		return metaData.ObjectSize, nil, eof, nofBytes, nil
+	}
+
+	return metaData.ObjectSize, bytes.NewReader(dataChunk), eof, nofBytes, nil
+}
+
 // GetRemovedDestinationPolicyServicesFromESS get the removedDestinationPolicyServices list
 // Call the storage module to get the object's removedDestinationPolicyServices
 func GetRemovedDestinationPolicyServicesFromESS(orgID string, objectType string, objectID string) ([]common.ServiceID, common.SyncServiceError) {
