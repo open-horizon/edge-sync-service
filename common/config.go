@@ -117,6 +117,10 @@ type Config struct {
 	//  For the ESS, default value is 2
 	ObjectQueueBufferSize uint64 `env:"OBJECT_QUEUE_BUFFER_SIZE"`
 
+	// Buffer size of Object Queue to verify object data
+	//  Default size is 500
+	VerifyQueueBufferSize uint64 `env:"VERIFY_QUEUE_BUFFER_SIZE"`
+
 	// CommunicationProtocol is a comma separated list of protocols to be used for communication between CSS and ESS
 	//  The elements of the list can be 'http', 'mqtt', and 'wiotp'
 	//  wiotp indicates MQTT communication via the Watson IoT Platform and mqtt indicates direct MQTT communication to a broker
@@ -204,6 +208,14 @@ type Config struct {
 	// default is 120s
 	HTTPESSClientTimeout int `env:"HTTPESSClientTimeout"`
 
+	// HTTPESSObjClientTimeout is to specify the http client timeout for downloading models (or objects) in seconds for ESS
+	// default is 600s
+	HTTPESSObjClientTimeout int `env:"HTTPESSObjClientTimeout"`
+
+	// HTTPCSSObjDownloadConcurrencyMultiplier specifies a number to multiple the number of threads by to set allowed concurrent downloads per CSS
+	// default is 1
+	HTTPCSSObjDownloadConcurrencyMultiplier int `env:"HTTPCSSObjDownloadConcurrencyMultiplier"`
+
 	// LogLevel specifies the logging level in string format
 	LogLevel string `env:"LOG_LEVEL"`
 
@@ -256,6 +268,10 @@ type Config struct {
 	// CSS only parameter, ignored on ESS
 	// A value of zero means ESSs are never removed
 	RemoveESSRegistrationTime int16 `env:"REMOVE_ESS_REGISTRATION_TIME"`
+
+	// EnableDataChunk specifies whether or not to transfer data in chunks between CSS and ESS
+	// It is always true for MQTT
+	EnableDataChunk bool `env:"ENABLE_DATA_CHUNK"`
 
 	// Maximum size of data that can be sent in one message
 	MaxDataChunkSize int `env:"MAX_DATA_CHUNK_SIZE"`
@@ -493,6 +509,7 @@ func ValidateConfig() error {
 		}
 		if mqtt {
 			Configuration.CommunicationProtocol = MQTTProtocol
+			Configuration.EnableDataChunk = true
 		} else if wiotp {
 			Configuration.CommunicationProtocol = WIoTP
 		} else {
@@ -505,6 +522,7 @@ func ValidateConfig() error {
 		if http {
 			if mqtt {
 				Configuration.CommunicationProtocol = HybridMQTT
+				Configuration.EnableDataChunk = true
 			} else if wiotp {
 				Configuration.CommunicationProtocol = HybridWIoTP
 			} else {
@@ -513,6 +531,7 @@ func ValidateConfig() error {
 		} else {
 			if mqtt {
 				Configuration.CommunicationProtocol = MQTTProtocol
+				Configuration.EnableDataChunk = true
 			} else if wiotp {
 				Configuration.CommunicationProtocol = WIoTP
 			}
@@ -675,6 +694,10 @@ func ValidateConfig() error {
 		}
 	}
 
+	if Configuration.VerifyQueueBufferSize == 0 {
+		Configuration.VerifyQueueBufferSize = 500
+	}
+
 	return nil
 }
 
@@ -689,7 +712,8 @@ func SetDefaultConfig(config *Config) {
 	config.ListeningAddress = ""
 	config.SecureListeningPort = 8443
 	config.UnsecureListeningPort = 8080
-	config.LeadershipTimeout = 30
+	config.LeadershipTimeout = 45
+	config.VerifyQueueBufferSize = 500
 	config.AuthenticationHandler = "dummy"
 	config.CSSOnWIoTP = false
 	config.UsingEdgeConnector = false
@@ -713,7 +737,8 @@ func SetDefaultConfig(config *Config) {
 	config.ESSCallSPIRetryInterval = 2
 	config.ESSPingInterval = 1
 	config.RemoveESSRegistrationTime = 30
-	config.MaxDataChunkSize = 120 * 1024
+	config.EnableDataChunk = true
+	config.MaxDataChunkSize = 5120 * 1024
 	config.MaxInflightChunks = 1
 	config.MongoAddressCsv = "localhost:27017"
 	config.MongoDbName = "d_edge"
@@ -733,6 +758,8 @@ func SetDefaultConfig(config *Config) {
 	config.HTTPCSSUseSSL = false
 	config.HTTPCSSCACertificate = ""
 	config.HTTPESSClientTimeout = 120
+	config.HTTPESSObjClientTimeout = 600
+	config.HTTPCSSObjDownloadConcurrencyMultiplier = 1
 	config.MessagingGroupCacheExpiration = 60
 	config.ShutdownQuiesceTime = 60
 	config.ESSConsumedObjectsKept = 1000

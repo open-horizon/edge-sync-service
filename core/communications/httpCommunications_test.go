@@ -40,7 +40,7 @@ func TestHTTPCommUpdatedObjects(t *testing.T) {
 	}
 
 	testObjects := []httpTestObjectInfo{
-		{common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg000", DestID: "dev1", DestType: "httpDevice"},
+		{common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorg000", DestID: "dev1", DestType: "httpDevice", ObjectSize: int64(len([]byte("plokmijnuhbygv")))},
 			common.ReadyToSend, []byte("plokmijnuhbygv")},
 		{common.MetaData{ObjectID: "2", ObjectType: "type1", DestOrgID: "myorg000", DestID: "dev1", DestType: "httpDevice",
 			Deleted: true},
@@ -217,6 +217,7 @@ func TestHTTPCommEssSendObjects(t *testing.T) {
 		t.Errorf("Failed to store destination. Error: %s", err.Error())
 	}
 
+	common.Configuration.CommunicationProtocol = common.HTTPProtocol
 	for _, testObject := range testObjects {
 		writer := newHTTPCommTestResponseWriter()
 		theURL := testObject.metaData.DestOrgID + "/" + testObject.metaData.ObjectType + "/" +
@@ -305,9 +306,9 @@ func TestEssHTTPComm(t *testing.T) {
 	}
 
 	ctx.pollPayload = []updateMessage{
-		{common.Update, common.MetaData{ObjectID: "1", ObjectType: "type2", DestOrgID: "myorg000", NoData: true}},
+		{common.Update, common.MetaData{ObjectID: "1", ObjectType: "type2", DestOrgID: "myorg000", NoData: true, ChunkSize: 2, ObjectSize: int64(len([]byte("wsxrfvyhnplijnygv")))}},
 		{common.Delete, common.MetaData{ObjectID: "2", ObjectType: "type2", DestOrgID: "myorg000", NoData: true}},
-		{common.Consumed, common.MetaData{ObjectID: "3", ObjectType: "type2", DestOrgID: "myorg000", NoData: true, InstanceID: 1}},
+		{common.Consumed, common.MetaData{ObjectID: "3", ObjectType: "type2", DestOrgID: "myorg000", NoData: false, InstanceID: 1, ChunkSize: 2, ObjectSize: int64(len([]byte("1234567890abcdefghijkl")))}},
 		{common.Deleted, common.MetaData{ObjectID: "4", ObjectType: "type2", DestOrgID: "myorg000", NoData: true, InstanceID: 1, Deleted: true}},
 	}
 	statusAfterPoll := []string{common.CompletelyReceived, common.ObjDeleted, common.ConsumedByDest, common.ObjDeleted}
@@ -320,9 +321,22 @@ func TestEssHTTPComm(t *testing.T) {
 	Store.UpdateNotificationRecord(notification)
 
 	ctx.subTest = "pushData"
-	err = httpComm.pushData(&ctx.pollPayload[2].MetaData)
+	common.Configuration.EnableDataChunk = false
+	err = httpComm.PushData(&ctx.pollPayload[2].MetaData, 0)
 	if err != nil {
 		t.Error(err)
+	}
+
+	ctx.subTest = "pushDataByChunk"
+	common.Configuration.EnableDataChunk = true
+	common.Configuration.MaxDataChunkSize = 2
+	offset := int64(0)
+	for offset < ctx.pollPayload[2].MetaData.ObjectSize {
+		err = httpComm.PushData(&ctx.pollPayload[2].MetaData, offset)
+		if err != nil {
+			t.Error(err)
+		}
+		offset += int64(metaData.ChunkSize)
 	}
 
 	metaData = ctx.pollPayload[3].MetaData
@@ -346,9 +360,22 @@ func TestEssHTTPComm(t *testing.T) {
 	}
 
 	ctx.subTest = "getData"
+	common.Configuration.EnableDataChunk = false
 	err = httpComm.GetData(ctx.pollPayload[0].MetaData, 0)
 	if err != nil {
 		t.Error(err)
+	}
+
+	ctx.subTest = "getDataByChunk"
+	common.Configuration.EnableDataChunk = true
+	common.Configuration.MaxDataChunkSize = 2
+	offset = int64(0)
+	for offset < ctx.pollPayload[0].MetaData.ObjectSize {
+		err = httpComm.GetData(ctx.pollPayload[0].MetaData, offset)
+		if err != nil {
+			t.Error(err)
+		}
+		offset += int64(ctx.pollPayload[0].MetaData.ChunkSize)
 	}
 
 	ctx.subTest = "notification"
@@ -539,12 +566,36 @@ func (ctx *testEssCommContext) testHandleObjects(writer http.ResponseWriter, req
 			// This is "received" notification sent from httpComm.GetData
 			writer.WriteHeader(http.StatusNoContent)
 		}
+	case "getDataByChunk":
+		if request.Method == http.MethodGet {
+			startOffset, endOffset, _ := common.GetStartAndEndRangeFromRangeHeader(request)
+			if startOffset == -1 && endOffset == -1 {
+				writer.WriteHeader(http.StatusGatewayTimeout)
+			} else {
+				slice := []byte("wsxrfvyhnplijnygv")
+				returnContent := slice[startOffset:(endOffset + 1)]
+				writer.WriteHeader(http.StatusPartialContent)
+				writer.Header().Add("Content-Length", strconv.Itoa(len(returnContent)))
+				writer.Write(returnContent)
+			}
+		} else {
+			// This is "received" notification sent from httpComm.GetData
+			writer.WriteHeader(http.StatusNoContent)
+		}
 
 	case "notification":
 		writer.WriteHeader(http.StatusNoContent)
 
 	case "pushData":
 		writer.WriteHeader(http.StatusNoContent)
+
+	case "pushDataByChunk":
+		_, startOffset, endOffset, _ := common.GetStartAndEndRangeFromContentRangeHeader(request)
+		if startOffset == -1 && endOffset == -1 {
+			writer.WriteHeader(http.StatusGatewayTimeout)
+		} else {
+			writer.WriteHeader(http.StatusNoContent)
+		}
 
 	case "resend":
 		writer.WriteHeader(http.StatusNoContent)
@@ -561,6 +612,7 @@ func testHTTPCommSetup(nodeType string) string {
 	common.Running = true
 	time.Sleep(100 * time.Millisecond) // Wait a bit
 	common.InitObjectLocks()
+	common.InitObjectDownloadSemaphore()
 	security.SetAuthentication(&security.TestAuthenticate{})
 	security.Start()
 

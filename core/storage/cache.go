@@ -80,14 +80,18 @@ func (store *Cache) RemoveObjectTempData(orgID string, objectType string, object
 	return store.Store.RemoveObjectTempData(orgID, objectType, objectID)
 }
 
-func (store *Cache) RetrieveTempObjectData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
-	return store.Store.RetrieveTempObjectData(orgID, objectType, objectID)
+func (store *Cache) RetrieveObjectTempData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
+	return store.Store.RetrieveObjectTempData(orgID, objectType, objectID)
 }
 
 // AppendObjectData appends a chunk of data to the object's data
 func (store *Cache) AppendObjectData(orgID string, objectType string, objectID string, dataReader io.Reader, dataLength uint32,
-	offset int64, total int64, isFirstChunk bool, isLastChunk bool) common.SyncServiceError {
-	return store.Store.AppendObjectData(orgID, objectType, objectID, dataReader, dataLength, offset, total, isFirstChunk, isLastChunk)
+	offset int64, total int64, isFirstChunk bool, isLastChunk bool, isTempData bool) (bool, common.SyncServiceError) {
+	return store.Store.AppendObjectData(orgID, objectType, objectID, dataReader, dataLength, offset, total, isFirstChunk, isLastChunk, isTempData)
+}
+
+func (store *Cache) HandleObjectInfoForLastDataChunk(orgID string, objectType string, objectID string, isTempData bool, dataSize int64) (bool, common.SyncServiceError) {
+	return store.Store.HandleObjectInfoForLastDataChunk(orgID, objectType, objectID, isTempData, dataSize)
 }
 
 // UpdateObjectStatus updates an object's status
@@ -151,8 +155,8 @@ func (store *Cache) RetrieveObjectsWithDestinationPolicyUpdatedSince(orgID strin
 }
 
 // RetrieveObjectsWithFilters returns the list of all othe objects that meet the given conditions
-func (store *Cache) RetrieveObjectsWithFilters(orgID string, destinationPolicy *bool, dpServiceOrgID string, dpServiceName string, dpPropertyName string, since int64, objectType string, objectID string, destinationType string, destinationID string, noData *bool, expirationTimeBefore string) ([]common.MetaData, common.SyncServiceError) {
-	return store.Store.RetrieveObjectsWithFilters(orgID, destinationPolicy, dpServiceOrgID, dpServiceName, dpPropertyName, since, objectType, objectID, destinationType, destinationID, noData, expirationTimeBefore)
+func (store *Cache) RetrieveObjectsWithFilters(orgID string, destinationPolicy *bool, dpServiceOrgID string, dpServiceName string, dpPropertyName string, since int64, objectType string, objectID string, destinationType string, destinationID string, noData *bool, expirationTimeBefore string, deleted *bool) ([]common.MetaData, common.SyncServiceError) {
+	return store.Store.RetrieveObjectsWithFilters(orgID, destinationPolicy, dpServiceOrgID, dpServiceName, dpPropertyName, since, objectType, objectID, destinationType, destinationID, noData, expirationTimeBefore, deleted)
 }
 
 // RetrieveAllObjects returns the list of all the objects of the specified type
@@ -181,8 +185,8 @@ func (store *Cache) RetrieveObjectAndStatus(orgID string, objectType string, obj
 }
 
 // RetrieveObjectData returns the object data with the specified parameters
-func (store *Cache) RetrieveObjectData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
-	return store.Store.RetrieveObjectData(orgID, objectType, objectID)
+func (store *Cache) RetrieveObjectData(orgID string, objectType string, objectID string, isTempData bool) (io.Reader, common.SyncServiceError) {
+	return store.Store.RetrieveObjectData(orgID, objectType, objectID, isTempData)
 }
 
 // ReadObjectData returns the object data with the specified parameters
@@ -221,8 +225,8 @@ func (store *Cache) DeleteStoredObject(orgID string, objectType string, objectID
 }
 
 // DeleteStoredData deletes the object's data
-func (store *Cache) DeleteStoredData(orgID string, objectType string, objectID string) common.SyncServiceError {
-	return store.Store.DeleteStoredData(orgID, objectType, objectID)
+func (store *Cache) DeleteStoredData(orgID string, objectType string, objectID string, isTempData bool) common.SyncServiceError {
+	return store.Store.DeleteStoredData(orgID, objectType, objectID, isTempData)
 }
 
 // CleanObjects removes the objects received from the other side.

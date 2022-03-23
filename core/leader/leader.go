@@ -64,6 +64,10 @@ func initializeLeadership() {
 	}
 }
 
+func GetLeaderID() string {
+	return leaderID.String()
+}
+
 // CheckIfLeader checks if the current process is the leader
 func CheckIfLeader() bool {
 	if common.Configuration.NodeType != common.CSS || common.Configuration.StorageProvider != common.Mongo {
@@ -91,33 +95,41 @@ func SetUnsubcribeCallback(callback func() common.SyncServiceError) {
 }
 
 func startLeadershipPeriodicUpdate() {
-	leaderTicker = time.NewTicker(time.Second * time.Duration(common.Configuration.LeadershipTimeout) / 5)
+	leaderTicker = time.NewTicker(time.Second * time.Duration(common.Configuration.LeadershipTimeout) / 6)
 	go func() {
 		common.GoRoutineStarted()
 		keepRunning := true
+		leaderFailureLimit := 3
+		leaderFailureCnt := 0
 		for keepRunning {
 			select {
 			case <-leaderTicker.C:
 				if isLeader {
 					ok, err := store.LeaderPeriodicUpdate(leaderID.String())
 					if err != nil || !ok {
-						isLeader = false
-						if changeLeadership != nil {
-							changeLeadership(false)
-						}
-						if err != nil {
-							if unsubscribe != nil {
-								unsubscribe()
+
+						leaderFailureCnt++
+						if leaderFailureCnt >= leaderFailureLimit {
+							isLeader = false
+							leaderFailureCnt = 0
+							if changeLeadership != nil {
+								changeLeadership(false)
 							}
-							if log.IsLogging(logger.ERROR) {
-								log.Error("%s\n", err)
+							if err != nil {
+								if unsubscribe != nil {
+									unsubscribe()
+								}
+								if log.IsLogging(logger.ERROR) {
+									log.Error("%s\n", err)
+								}
 							}
-						}
-						if trace.IsLogging(logger.TRACE) {
-							trace.Trace("Have lost the leadership")
+							if trace.IsLogging(logger.TRACE) {
+								trace.Trace("Have lost the leadership")
+							}
 						}
 					} else {
 						lastTimestamp = time.Now()
+						leaderFailureCnt = 0
 					}
 				} else {
 					_, heartbeatTimeout, lastHeartbeatTS, version, err := store.RetrieveLeader()

@@ -16,6 +16,7 @@ import (
 	"github.com/open-horizon/edge-sync-service/core/communications"
 	"github.com/open-horizon/edge-sync-service/core/dataURI"
 	"github.com/open-horizon/edge-sync-service/core/dataVerifier"
+	"github.com/open-horizon/edge-sync-service/core/leader"
 	"github.com/open-horizon/edge-sync-service/core/storage"
 	"github.com/open-horizon/edge-utilities/logger"
 	"github.com/open-horizon/edge-utilities/logger/log"
@@ -227,73 +228,124 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 		metaData.ExpectedConsumers = math.MaxInt32
 	}
 
+	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+	apiObjectLocks.Lock(lockIndex)
+	common.ObjectLocks.Lock(lockIndex)
+
+	existingObject, existingObjStatus, _ := store.RetrieveObjectAndStatus(orgID, objectType, objectID)
+	if existingObjStatus != "" && existingObjStatus != common.ReadyToSend && existingObjStatus != common.NotReadyToSend && existingObjStatus != common.Verifying && existingObjStatus != common.VerificationFailed {
+		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
+		return &common.InvalidRequest{Message: "Can't update object of the receiving side"}
+	}
+
 	// Store the object in the storage module
 	status := common.NotReadyToSend
-	if data != nil || metaData.Link != "" || metaData.NoData || metaData.SourceDataURI != "" {
+	if metaData.Link != "" || metaData.NoData || metaData.SourceDataURI != "" {
 		status = common.ReadyToSend
+		if metaData.NoData {
+			data = nil
+			metaData.Link = ""
+			metaData.SourceDataURI = ""
+			metaData.PublicKey = ""
+			metaData.Signature = ""
+		}
 	} else if metaData.MetaOnly {
-		reader, err := store.RetrieveObjectData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+		// data is nil
+		data = nil
+		reader, err := store.RetrieveObjectData(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, false)
 		if err != nil {
+			common.ObjectLocks.Unlock(lockIndex)
+			apiObjectLocks.Unlock(lockIndex)
 			return err
 		}
 		if reader != nil {
 			status = common.ReadyToSend
 			store.CloseDataReader(reader)
 		}
+		// for MetaOnly, we will re-use the checksum fields
+		if existingObject != nil {
+			metaData.HashAlgorithm = existingObject.HashAlgorithm
+			metaData.PublicKey = existingObject.PublicKey
+			metaData.Signature = existingObject.Signature
+		}
+		// If no data in the database, then status is notReady (data == nil, status == notReady)
 	}
 
-	lockIndex := common.HashStrings(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
-	apiObjectLocks.Lock(lockIndex)
-	common.ObjectLocks.Lock(lockIndex)
+	metaData.ChunkSize = common.Configuration.MaxDataChunkSize
+	if data != nil {
+		metaData.ObjectSize = int64(len(data))
+		if !common.NeedDataVerification(metaData) {
+			status = common.ReadyToSend
+		}
+	}
 
-	if metaData.NoData {
-		data = nil
-		metaData.Link = ""
-		metaData.SourceDataURI = ""
-		metaData.PublicKey = ""
-		metaData.Signature = ""
-	} else if data != nil {
-		// data signature verification if metadata has both publicKey and signature
-		// data is nil for metaOnly object. Meta-only object will not apply data verification
-		if common.IsValidHashAlgorithm(metaData.HashAlgorithm) && metaData.PublicKey != "" && metaData.Signature != "" {
-			// will no store data if object metadata not exist
-			dataReader := bytes.NewReader(data)
-			dataVf := dataVerifier.NewDataVerifier(metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature)
-			if success, err := dataVf.VerifyDataSignature(dataReader, orgID, objectType, objectID, ""); !success || err != nil {
-				if trace.IsLogging(logger.ERROR) {
-					trace.Error("Failed to verify data for object %s %s, remove temp data\n", objectType, objectID)
+	// Verify
+	// data signature verification if metadata has both publicKey and signature
+	// data is nil for metaOnly object. Meta-only object will not apply data verification
+	var deletedDestinations []common.StoreDestinationStatus
+	var err common.SyncServiceError
+	if data != nil && common.NeedDataVerification(metaData) {
+		// Store metadata, with correct verified status
+		deletedDestinations, err = store.StoreObject(metaData, nil, status)
+		if err != nil {
+			common.ObjectLocks.Unlock(lockIndex)
+			apiObjectLocks.Unlock(lockIndex)
+			return err
+		}
+
+		// Set object status from "notReady" to "verifying"
+		status = common.Verifying
+		if err = store.UpdateObjectStatus(orgID, objectType, objectID, status); err != nil {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("Failed to update object status to %s for object %s/%s/%s", status, orgID, objectType, objectID)
+			}
+			common.ObjectLocks.Unlock(lockIndex)
+			apiObjectLocks.Unlock(lockIndex)
+			return err
+		}
+		// will no store data if object metadata not exist
+		dataReader := bytes.NewReader(data)
+		dataVf := dataVerifier.NewDataVerifier(metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature)
+		if success, err := dataVf.VerifyDataSignature(dataReader, orgID, objectType, objectID, ""); !success || err != nil {
+			if log.IsLogging(logger.ERROR) && err != nil {
+				log.Error("Failed to verify data for object %s %s, Error: %s\n", objectType, objectID, err.Error())
+			}
+
+			dataVf.RemoveUnverifiedData(metaData)
+			status = common.VerificationFailed
+			if updateStatusErr := store.UpdateObjectStatus(orgID, objectType, objectID, status); updateStatusErr != nil && log.IsLogging(logger.ERROR) {
+				log.Error("Failed to update object status to %s for %s %s, Error: %s\n", status, objectType, objectID, updateStatusErr.Error())
+			}
+
+			common.ObjectLocks.Unlock(lockIndex)
+			apiObjectLocks.Unlock(lockIndex)
+			return err
+		} else {
+			// verified, update object status to "ready"
+			status = common.ReadyToSend
+			if err = store.UpdateObjectStatus(orgID, objectType, objectID, status); err != nil {
+				if log.IsLogging(logger.ERROR) {
+					log.Error("Failed to update object status to %s for object %s/%s/%s", status, orgID, objectType, objectID)
 				}
-				dataVf.RemoveTempData(orgID, objectType, objectID, "")
-
 				common.ObjectLocks.Unlock(lockIndex)
 				apiObjectLocks.Unlock(lockIndex)
 				return err
 			}
-			dataVf.RemoveTempData(orgID, objectType, objectID, "")
-
 		}
-
-		metaData.ObjectSize = int64(len(data))
-	}
-	metaData.ChunkSize = common.Configuration.MaxDataChunkSize
-
-	_, existingObjStatus, _ := store.RetrieveObjectAndStatus(orgID, objectType, objectID)
-	if existingObjStatus != "" && existingObjStatus != common.ReadyToSend && existingObjStatus != common.NotReadyToSend {
-		common.ObjectLocks.Unlock(lockIndex)
-		apiObjectLocks.Unlock(lockIndex)
-		return &common.InvalidRequest{Message: "Can't update object of the receiving side"}
-	}
-
-	deletedDestinations, err := store.StoreObject(metaData, data, status)
-	if err != nil {
-		common.ObjectLocks.Unlock(lockIndex)
-		apiObjectLocks.Unlock(lockIndex)
-		return err
+	} else {
+		// Store metadata and data, with correct verified status
+		deletedDestinations, err = store.StoreObject(metaData, data, status)
+		if err != nil {
+			common.ObjectLocks.Unlock(lockIndex)
+			apiObjectLocks.Unlock(lockIndex)
+			return err
+		}
 	}
 
 	store.DeleteNotificationRecords(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, "", "")
 
-	if status == common.NotReadyToSend || metaData.Inactive {
+	if status == common.NotReadyToSend || status == common.VerificationFailed || status == common.Verifying || metaData.Inactive {
 		common.ObjectLocks.Unlock(lockIndex)
 		apiObjectLocks.Unlock(lockIndex)
 		return nil
@@ -301,6 +353,7 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 
 	// StoreObject increments the instance id, we need to fetch the updated meta data
 	updatedMetaData, err := store.RetrieveObject(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
+
 	if err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
 		apiObjectLocks.Unlock(lockIndex)
@@ -424,13 +477,13 @@ func ListObjectsWithDestinationPolicyUpdatedSince(orgID string, since int64) ([]
 }
 
 // ListObjectsWithFilters provides a list of objects that satisfy the given conditions
-func ListObjectsWithFilters(orgID string, destinationPolicy *bool, dpServiceOrgID string, dpServiceName string, dpPropertyName string, since int64, objectType string, objectID string, destinationType string, destinationID string, noData *bool, expirationTimeBefore string) ([]common.MetaData, common.SyncServiceError) {
+func ListObjectsWithFilters(orgID string, destinationPolicy *bool, dpServiceOrgID string, dpServiceName string, dpPropertyName string, since int64, objectType string, objectID string, destinationType string, destinationID string, noData *bool, expirationTimeBefore string, deleted *bool) ([]common.MetaData, common.SyncServiceError) {
 	apiLock.RLock()
 	defer apiLock.RUnlock()
 
 	common.HealthStatus.ClientRequestReceived()
 
-	objects, err := store.RetrieveObjectsWithFilters(orgID, destinationPolicy, dpServiceOrgID, dpServiceName, dpPropertyName, since, objectType, objectID, destinationType, destinationID, noData, expirationTimeBefore)
+	objects, err := store.RetrieveObjectsWithFilters(orgID, destinationPolicy, dpServiceOrgID, dpServiceName, dpPropertyName, since, objectType, objectID, destinationType, destinationID, noData, expirationTimeBefore, deleted)
 
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In ListObjectsWithFilters. Get %s. Returned %d objects\n", orgID, len(objects))
@@ -488,16 +541,16 @@ func GetObjectData(orgID string, objectType string, objectID string) (io.Reader,
 	if err != nil {
 		return nil, err
 	}
-	if metaData == nil || status == common.NotReadyToSend || status == common.PartiallyReceived {
+	if metaData == nil || status == common.NotReadyToSend || status == common.Verifying || status == common.VerificationFailed || status == common.ReceiverVerifying || status == common.ReceiverVerificationFailed || status == common.PartiallyReceived {
 		return nil, nil
 	}
 	if metaData.DestinationDataURI != "" && status == common.CompletelyReceived {
-		return dataURI.GetData(metaData.DestinationDataURI)
+		return dataURI.GetData(metaData.DestinationDataURI, false)
 	}
 	if metaData.SourceDataURI != "" && status == common.ReadyToSend {
-		return dataURI.GetData(metaData.SourceDataURI)
+		return dataURI.GetData(metaData.SourceDataURI, false)
 	}
-	return store.RetrieveObjectData(orgID, objectType, objectID)
+	return store.RetrieveObjectData(orgID, objectType, objectID, false)
 }
 
 // GetRemovedDestinationPolicyServicesFromESS get the removedDestinationPolicyServices list
@@ -520,14 +573,14 @@ func GetRemovedDestinationPolicyServicesFromESS(orgID string, objectType string,
 	return removedDestinationPolicyServices, err
 }
 
-// PutObjectData stores an object's data
+// PutObjectAllData stores an object's data
 // Verify data signature (if publicKey and signature both have value)
 // Call the storage module to store the object's data
 // Return true if the object was found and updated
 // Return false and no error if the object was not found
-func PutObjectData(orgID string, objectType string, objectID string, dataReader io.Reader) (bool, common.SyncServiceError) {
+func PutObjectAllData(orgID string, objectType string, objectID string, dataReader io.Reader) (bool, common.SyncServiceError) {
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("In PutObjectData. Update data %s %s\n", objectType, objectID)
+		trace.Debug("In PutObjectAllData. Update data %s %s\n", objectType, objectID)
 	}
 
 	common.HealthStatus.ClientRequestReceived()
@@ -547,7 +600,7 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 		apiObjectLocks.Unlock(lockIndex)
 		return false, nil
 	}
-	if status != common.ReadyToSend && status != common.NotReadyToSend {
+	if status != common.ReadyToSend && status != common.NotReadyToSend && status != common.Verifying && status != common.VerificationFailed {
 		common.ObjectLocks.Unlock(lockIndex)
 		apiObjectLocks.Unlock(lockIndex)
 		return false, &common.InvalidRequest{Message: "Can't update data of the receiving side"}
@@ -559,37 +612,56 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 	}
 
 	var dataVf *dataVerifier.DataVerifier
-	if common.IsValidHashAlgorithm(metaData.HashAlgorithm) && metaData.PublicKey != "" && metaData.Signature != "" {
-		//start data verification
-		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("In PutObjectData. Start data verification %s %s\n", objectType, objectID)
+	if common.NeedDataVerification(*metaData) {
+		// Set object status from "notReady" to "verifying"
+		if err := store.UpdateObjectStatus(orgID, objectType, objectID, common.Verifying); err != nil {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("Failed to update object status to %s for object %s/%s/%s", common.Verifying, orgID, objectType, objectID)
+			}
+			common.ObjectLocks.Unlock(lockIndex)
+			apiObjectLocks.Unlock(lockIndex)
+			return false, &common.InternalError{Message: "Failed to update object status to verifying"}
 		}
 
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectAllData. Start data verification %s %s\n", objectType, objectID)
+		}
+
+		//start data verification. After verified, the data is stored. object size is updated, dataID is incremented
 		dataVf = dataVerifier.NewDataVerifier(metaData.HashAlgorithm, metaData.PublicKey, metaData.Signature)
 		if success, err := dataVf.VerifyDataSignature(dataReader, orgID, objectType, objectID, ""); !success || err != nil {
-			if trace.IsLogging(logger.ERROR) {
-				trace.Error("Failed to verify data for object %s %s, remove temp data\n", objectType, objectID)
+			errMessage := ""
+			if log.IsLogging(logger.ERROR) {
+				if err != nil {
+					errMessage = err.Error()
+				}
+				log.Error("Failed to verify data for object %s %s, remove unverified data. Error: %s\n", objectType, objectID, errMessage)
 			}
-			dataVf.RemoveTempData(orgID, objectType, objectID, "")
+			dataVf.RemoveUnverifiedData(*metaData)
+
+			if updateErr := store.UpdateObjectStatus(orgID, objectType, objectID, common.VerificationFailed); updateErr != nil {
+				if log.IsLogging(logger.ERROR) {
+					log.Error("Failed to update object status to %s for object %s/%s/%s, Error: %s", common.VerificationFailed, orgID, objectType, objectID, updateErr.Error())
+				}
+			}
 			common.ObjectLocks.Unlock(lockIndex)
 			apiObjectLocks.Unlock(lockIndex)
-			return false, &common.InvalidRequest{Message: "Failed to verify and store data, Error: " + err.Error()}
+			return false, &common.InternalError{Message: "Failed to verify and store data, Error: " + errMessage}
+		}
+
+		if err := store.UpdateObjectStatus(orgID, objectType, objectID, common.ReadyToSend); err != nil {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("Failed to update object status to %s for object %s/%s/%s", common.ReadyToSend, orgID, objectType, objectID)
+			}
+			common.ObjectLocks.Unlock(lockIndex)
+			apiObjectLocks.Unlock(lockIndex)
+			return false, &common.InternalError{Message: "Failed to updated object status to " + common.ReadyToSend}
 		}
 		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("In PutObjectData. data verified for object %s %s\n", objectType, objectID)
-		}
-
-	}
-
-	// If the data has been verified, then we retrieve the temp data, store in DB, and delete temp data
-	if dataVf != nil {
-		if err := dataVf.StoreVerifiedData(orgID, objectType, objectID, ""); err != nil {
-			dataVf.RemoveTempData(orgID, objectType, objectID, "")
-			common.ObjectLocks.Unlock(lockIndex)
-			apiObjectLocks.Unlock(lockIndex)
-			return false, err
+			trace.Debug("In PutObjectAllData. data verified for object %s %s\n", objectType, objectID)
 		}
 	} else {
+		// After the data is stored. object size is updated, dataID is incremented, object status is set to "ready"
 		if exists, err := store.StoreObjectData(orgID, objectType, objectID, dataReader); err != nil || !exists {
 			common.ObjectLocks.Unlock(lockIndex)
 			apiObjectLocks.Unlock(lockIndex)
@@ -624,7 +696,7 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 
 	// Should be in antoher thread
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("In PutObjectData. Send object to objectQueue %s %s\n", objectType, objectID)
+		trace.Debug("In PutObjectAllData. Send object to objectQueue %s %s\n", objectType, objectID)
 	}
 
 	common.ObjectLocks.Unlock(lockIndex)
@@ -633,9 +705,150 @@ func PutObjectData(orgID string, objectType string, objectID string, dataReader 
 	objectQueue.SendObjectToQueue(objectInQueue)
 
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("In PutObjectData. Return response for PutObjectData %s %s\n", objectType, objectID)
+		trace.Debug("In PutObjectAllData. Return response for PutObjectData %s %s\n", objectType, objectID)
 	}
 	return true, nil
+}
+
+func PutObjectChunkData(orgID string, objectType string, objectID string, dataReader io.Reader, startOffset int64, endOffset int64, totalSize int64, uploadOwnerID string) (bool, common.SyncServiceError) {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In PutObjectChunkData. Update data %s %s %s, startOffset: %d, endOffset: %d. Check if is leader: %t. UploadOwnerID: %s, current CSS ID: %s\n", orgID, objectType, objectID, startOffset, endOffset, leader.CheckIfLeader(), uploadOwnerID, leader.GetLeaderID())
+	}
+
+	if !leader.CheckIfLeader() {
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectChunkData. This is not leader, ignore...")
+		}
+		return false, &common.IgnoredRequest{Message: "Request Ignored by non-leader"}
+	}
+
+	if uploadOwnerID != "" && uploadOwnerID != leader.GetLeaderID() {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("Failed to put chunk data for %s %s %s. It is leader, but uploadOwnerID (%s) != CSSID (%s)", orgID, objectType, objectID, uploadOwnerID, leader.GetLeaderID())
+		}
+		return false, &common.InternalError{Message: "leader changed during the chunk uploading"}
+	}
+
+	// 2 situations when reach here:
+	// It is leader && uploadOwnerID == leader.GetLeaderID()
+	// It is leader && uploadOwnerID == ""
+
+	common.HealthStatus.ClientRequestReceived()
+
+	lockIndex := common.HashStrings(orgID, objectType, objectID)
+	apiObjectLocks.Lock(lockIndex)
+	common.ObjectLocks.Lock(lockIndex)
+
+	metaData, status, err := store.RetrieveObjectAndStatus(orgID, objectType, objectID)
+	if err != nil {
+		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
+		return false, err
+	}
+	if metaData == nil {
+		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
+		return false, nil
+	}
+	if status != common.ReadyToSend && status != common.NotReadyToSend && status != common.Verifying && status != common.VerificationFailed {
+		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
+		return false, &common.InvalidRequest{Message: "Can't update data of the receiving side"}
+	}
+	if metaData.NoData {
+		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
+		return false, &common.InvalidRequest{Message: "Can't update data, the NoData flag is set to true"}
+	}
+
+	isFirstChunk := startOffset == 0
+	isLastChunk := false
+	dataSize := endOffset - startOffset + 1
+
+	// append Data to temp file/data
+	isTempData := false
+	if common.NeedDataVerification(*metaData) {
+		isTempData = true
+	}
+
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In PutObjectChunkData for %s %s %s, isTempData: %t, isFirstChunk: %t, dataSize to store: %d \n", orgID, objectType, objectID, isTempData, isFirstChunk, dataSize)
+	}
+
+	if isLastChunk, err = store.AppendObjectData(orgID, objectType, objectID, dataReader, 0, startOffset, totalSize,
+		isFirstChunk, isLastChunk, isTempData); err != nil {
+		if log.IsLogging(logger.ERROR) {
+			log.Error("Failed to append data for %s %s %s from offset %d to %d, Error: %s\n", orgID, objectType, objectID, startOffset, endOffset, err.Error())
+		}
+		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
+		return false, err
+	}
+
+	if !isLastChunk {
+		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
+
+		return true, nil
+	} else if isTempData {
+		// Is lastChunk and need data verification:
+		// send object to queue for data verification, and return
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectChunkData, send object %s %s to data verification queue\n", objectType, objectID)
+		}
+		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
+		objectForDataVerification := common.ObjectInVerifyQueue{Object: *metaData}
+		objectDataVerifyQueue.SendObjectToQueue(objectForDataVerification)
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectChunkData. Return response for PutObjectChunkData %s %s\n", objectType, objectID)
+		}
+
+		return true, nil
+	} else {
+		// It is last chunk, and no data verification is needed
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectChunkData, received last chunk for %s %s. Data verificaton is not applied\n", objectType, objectID)
+		}
+		// handle object info (update metadata.ObjectSize, metadata.InstanceId, metaData.DataId and object status from notReady to Ready), because Store.AppendObjectData will not modify those object info
+		if _, err := store.HandleObjectInfoForLastDataChunk(orgID, objectType, objectID, false, totalSize); err != nil {
+			common.ObjectLocks.Unlock(lockIndex)
+			apiObjectLocks.Unlock(lockIndex)
+			return false, err
+		}
+		var updatedMetaData *common.MetaData
+		// StoreObject increments the instance id if this is a data update, we need to fetch the updated meta data
+		// Also, StoreObjectData updates the ObjectSize, so we need to fetch the updated meta data
+		updatedMetaData, err = store.RetrieveObject(orgID, objectType, objectID)
+		if err != nil {
+			common.ObjectLocks.Unlock(lockIndex)
+			apiObjectLocks.Unlock(lockIndex)
+			return false, err
+		}
+
+		if updatedMetaData.Inactive {
+			// Don't send inactive objects to the other side
+			common.ObjectLocks.Unlock(lockIndex)
+			apiObjectLocks.Unlock(lockIndex)
+			return true, nil
+		}
+
+		// Should be in antoher thread
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectChunkData. Send object to objectQueue %s %s\n", objectType, objectID)
+		}
+
+		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
+		objectInQueue := common.ObjectInQueue{NotificationAction: common.Update, NotificationType: common.TypeObject, Object: *updatedMetaData, Destinations: []common.StoreDestinationStatus{}}
+		objectQueue.SendObjectToQueue(objectInQueue)
+
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In PutObjectChunkData. Return response for PutObjectChunkData %s %s\n", objectType, objectID)
+		}
+		return true, nil
+	}
 }
 
 // ObjectConsumed is used when an app indicates that it consumed the object
@@ -956,7 +1169,7 @@ func DeleteObject(orgID string, objectType string, objectID string) common.SyncS
 		apiObjectLocks.Unlock(lockIndex)
 		return &common.InvalidRequest{Message: "Object not found"}
 	}
-	if status != common.NotReadyToSend && status != common.ReadyToSend {
+	if status != common.NotReadyToSend && status != common.ReadyToSend && status != common.Verifying && status != common.VerificationFailed {
 		// This node is not the originator of the object being deleted.
 		// ESS is not allowed to remove such objects
 		if common.Configuration.NodeType == common.ESS {
@@ -1025,7 +1238,7 @@ func ActivateObject(orgID string, objectType string, objectID string) common.Syn
 		apiObjectLocks.Unlock(lockIndex)
 		return &common.InvalidRequest{Message: "Object not found"}
 	}
-	if status != common.NotReadyToSend && status != common.ReadyToSend {
+	if status != common.NotReadyToSend && status != common.ReadyToSend && status != common.Verifying && status != common.VerificationFailed {
 		common.ObjectLocks.Unlock(lockIndex)
 		apiObjectLocks.Unlock(lockIndex)
 		return &common.InvalidRequest{Message: "Can't activate object on the receiving side"}

@@ -43,8 +43,9 @@ var started bool
 
 var waitersForStartChannel chan chan int
 
-var objectQueue *communications.ObjectWorkQueue
+var objectQueue *ObjectWorkQueue
 var destReqQueue *communications.DestinationRequestQueue
+var objectDataVerifyQueue *ObjectVerifyQueue
 
 func init() {
 	blockChannel = make(chan int, 1)
@@ -145,25 +146,30 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 
 	if common.Configuration.NodeType == common.ESS {
 		common.Registered = false
-		if common.Configuration.CommunicationProtocol == common.HTTPProtocol {
-			go communication.Register()
-		}
 	}
 
 	common.ResendAcked = true
 
 	common.InitObjectLocks()
+	common.InitObjectDownloadSemaphore()
 
 	// storage, lock should be setup before initialize objectQueue
-	queueBufferSize := common.Configuration.ObjectQueueBufferSize
-	objectQueue = communications.NewObjectWorkQueue(queueBufferSize)
+	objectQueueBufferSize := common.Configuration.ObjectQueueBufferSize
+	objectDataVerifyQueueBufferSize := common.Configuration.VerifyQueueBufferSize
+
+	objectQueue = NewObjectWorkQueue(objectQueueBufferSize)
 	if trace.IsLogging(logger.INFO) {
-		trace.Info("ObjectQueue initialzed with buffer size %d", queueBufferSize)
+		trace.Info("ObjectQueue initialzed with buffer size %d", objectQueueBufferSize)
 	}
 
-	destReqQueue = communications.NewDestinationRequestQueue(queueBufferSize)
+	objectDataVerifyQueue = NewObjectVerifyQueue(objectDataVerifyQueueBufferSize)
 	if trace.IsLogging(logger.INFO) {
-		trace.Info("DestinationRequestQueue initialzed with buffer size %d", queueBufferSize)
+		trace.Info("ObjectVerifyQueue initialzed with buffer size %d", objectDataVerifyQueueBufferSize)
+	}
+
+	destReqQueue = communications.NewDestinationRequestQueue(objectQueueBufferSize)
+	if trace.IsLogging(logger.INFO) {
+		trace.Info("DestinationRequestQueue initialzed with buffer size %d", objectQueueBufferSize)
 	}
 	communications.DestReqQueue = destReqQueue
 
@@ -343,6 +349,16 @@ func Stop(quiesceTime int, unregisterSelf bool) {
 			objectQueue.Close()
 			if trace.IsLogging(logger.INFO) {
 				trace.Info("ObjectQueue closed")
+			}
+		}
+
+		if objectDataVerifyQueue != nil {
+			if trace.IsLogging(logger.INFO) {
+				trace.Info("Closing objectVerifyQueue...")
+			}
+			objectDataVerifyQueue.Close()
+			if trace.IsLogging(logger.INFO) {
+				trace.Info("ObjectVerifyQueue closed")
 			}
 		}
 

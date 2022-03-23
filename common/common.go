@@ -6,11 +6,16 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"hash"
+	"net/http"
 	"os"
 	"regexp"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/semaphore"
 )
 
 // SyncServiceError is a common error type used in the sync service
@@ -94,6 +99,22 @@ func (e *NotFound) Error() string {
 // IsNotFound returns true if the error passed in is the common.NotFound error
 func IsNotFound(err error) bool {
 	_, ok := err.(*NotFound)
+	return ok
+}
+
+// InvalidRequest is the error for invalid reguests
+// swagger:ignore
+type IgnoredRequest struct {
+	Message string
+}
+
+func (e *IgnoredRequest) Error() string {
+	return e.Message
+}
+
+// IsInvalidRequest returns true if the error passed in is the common.InvalidRequest error
+func IsIgnoredRequest(err error) bool {
+	_, ok := err.(*IgnoredRequest)
 	return ok
 }
 
@@ -256,6 +277,84 @@ func GetHash(hashAlgo string) (hash.Hash, crypto.Hash, SyncServiceError) {
 	} else {
 		return nil, 0, &InternalError{Message: fmt.Sprintf("Hash algorithm %s is not supported", hashAlgo)}
 	}
+}
+
+func GetStartAndEndRangeFromRangeHeader(request *http.Request) (int64, int64, SyncServiceError) {
+	// Get range from the "Range:bytes={startOffset}-{endOffset}"
+	requestRangeAll := request.Header.Get("Range")
+	if requestRangeAll == "" {
+		return -1, -1, nil
+	}
+	requestRange := requestRangeAll[6:]
+	ranges := strings.Split(requestRange, "-")
+
+	if len(ranges) != 2 {
+		return -1, -1, &InvalidRequest{Message: "Failed to parse Range header: " + requestRangeAll}
+	}
+
+	beginOffset, err := strconv.ParseInt(ranges[0], 10, 64)
+	if err != nil {
+		return -1, -1, &InvalidRequest{Message: "Failed to get begin offset from Range header: " + err.Error()}
+	}
+
+	endOffset, err := strconv.ParseInt(ranges[1], 10, 64)
+	if err != nil {
+		return -1, -1, &InvalidRequest{Message: "Failed to get end offset from Range header: " + err.Error()}
+	}
+
+	if beginOffset > endOffset {
+		return -1, -1, &InvalidRequest{Message: "Begin offset cannot be greater than end offset"}
+	}
+
+	return beginOffset, endOffset, nil
+}
+
+// Content-Range: bytes 1-2/*\
+// Returns totalsize, startOffset, endOffset, err
+func GetStartAndEndRangeFromContentRangeHeader(request *http.Request) (int64, int64, int64, SyncServiceError) {
+	// Get range from the "Range:bytes={startOffset}-{endOffset}"
+	requestContentRange := request.Header.Get("Content-Range")
+	if requestContentRange == "" {
+		return 0, -1, -1, nil
+	}
+	contentRange := strings.Replace(requestContentRange, "bytes ", "", -1)
+	// 1-2/30
+	ranges := strings.Split(contentRange, "/")
+
+	if len(ranges) != 2 {
+		return 0, -1, -1, &InvalidRequest{Message: "Failed to parse Content-Range header: " + requestContentRange}
+	}
+	// [1-2, 30]
+	totalSize, err := strconv.ParseInt(ranges[1], 10, 64)
+	if err != nil {
+		return 0, -1, -1, &InvalidRequest{Message: "Failed to get total size from Content-Range header: " + err.Error()}
+	}
+
+	offsets := strings.Split(ranges[0], "-")
+	if len(offsets) != 2 {
+		return 0, -1, -1, &InvalidRequest{Message: "Failed to get offsets from Content-Range header: " + requestContentRange}
+	}
+
+	startOffset, err := strconv.ParseInt(offsets[0], 10, 64)
+	if err != nil {
+		return 0, -1, -1, &InvalidRequest{Message: "Failed to get start offset from Content-Range header: " + err.Error()}
+	}
+
+	endOffset, err := strconv.ParseInt(offsets[1], 10, 64)
+	if err != nil {
+		return 0, -1, -1, &InvalidRequest{Message: "Failed to get end offset from Content-Range header: " + err.Error()}
+	}
+
+	if startOffset > endOffset {
+		return 0, -1, -1, &InvalidRequest{Message: "Begin offset cannot be greater than end offset"}
+	}
+
+	return totalSize, startOffset, endOffset, nil
+}
+
+func GetMMSUploadOwnerHeader(request *http.Request) string {
+	uploadOwner := request.Header.Get("MMS-Upload-Owner")
+	return uploadOwner
 }
 
 // MetaData is the metadata that identifies and defines the sync service object.
@@ -575,6 +674,10 @@ type DestinationRequestInQueue struct {
 	Destination Destination
 }
 
+type ObjectInVerifyQueue struct {
+	Object MetaData
+}
+
 // ACLentry contains ACL information about each user
 type ACLentry struct {
 	Username    string
@@ -584,20 +687,27 @@ type ACLentry struct {
 
 // Object status
 const (
+	// status at sender side
 	NotReadyToSend     = "notReady"           // The object is not ready to be sent to the other side
+	Verifying          = "verifying"          // The object data is in the process of verification
+	VerificationFailed = "verificationFailed" // The data verification is failed
 	ReadyToSend        = "ready"              // The object is ready to be sent to the other side
-	PartiallyReceived  = "partiallyreceived"  // Received the object from the other side, waiting for its data
-	CompletelyReceived = "completelyReceived" // The object was received completely from the other side
-	ObjConsumed        = "objconsumed"        // The object was consumed by the app
-	ObjDeleted         = "objdeleted"         // The object was deleted by the other side
-	ObjReceived        = "objreceived"        // The object was received by the app
-	ConsumedByDest     = "consumedByDest"     // The object was consumed by the other side (ESS only)
+	// status at receiver side
+	PartiallyReceived          = "partiallyreceived"          // Received the object from the other side, waiting for its data
+	ReceiverVerifying          = "receiverVerifying"          // The object data at receiver side is in the process of verification
+	ReceiverVerificationFailed = "receiverVerificationFailed" // The data verification is failed at receiver side
+	CompletelyReceived         = "completelyReceived"         // The object was received completely from the other side
+	ObjConsumed                = "objconsumed"                // The object was consumed by the app
+	ObjDeleted                 = "objdeleted"                 // The object was deleted by the other side
+	ObjReceived                = "objreceived"                // The object was received by the app
+	ConsumedByDest             = "consumedByDest"             // The object was consumed by the other side (ESS only)
 )
 
 // Notification status and type
 const (
 	Update                = "update"
 	Updated               = "updated"
+	HandleUpdate          = "handleUpdate"
 	Consumed              = "consumed"
 	AckConsumed           = "ackconsumed"
 	ConsumedByDestination = "consumedByDest"
@@ -776,6 +886,15 @@ func NewLocks(name string) *Locks {
 	return &locks
 }
 
+// ObjectDownloadSemaphore sets the concurrent spi object download concurrency
+var ObjectDownloadSemaphore *semaphore.Weighted
+
+// InitObjectDownloadSemaphore initializes ObjectDownloadSemaphore
+func InitObjectDownloadSemaphore() {
+	maxWorkers := runtime.GOMAXPROCS(-1) * Configuration.HTTPCSSObjDownloadConcurrencyMultiplier
+	ObjectDownloadSemaphore = semaphore.NewWeighted(int64(maxWorkers))
+}
+
 // ObjectLocks are locks for object and notification changes
 var ObjectLocks Locks
 
@@ -937,6 +1056,13 @@ func BlockUntilNoRunningGoRoutines() {
 
 func IsValidHashAlgorithm(hashAlgorithm string) bool {
 	if hashAlgorithm == Sha1 || hashAlgorithm == Sha256 {
+		return true
+	}
+	return false
+}
+
+func NeedDataVerification(metaData MetaData) bool {
+	if IsValidHashAlgorithm(metaData.HashAlgorithm) && metaData.PublicKey != "" && metaData.Signature != "" {
 		return true
 	}
 	return false

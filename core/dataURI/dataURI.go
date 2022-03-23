@@ -22,40 +22,56 @@ func (e *Error) Error() string {
 }
 
 // AppendData appends a chunk of data to the file stored at the given URI
-func AppendData(uri string, dataReader io.Reader, dataLength uint32, offset int64, total int64, isFirstChunk bool, isLastChunk bool) common.SyncServiceError {
+func AppendData(uri string, dataReader io.Reader, dataLength uint32, offset int64, total int64, isFirstChunk bool, isLastChunk bool, isTempData bool) (bool, common.SyncServiceError) {
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Storing data chunk at %s", uri)
 	}
 
 	dataURI, err := url.Parse(uri)
 	if err != nil || !strings.EqualFold(dataURI.Scheme, "file") {
-		return &Error{"Invalid data URI"}
+		return isLastChunk, &Error{"Invalid data URI"}
 	}
 
 	filePath := dataURI.Path + ".tmp"
+
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("Open file %s", filePath)
+	}
 	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
-		return common.CreateError(err, fmt.Sprintf("Failed to open file %s to append data. Error: ", dataURI.Path))
+		return isLastChunk, common.CreateError(err, fmt.Sprintf("Failed to open file %s to append data. Error: ", dataURI.Path))
 	}
 	defer file.Close()
 	if _, err = file.Seek(offset, io.SeekStart); err != nil {
-		return &common.IOError{Message: fmt.Sprintf("Failed to seek to the offset %d of a file. Error: %s", offset, err.Error())}
+		return isLastChunk, &common.IOError{Message: fmt.Sprintf("Failed to seek to the offset %d of a file. Error: %s", offset, err.Error())}
 	}
 
 	written, err := io.Copy(file, dataReader)
 	if err != nil && err != io.EOF {
-		return &common.IOError{Message: "Failed to write to file. Error: " + err.Error()}
+		return isLastChunk, &common.IOError{Message: "Failed to write to file. Error: " + err.Error()}
 	}
 	if written != int64(dataLength) {
-		return &common.IOError{Message: "Failed to write all the data to file."}
+		return isLastChunk, &common.IOError{Message: "Failed to write all the data to file."}
 	}
 
-	if isLastChunk {
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		return isLastChunk, &common.IOError{Message: "Failed to check file size. Error: " + err.Error()}
+	}
+
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("File size after append %d is %d", offset, fileInfo.Size())
+	}
+
+	if isLastChunk && !isTempData {
+		if trace.IsLogging(logger.TRACE) {
+			trace.Trace("Rename file from %s to %s", filePath, dataURI.Path)
+		}
 		if err := os.Rename(filePath, dataURI.Path); err != nil {
-			return &common.IOError{Message: "Failed to rename data file. Error: " + err.Error()}
+			return isLastChunk, &common.IOError{Message: "Failed to rename data file. Error: " + err.Error()}
 		}
 	}
-	return nil
+	return isLastChunk, nil
 }
 
 // StoreData writes the data to the file stored at the given URI
@@ -144,22 +160,27 @@ func StoreDataFromTempData(uri string) common.SyncServiceError {
 
 // GetData retrieves the data stored at the given URI.
 // After reading, the reader has to be closed.
-func GetData(uri string) (io.Reader, common.SyncServiceError) {
+func GetData(uri string, isTempData bool) (io.Reader, common.SyncServiceError) {
 	dataURI, err := url.Parse(uri)
 	if err != nil || !strings.EqualFold(dataURI.Scheme, "file") {
 		return nil, &Error{"Invalid data URI"}
 	}
 
-	if trace.IsLogging(logger.TRACE) {
-		trace.Trace("Retrieving data from %s", uri)
+	filePath := dataURI.Path
+	if isTempData {
+		filePath = dataURI.Path + ".tmp"
 	}
 
-	file, err := os.Open(dataURI.Path)
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("Retrieving data from %s", filePath)
+	}
+
+	file, err := os.Open(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, &common.NotFound{}
 		}
-		return nil, common.CreateError(err, fmt.Sprintf("Failed to open file %s to read data. Error: ", dataURI.Path))
+		return nil, common.CreateError(err, fmt.Sprintf("Failed to open file %s to read data. Error: ", filePath))
 	}
 	return file, nil
 }
@@ -210,12 +231,23 @@ func GetDataChunk(uri string, size int, offset int64) ([]byte, bool, int, common
 }
 
 // DeleteStoredData deletes the data file stored at the given URI
-func DeleteStoredData(uri string) common.SyncServiceError {
+func DeleteStoredData(uri string, isTempData bool) common.SyncServiceError {
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("Deleting stored data at %s, isTempData: %t", uri, isTempData)
+	}
 	dataURI, err := url.Parse(uri)
 	if err != nil || !strings.EqualFold(dataURI.Scheme, "file") {
 		return &Error{"Invalid data URI"}
 	}
-	if err = os.Remove(dataURI.Path); err != nil && !os.IsNotExist(err) {
+	filePath := dataURI.Path
+	if isTempData {
+		filePath = dataURI.Path + ".tmp"
+	}
+
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace("Deleting %s", filePath)
+	}
+	if err = os.Remove(filePath); err != nil && !os.IsNotExist(err) {
 		return &common.IOError{Message: "Failed to delete data. Error: " + err.Error()}
 	}
 	return nil
