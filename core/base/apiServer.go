@@ -2023,6 +2023,10 @@ func handleObjectGetData(orgID string, objectType string, objectID string, canAc
 	} else {
 		requestPartialData = true
 		objSize, dataReader, eof, _, err = GetObjectDataByChunk(orgID, objectType, objectID, startOffset, endOffset)
+		if (endOffset - startOffset + 1) >= objSize {
+			// requested range >= object size
+			requestPartialData = false
+		}
 	}
 
 	if err != nil {
@@ -2039,7 +2043,7 @@ func handleObjectGetData(orgID string, objectType string, objectID string, canAc
 				writer.Header().Add("Content-Range", fmt.Sprintf("bytes %d-%d/%d", startOffset, endOffset, objSize))
 			}
 
-			if requestPartialData && !eof {
+			if requestPartialData {
 				writer.WriteHeader(http.StatusPartialContent)
 			} else {
 				writer.WriteHeader(http.StatusOK)
