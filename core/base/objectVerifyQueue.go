@@ -38,9 +38,14 @@ func (q *ObjectVerifyQueue) run() {
 					trace.Trace("Get an object %s/%s/%s from object verification Queue", meta.DestOrgID, meta.ObjectType, meta.ObjectID)
 				}
 
-				if common.NeedDataVerification(meta) {
+				// For Mongo, we always need to do some file manipulation for upload chunking - either a pass-thru copy or signature verification. If file is streamed to mongo, we shouldn't get here
+				if common.Configuration.StorageProvider == common.Mongo || common.NeedDataVerification(meta) {
 					if trace.IsLogging(logger.TRACE) {
-						trace.Trace("Start data verification for %s/%s/%s", meta.DestOrgID, meta.ObjectType, meta.ObjectID)
+						if common.NeedDataVerification(meta) {
+							trace.Trace("Start data verification for %s/%s/%s", meta.DestOrgID, meta.ObjectType, meta.ObjectID)
+						} else {
+							trace.Trace("Start pass-thru copy for %s/%s/%s", meta.DestOrgID, meta.ObjectType, meta.ObjectID)
+						}
 					}
 
 					lockIndex := common.HashStrings(meta.DestOrgID, meta.ObjectType, meta.ObjectID)
@@ -63,7 +68,11 @@ func (q *ObjectVerifyQueue) run() {
 						// Set object status from "verifying" to "verificationFailed"
 					} else if success, err := dataVf.VerifyDataSignature(dr, meta.DestOrgID, meta.ObjectType, meta.ObjectID, ""); !success || err != nil {
 						if log.IsLogging(logger.ERROR) {
-							log.Error("Failed to verify data for object %s/%s/%s, remove unverified data", meta.DestOrgID, meta.ObjectType, meta.ObjectID)
+							if common.NeedDataVerification(meta) {
+								log.Error("Failed to verify data for object %s/%s/%s, remove unverified data", meta.DestOrgID, meta.ObjectType, meta.ObjectID)
+							} else {
+								log.Error("Failed to copy data for object %s/%s/%s, remove unverified data", meta.DestOrgID, meta.ObjectType, meta.ObjectID)
+							}
 							if err != nil {
 								log.Error("Error: %s", err.Error())
 							}
@@ -72,11 +81,16 @@ func (q *ObjectVerifyQueue) run() {
 						// Set object status from "verifying" to "verification_failed"
 					} else {
 						status = common.ReadyToSend
+						dataVf.RemoveTempData(meta.DestOrgID, meta.ObjectType, meta.ObjectID, meta.DestinationDataURI)
 					}
 
 					// Data is verified, object status is set to "ready" during VerifyDataSignature(StoreObjectData)
 					if trace.IsLogging(logger.DEBUG) {
-						trace.Debug("Data verification is done for object %s/%s/%s, updating object status to %s", meta.DestOrgID, meta.ObjectType, meta.ObjectID, status)
+						if common.NeedDataVerification(meta) {
+							trace.Debug("Data verification is done for object %s/%s/%s, updating object status to %s", meta.DestOrgID, meta.ObjectType, meta.ObjectID, status)
+						} else {
+							trace.Debug("Pass-thru copy is done for object %s/%s/%s, updating object status to %s", meta.DestOrgID, meta.ObjectType, meta.ObjectID, status)
+						}
 					}
 
 					if err := store.UpdateObjectStatus(meta.DestOrgID, meta.ObjectType, meta.ObjectID, status); err != nil {
@@ -96,9 +110,13 @@ func (q *ObjectVerifyQueue) run() {
 						continue
 					}
 
-					// Data is verified, object status is set to "ready" during VerifyDataSignature(StoreObjectData)
+					// Data is verified or copied, object status is set to "ready" during VerifyDataSignature(StoreObjectData)
 					if trace.IsLogging(logger.DEBUG) {
-						trace.Debug("Data verified for object %s/%s/%s", meta.DestOrgID, meta.ObjectType, meta.ObjectID)
+						if common.NeedDataVerification(meta) {
+							trace.Debug("Data verified for object %s/%s/%s", meta.DestOrgID, meta.ObjectType, meta.ObjectID)
+						} else {
+							trace.Debug("Data copied for object %s/%s/%s", meta.DestOrgID, meta.ObjectType, meta.ObjectID)
+						}
 					}
 
 					// StoreObject increments the instance id if this is a data update, we need to fetch the updated meta data
