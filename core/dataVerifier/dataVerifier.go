@@ -52,30 +52,46 @@ func NewDataVerifier(hashAlgorithm string, publicKey string, signature string) *
 
 // VerifyDataSignature is to verify the data. This function will generate the tmp data in storage. Call RemoveTempData() after verification to remove the tmp data
 func (dataVerifier *DataVerifier) VerifyDataSignature(data io.Reader, orgID string, objectType string, objectID string, destinationDataURI string) (bool, common.SyncServiceError) {
+
+	var dr io.Reader
+	var publicKeyBytes []byte
+	var signatureBytes []byte
+	var err error
+
 	if dataVerifier.writeThrough {
-		return true, nil
+		dr = data
+	} else {
+		if publicKeyBytes, err = base64.StdEncoding.DecodeString(dataVerifier.publicKey); err != nil {
+			return false, &common.InternalError{Message: "PublicKey is not base64 encoded. Error: " + err.Error()}
+		} else if signatureBytes, err = base64.StdEncoding.DecodeString(dataVerifier.signature); err != nil {
+			return false, &common.InternalError{Message: "Signature is not base64 encoded. Error: " + err.Error()}
+		} else {
+
+			dr = io.TeeReader(data, dataVerifier.dataHash)
+		}
 	}
 
-	if publicKeyBytes, err := base64.StdEncoding.DecodeString(dataVerifier.publicKey); err != nil {
-		return false, &common.InternalError{Message: "PublicKey is not base64 encoded. Error: " + err.Error()}
-	} else if signatureBytes, err := base64.StdEncoding.DecodeString(dataVerifier.signature); err != nil {
-		return false, &common.InternalError{Message: "Signature is not base64 encoded. Error: " + err.Error()}
-	} else {
-		dr := io.TeeReader(data, dataVerifier.dataHash)
-		if trace.IsLogging(logger.DEBUG) {
+	if trace.IsLogging(logger.DEBUG) {
+		if dataVerifier.writeThrough {
+			trace.Debug("DataVerifier - Pass-thru mode for object %s %s\n", objectType, objectID)
+		} else {
 			trace.Debug("DataVerifier - In VerifyDataSignature, verifying and storing data for object %s %s\n", objectType, objectID)
 		}
+	}
 
-		if destinationDataURI != "" {
-			if _, err := dataURI.StoreData(destinationDataURI, dr, 0); err != nil {
-				return false, err
-			}
-		} else {
-			if exists, err := Store.StoreObjectData(orgID, objectType, objectID, dr); err != nil || !exists {
-				return false, err
-			}
+	if destinationDataURI != "" {
+		if _, err := dataURI.StoreData(destinationDataURI, dr, 0); err != nil {
+			return false, err
 		}
+	} else {
+		if exists, err := Store.StoreObjectData(orgID, objectType, objectID, dr); err != nil || !exists {
+			return false, err
+		}
+	}
 
+	if dataVerifier.writeThrough {
+		return true, nil
+	} else {
 		return dataVerifier.verifyHelper(publicKeyBytes, signatureBytes)
 	}
 }

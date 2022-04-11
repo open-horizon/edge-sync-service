@@ -365,10 +365,6 @@ func GetStartAndEndRangeFromContentRangeHeader(request *http.Request) (int64, in
 	return totalSize, startOffset, endOffset, nil
 }
 
-func GetMMSUploadOwnerHeader(request *http.Request) string {
-	uploadOwner := request.Header.Get("MMS-Upload-Owner")
-	return uploadOwner
-}
 
 // MetaData is the metadata that identifies and defines the sync service object.
 // Every object includes metadata (mandatory) and data (optional). The metadata and data can be updated independently.
@@ -497,6 +493,11 @@ type MetaData struct {
 	// ChunkSize is an internal field indicating the maximal message payload size.
 	// This field should not be set by users.
 	ChunkSize int `json:"chunkSize" bson:"chunk-size"`
+
+	// UploadChunkSize is an internal field indicating the upload chunk size used when uploading the
+	// the model (if chunking was used)
+	// This field should not be set by users.
+	UploadChunkSize int64 `json:"uploadChunkSize" bson:"upload-chunk-size"`
 
 	// HashAlgorithm used for data signature sign/verification. "SHA1" and "SHA256" are supported hash algorithms.
 	// Valid values are: "SHA1", "SHA256"
@@ -1106,3 +1107,4 @@ func init() {
 	Version.Major = 1
 	Version.Minor = 0
 }
+

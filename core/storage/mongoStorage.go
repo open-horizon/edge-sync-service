@@ -994,7 +994,7 @@ func (store *MongoStorage) RetrieveObjectAndStatus(orgID string, objectType stri
 func (store *MongoStorage) RetrieveObjectData(orgID string, objectType string, objectID string, isTempData bool) (io.Reader, common.SyncServiceError) {
 	var id string
 	if isTempData {
-		id = createTempObjectCollectionID(orgID, objectType, objectID)
+		return nil, &Error{fmt.Sprintf("RetrieveObjectData with isTempData set true should not be called for Mongo DB.")}
 	} else {
 		id = createObjectCollectionID(orgID, objectType, objectID)
 	}
@@ -1115,27 +1115,85 @@ func (store *MongoStorage) StoreObjectData(orgID string, objectType string, obje
 }
 
 func (store *MongoStorage) StoreObjectTempData(orgID string, objectType string, objectID string, dataReader io.Reader) (bool, common.SyncServiceError) {
-	id := createTempObjectCollectionID(orgID, objectType, objectID)
-
-	_, _, err := store.copyDataToFile(id, dataReader, true, true)
-	if err != nil {
-		return false, err
-	}
-
-	return true, nil
+	return false, &Error{fmt.Sprintf("StoreObjectTempData should not be called for Mongo DB.")}
 }
 
+// Removes all the temporary chunk files from Mongo. Depends on RetrieveObjectTempData putting the fileHandle of the temp file into the map
+// The verification step will be done by the CSS that opened all the files so should have the correct mapping
 func (store *MongoStorage) RemoveObjectTempData(orgID string, objectType string, objectID string) common.SyncServiceError {
-	id := createTempObjectCollectionID(orgID, objectType, objectID)
-	if err := store.removeFile(id); err != nil && err != mgo.ErrNotFound {
-		return err
+
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace(fmt.Sprintf("RemoveObjectTempData for org - %s, type - %s, id - %s", orgID, objectType, objectID))
 	}
+
+	foundChunk := true
+	chunkNum := 1
+	for foundChunk == true {
+		id := createTempObjectCollectionID(orgID, objectType, objectID, chunkNum)
+		fileHandle := store.getFileHandle(id)
+		if fileHandle != nil {
+			store.CloseDataReader(fileHandle.file)
+			store.deleteFileHandle(id)
+			if err := store.removeFile(id); err != nil && err != mgo.ErrNotFound {
+				return err
+			}
+			if trace.IsLogging(logger.TRACE) {
+				trace.Trace(fmt.Sprintf("Removed file %s)", id))
+			}
+		} else {
+			foundChunk = false
+		}
+		chunkNum += 1
+	}
+
 	return nil
+}
+
+// For mongo implementation, each chunk is saved to a separate document. In this method, we have to combine all those documents into a MultiReader
+func (store *MongoStorage) RetrieveObjectTempData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
+
+	if trace.IsLogging(logger.TRACE) {
+		trace.Trace(fmt.Sprintf("RetrieveObjectTempData for org - %s, type - %s, id - %s", orgID, objectType, objectID))
+	}
+	var readers []io.Reader
+	metaData, err := store.RetrieveObject(orgID, objectType, objectID)
+	if err != nil || metaData == nil {
+		return nil, &Error{fmt.Sprintf("Error in retrieving object metadata.\n")}
+	}
+
+	var offset int64 = 0
+	chunkNumber := 1
+
+	for offset < metaData.ObjectSize {
+
+		id := createTempObjectCollectionID(orgID, objectType, objectID, chunkNumber)
+		if trace.IsLogging(logger.TRACE) {
+			trace.Trace(fmt.Sprintf("RetrieveObjectTempData for org - %s, type - %s, id - %s, chunkNum - %d", orgID, objectType, objectID, chunkNumber))
+		}
+		fileHandle, err := store.retrieveObjectTempData(id)
+		if err != nil {
+			return  nil, &Error{fmt.Sprintf("Error in retrieving objects chunk data. Error: %s.\n", err)}
+		}
+
+		if fileHandle != nil {
+			// Store the fileHandle so we can delete it when done; needed for RemoveObjectTempData 
+			store.putFileHandle(id, fileHandle)
+			readers = append(readers, fileHandle.file)
+		}
+
+		chunkNumber += 1
+		offset += metaData.UploadChunkSize
+	}
+
+	if trace.IsLogging(logger.TRACE) { 
+		trace.Trace(fmt.Sprintf("returning %d file readers in the MultiReader from RetrieveObjectTempData", len(readers)))
+	}
+	rr := io.MultiReader(readers...)
+	return rr, nil
 
 }
 
-func (store *MongoStorage) RetrieveObjectTempData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
-	id := createTempObjectCollectionID(orgID, objectType, objectID)
+func (store *MongoStorage) retrieveObjectTempData(id string) (*fileHandle, common.SyncServiceError) {
 	fileHandle, err := store.openFile(id)
 	if err != nil {
 		switch err {
@@ -1145,35 +1203,14 @@ func (store *MongoStorage) RetrieveObjectTempData(orgID string, objectType strin
 			return nil, &Error{fmt.Sprintf("Failed to open file to read the data. Error: %s.", err)}
 		}
 	}
-	store.putFileHandle(id, fileHandle)
-	return fileHandle.file, nil
+	return fileHandle, nil
 }
 
-// AppendObjectData appends a chunk of data to the object's data
+// AppendObjectData appends a chunk of data to the object's data. Design is that each chunk will be written to a new document in mongo and then combined
+// into final document by user caller RetrieveObjectTempData during verification step (or just copied if no verification necessary)
 func (store *MongoStorage) AppendObjectData(orgID string, objectType string, objectID string, dataReader io.Reader,
 	dataLength uint32, offset int64, total int64, isFirstChunk bool, isLastChunk bool, isTempData bool) (bool, common.SyncServiceError) {
-	var id string
-	if isTempData {
-		id = createTempObjectCollectionID(orgID, objectType, objectID)
-	} else {
-		id = createObjectCollectionID(orgID, objectType, objectID)
-	}
 
-	var fileHandle *fileHandle
-	if isFirstChunk {
-		store.removeFile(id)
-		fh, err := store.createFile(id)
-		if err != nil {
-			return isLastChunk, err
-		}
-		fileHandle = fh
-	} else {
-		fh := store.getFileHandle(id)
-		if fh == nil {
-			return isLastChunk, &Error{fmt.Sprintf("Failed to append the data at offset %d, the file %s doesn't exist.", offset, id)}
-		}
-		fileHandle = fh
-	}
 
 	var n int
 	var err error
@@ -1191,72 +1228,117 @@ func (store *MongoStorage) AppendObjectData(orgID string, objectType string, obj
 	if uint32(n) != dataLength && dataLength > 0 {
 		return isLastChunk, &Error{fmt.Sprintf("Failed to read all the data from the dataReader. Read %d instead of %d.", n, dataLength)}
 	}
-	if offset == fileHandle.offset {
-		for {
-			if trace.IsLogging(logger.TRACE) {
-				trace.Trace(" Put data (data size: %d) in file at offset %d\n", len(data), fileHandle.offset)
-			}
-			n, err = fileHandle.file.Write(data)
-			if err != nil {
-				return isLastChunk, &Error{fmt.Sprintf("Failed to write the data to the file. Error: %s.", err)}
-			}
-			if n != len(data) {
-				return isLastChunk, &Error{fmt.Sprintf("Failed to write all the data to the file. Wrote %d instead of %d.", n, len(data))}
-			}
-			fileHandle.offset += int64(n)
-			if fileHandle.chunks == nil {
-				break
-			}
-			data = fileHandle.chunks[fileHandle.offset]
-			if data == nil {
-				break
-			}
-			delete(fileHandle.chunks, fileHandle.offset)
-			if trace.IsLogging(logger.TRACE) {
-				trace.Trace(" Get data (%d) from map at offset %d\n", len(data), fileHandle.offset)
-			}
-		}
-	} else {
-		if fileHandle.chunks == nil {
-			fileHandle.chunks = make(map[int64][]byte)
-		}
-		if len(fileHandle.chunks) > 100 {
-			if trace.IsLogging(logger.INFO) {
-				trace.Info(" Discard data chunk at offset %d since there are too many (%d) out-of-order chunks\n", offset, len(fileHandle.chunks))
-			}
-			return isLastChunk, &Discarded{fmt.Sprintf(" Discard data chunk at offset %d since there are too many out-of-order chunks\n", offset)}
-		}
-		fileHandle.chunks[offset] = data
-		if trace.IsLogging(logger.TRACE) {
-			trace.Trace(" Put data (%d) in map at offset %d (# in map %d)\n", len(data), offset, len(fileHandle.chunks))
-		}
-	}
-
-	fileSize := fileHandle.file.Size()
-	if trace.IsLogging(logger.TRACE) {
-		trace.Trace(" FileSize is: %d\n", fileSize)
-	}
 
 	updatedLastChunk := isLastChunk
-	if fileSize == total {
 
+	var n_int64 int64 = int64(n)
+
+	// Set the chunk size which will be the amount of data sent in first chunk. Works even if all data fits in one chunk. Needs to be saved for when temp documents
+	// need to be moved to final mongo document location to compute how many chunks were received for this object. Also need object size stored in metaData here
+	if isFirstChunk {
+		err := store.setUploadDataInfo(orgID, objectType, objectID, n_int64, total)
+		if err != nil {
+			return isLastChunk, &Error{fmt.Sprintf("Failed to set the upload chunk size. Error: %s", err)}
+		}
+	}
+
+	// Figure out which chunk this is by looking at offset + length of data
+	var chunkNumber int
+	if ( offset + n_int64 ) < total {
+		chunkNumber = (int(offset) + n) / n
+	} else {
 		updatedLastChunk = true
+
+		if offset == 0 {
+			// Special case if file fits in a single chunk
+			chunkNumber = 1
+		} else {
+
+			// This is the last chunk so to figure out what chunk number it is, need to know the chunk size and the total object size
+			chunkSize, err := store.getUploadDataChunkSize(orgID, objectType, objectID)
+
+			if err != nil {
+				return isLastChunk, &Error{fmt.Sprintf("Failed to read the upload chunk size. Error: %s.", err)}
+			}
+
+			chunkNumber = (int)(total / chunkSize )
+			if total % chunkSize != 0 {
+				chunkNumber += 1
+			}
+		}
+	}
+
+	// In Mongo implementation, all data passed to this function is to be stored in temp data
+	id := createTempObjectCollectionID(orgID, objectType, objectID, chunkNumber)
+
+	var fileHandle *fileHandle
+	store.removeFile(id)
+	fh, err := store.createFile(id)
+	if err != nil {
+		return isLastChunk, err
+	}
+	fileHandle = fh
+	store.putFileHandle(id, fileHandle)
+
+	for {
 		if trace.IsLogging(logger.TRACE) {
-			trace.Trace(" FileSize is same as total, set updatedLastChunk to %t\n", updatedLastChunk)
+			trace.Trace("Put data (data size: %d) in file %s\n", len(data), id)
+		}
+		n, err = fileHandle.file.Write(data)
+		if err != nil {
+			return isLastChunk, &Error{fmt.Sprintf("Failed to write the data to the file. Error: %s.", err)}
+		}
+		if n != len(data) {
+			return isLastChunk, &Error{fmt.Sprintf("Failed to write all the data to the file. Wrote %d instead of %d.", n, len(data))}
+		}
+		fileHandle.offset += int64(n)
+		if fileHandle.chunks == nil {
+			break
+		}
+		data = fileHandle.chunks[fileHandle.offset]
+		if data == nil {
+			break
+		}
+		delete(fileHandle.chunks, fileHandle.offset)
+		if trace.IsLogging(logger.TRACE) {
+			trace.Trace(" Get data (%d) from map at offset %d\n", len(data), offset)
 		}
 	}
 
 	if updatedLastChunk {
-		store.deleteFileHandle(id)
-		err := fileHandle.file.Close()
-		if err != nil {
-			return updatedLastChunk, &Error{fmt.Sprintf("Failed to close the file. Error: %s.", err)}
+		if trace.IsLogging(logger.TRACE) {
+			trace.Trace("Model file completely written; set updatedLastChunk to %t\n", updatedLastChunk)
 		}
-	} else {
-		store.putFileHandle(id, fileHandle)
+	}
+
+	store.deleteFileHandle(id)
+	err = fileHandle.file.Close()
+	if err != nil {
+		return updatedLastChunk, &Error{fmt.Sprintf("Failed to close the file. Error: %s.", err)}
 	}
 
 	return updatedLastChunk, nil
+}
+
+
+// Handles storing the upload data chunk size and the total size
+func (store *MongoStorage) setUploadDataInfo(orgID string, objectType string, objectID string, chunkSize int64, totalSize int64) common.SyncServiceError {
+	id := createObjectCollectionID(orgID, objectType, objectID)
+	if err := store.update(objects, bson.M{"_id": id}, bson.M{ "$set": bson.M{"metadata.upload-chunk-size": chunkSize, "metadata.object-size": totalSize}}); err != nil {
+					 return &Error{fmt.Sprintf("Failed to set uploadDataChunkSize. Error: %s.", err)}
+	}
+	return nil
+}
+
+// Handles retrieving the upload data chunk size
+func (store *MongoStorage) getUploadDataChunkSize(orgID string, objectType string, objectID string) (int64, common.SyncServiceError) {
+
+	metaData, err := store.RetrieveObject(orgID, objectType, objectID)
+	if err != nil || metaData == nil || metaData.UploadChunkSize == 0 {
+		return 0, &Error{fmt.Sprintf("Error in getUploadDataChunkSize. Failed to find upload chunk size.\n")}
+	}
+
+	return metaData.UploadChunkSize, nil
 }
 
 // Handles the last data chunk when no data verification needed
@@ -1364,20 +1446,20 @@ func (store *MongoStorage) DeleteStoredObject(orgID string, objectType string, o
 func (store *MongoStorage) DeleteStoredData(orgID string, objectType string, objectID string, isTempData bool) common.SyncServiceError {
 	var id string
 	if isTempData {
-		id = createTempObjectCollectionID(orgID, objectType, objectID)
+		return store.RemoveObjectTempData(orgID, objectType, objectID)
 	} else {
 		id = createObjectCollectionID(orgID, objectType, objectID)
+		if trace.IsLogging(logger.TRACE) {
+			trace.Trace("Deleting object's data %s\n", id)
+		}
+		if err := store.removeFile(id); err != nil {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("Error in DeleteStoredData: failed to delete data file. Error: %s\n", err)
+			}
+			return err
+		}
 	}
 
-	if trace.IsLogging(logger.TRACE) {
-		trace.Trace("Deleting object's data %s\n", id)
-	}
-	if err := store.removeFile(id); err != nil {
-		if log.IsLogging(logger.ERROR) {
-			log.Error("Error in DeleteStoredData: failed to delete data file. Error: %s\n", err)
-		}
-		return err
-	}
 	return nil
 }
 

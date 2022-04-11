@@ -2350,10 +2350,8 @@ func handleObjectPutData(orgID string, objectType string, objectID string, write
 			return
 		}
 
-		uploadOwner := common.GetMMSUploadOwnerHeader(request)
-
 		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("In handleObjectPutData. TotalSize: %d, startOffset: %d, endOffset: %d, upload owner: %s\n", totalSize, startOffset, endOffset, uploadOwner)
+			trace.Debug("In handleObjectPutData. TotalSize: %d, startOffset: %d, endOffset: %d\n", totalSize, startOffset, endOffset)
 		}
 
 		var found bool
@@ -2362,7 +2360,7 @@ func handleObjectPutData(orgID string, objectType string, objectID string, write
 			found, err = PutObjectAllData(orgID, objectType, objectID, request.Body)
 			chunkUpload = false
 		} else {
-			found, err = PutObjectChunkData(orgID, objectType, objectID, request.Body, startOffset, endOffset, totalSize, uploadOwner)
+			found, err = PutObjectChunkData(orgID, objectType, objectID, request.Body, startOffset, endOffset, totalSize)
 			chunkUpload = true
 		}
 
