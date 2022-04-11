@@ -975,6 +975,16 @@ func testStorageObjectData(storageType string, t *testing.T) {
 				bytes.NewReader(test.newData), uint32(len(test.newData)), int64(len(test.data)), test.metaData.ObjectSize, false, true, false); err != nil {
 				t.Errorf("AppendObjectData failed (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
 			} else {
+
+				// Mongo implementation stores all AppendObjectData in separate temp data documents and then needs to be combined
+				if storageType == common.Mongo {
+					if tmpObjectReaders, err := store.RetrieveObjectTempData(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID); err != nil {
+						t.Errorf("AppendObjectData failed (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+					} else if _, err := store.StoreObjectData(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID, tmpObjectReaders); err != nil {
+						t.Errorf("StoreObjectData failed (objectID = %s). Error: %s\n", test.metaData.ObjectID, err.Error())
+					}
+				}
+
 				expectedData := append(test.data, test.newData...)
 				data, _, _, err := store.ReadObjectData(test.metaData.DestOrgID, test.metaData.ObjectType, test.metaData.ObjectID,
 					len(expectedData), 0)
