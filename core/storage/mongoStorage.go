@@ -1164,28 +1164,32 @@ func (store *MongoStorage) RetrieveObjectTempData(orgID string, objectType strin
 	var offset int64 = 0
 	chunkNumber := 1
 
-	for offset < metaData.ObjectSize {
+	// Will be 0 if data was uploaded with streaming
+	if metaData.UploadChunkSize > 0 {
 
-		id := createTempObjectCollectionID(orgID, objectType, objectID, chunkNumber)
-		if trace.IsLogging(logger.TRACE) {
-			trace.Trace(fmt.Sprintf("RetrieveObjectTempData for org - %s, type - %s, id - %s, chunkNum - %d", orgID, objectType, objectID, chunkNumber))
-		}
-		fileHandle, err := store.retrieveObjectTempData(id)
-		if err != nil {
-			return  nil, &Error{fmt.Sprintf("Error in retrieving objects chunk data. Error: %s.\n", err)}
-		}
+		for offset < metaData.ObjectSize {
 
-		if fileHandle != nil {
-			// Store the fileHandle so we can delete it when done; needed for RemoveObjectTempData 
-			store.putFileHandle(id, fileHandle)
-			readers = append(readers, fileHandle.file)
-		}
+			id := createTempObjectCollectionID(orgID, objectType, objectID, chunkNumber)
+			if trace.IsLogging(logger.TRACE) {
+				trace.Trace(fmt.Sprintf("RetrieveObjectTempData for org - %s, type - %s, id - %s, chunkNum - %d", orgID, objectType, objectID, chunkNumber))
+			}
+			fileHandle, err := store.retrieveObjectTempData(id)
+			if err != nil {
+				return  nil, &Error{fmt.Sprintf("Error in retrieving objects chunk data. Error: %s.\n", err)}
+			}
 
-		chunkNumber += 1
-		offset += metaData.UploadChunkSize
+			if fileHandle != nil {
+				// Store the fileHandle so we can delete it when done; needed for RemoveObjectTempData 
+				store.putFileHandle(id, fileHandle)
+				readers = append(readers, fileHandle.file)
+			}
+
+			chunkNumber += 1
+			offset += metaData.UploadChunkSize
+		}
 	}
 
-	if trace.IsLogging(logger.TRACE) { 
+	if trace.IsLogging(logger.TRACE) {
 		trace.Trace(fmt.Sprintf("returning %d file readers in the MultiReader from RetrieveObjectTempData", len(readers)))
 	}
 	rr := io.MultiReader(readers...)
