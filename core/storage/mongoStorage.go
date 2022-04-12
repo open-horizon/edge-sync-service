@@ -1155,7 +1155,7 @@ func (store *MongoStorage) RetrieveObjectTempData(orgID string, objectType strin
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace(fmt.Sprintf("RetrieveObjectTempData for org - %s, type - %s, id - %s", orgID, objectType, objectID))
 	}
-	var readers []io.Reader
+	readers := make([]io.Reader, 0)
 	metaData, err := store.RetrieveObject(orgID, objectType, objectID)
 	if err != nil || metaData == nil {
 		return nil, &Error{fmt.Sprintf("Error in retrieving object metadata.\n")}
@@ -1446,7 +1446,13 @@ func (store *MongoStorage) DeleteStoredObject(orgID string, objectType string, o
 func (store *MongoStorage) DeleteStoredData(orgID string, objectType string, objectID string, isTempData bool) common.SyncServiceError {
 	var id string
 	if isTempData {
-		return store.RemoveObjectTempData(orgID, objectType, objectID)
+		// Make sure we have all the temp data by calling RetrieveObjectTempData here
+		_,err := store.RetrieveObjectTempData(orgID, objectType, objectID)
+		if err == nil {
+			return store.RemoveObjectTempData(orgID, objectType, objectID)
+		} else {
+			return err
+		}
 	} else {
 		id = createObjectCollectionID(orgID, objectType, objectID)
 		if trace.IsLogging(logger.TRACE) {
