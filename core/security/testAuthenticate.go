@@ -20,6 +20,7 @@ type TestAuthenticate struct {
 //      are ignored. App keys for APIs are of the form, userID@orgID. It supports
 //      the following users:
 //          testerUser - A regular user
+//          testerObjectAdmin - An admin of object, no right access to manifest
 //          testerAdmin - An admin of the specified orgID
 //          testSyncAdmin - An admin of the Sync Service
 //          testerService1 - A service
@@ -48,6 +49,8 @@ func (auth *TestAuthenticate) Authenticate(request *http.Request) (int, string, 
 		code = AuthUser
 	} else if user == "testerNode" || user == "testerNode1" || user == "testerNode2" || user == "testerNodeCanAccessAllTypes" {
 		code = AuthNodeUser
+	} else if user == "testerObjectAdmin" {
+		code = AuthObjectAdmin
 	} else if user == "testerAdmin" {
 		code = AuthAdmin
 	} else if user == "testerSyncAdmin" {

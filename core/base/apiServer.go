@@ -920,7 +920,7 @@ func handleListObjectsWithFilters(orgID string, writer http.ResponseWriter, requ
 
 	// only allow AuthSyncAdmin, AuthAdmin, AuthUser and AuthNodeUser to access, it is okay if orgID != userOrgID to display "public" object
 	code, userOrgID, userID := security.Authenticate(request)
-	if code == security.AuthFailed || (code != security.AuthSyncAdmin && code != security.AuthAdmin && code != security.AuthUser && code != security.AuthNodeUser) {
+	if code == security.AuthFailed || (code != security.AuthSyncAdmin && code != security.AuthAdmin && code != security.AuthObjectAdmin && code != security.AuthUser && code != security.AuthNodeUser) {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
 		return
@@ -1043,7 +1043,7 @@ func handleListObjectsWithFilters(orgID string, writer http.ResponseWriter, requ
 		if len(objects) == 0 {
 			writer.WriteHeader(http.StatusNotFound)
 		} else {
-			if accessibleObjects, err := GetAccessibleObjects(code, orgID, userOrgID, userID, objects); err != nil {
+			if accessibleObjects, err := GetAccessibleObjects(code, orgID, userOrgID, userID, objects, objectType); err != nil {
 				communications.SendErrorResponse(writer, err, "Failed to get accessible object. Error: ", 0)
 			} else {
 				if data, err := json.MarshalIndent(accessibleObjects, "", "  "); err != nil {
@@ -1137,7 +1137,7 @@ func handleListObjectTypes(orgID string, writer http.ResponseWriter, request *ht
 		if len(objects) == 0 {
 			writer.WriteHeader(http.StatusNotFound)
 		} else {
-			if accessibleObjects, err := GetAccessibleObjects(code, orgID, userOrgID, userID, objects); err != nil {
+			if accessibleObjects, err := GetAccessibleObjects(code, orgID, userOrgID, userID, objects, ""); err != nil {
 				communications.SendErrorResponse(writer, err, "Failed to get accessible object. Error: ", 0)
 			} else {
 				objTypes = GetListOfObjTypes(accessibleObjects)
@@ -3955,21 +3955,21 @@ func serviceContainedInLastDestinationPolicyServices(serviceID string, oldPolicy
 	return false
 }
 
-func GetAccessibleObjects(code int, orgID string, userOrgID string, userID string, objects []common.MetaData) ([]common.MetaData, error) {
+func GetAccessibleObjects(code int, orgID string, userOrgID string, userID string, objects []common.MetaData, objectType string) ([]common.MetaData, error) {
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("In getAccessibleObjects\n")
+		trace.Debug("In getAccessibleObjects, orgID: %s, userOrgID: %s, userID: %s, objectType: %s\n", orgID, userOrgID, userID, objectType)
 	}
 
 	accessibleObjects := make([]common.MetaData, 0)
 
-	if code == security.AuthSyncAdmin || (code == security.AuthAdmin && orgID == userOrgID) {
+	if code == security.AuthSyncAdmin || (code == security.AuthAdmin && orgID == userOrgID) || (code == security.AuthObjectAdmin && orgID == userOrgID) {
 		// AuthSyncAdmin: show all objects
 		// AuthAdmin in this org: show all objects
 		accessibleObjects = append(accessibleObjects, objects...)
 	} else if orgID != userOrgID {
 		// different org: only show public objects
 		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("In GetAccessibleObjects, userOrg %s is not same as orgID %s in API path, will return public objects\n", userID, orgID)
+			trace.Debug("In GetAccessibleObjects, userOrg %s*is not same as orgID %s in API path, will return public objects\n", userOrgID, orgID)
 		}
 		for _, objMeta := range objects {
 			if objMeta.Public {
@@ -3986,23 +3986,37 @@ func GetAccessibleObjects(code int, orgID string, userOrgID string, userID strin
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("Get objects in same org. Check if object type is accessable by given user (%d, %s, %s)\n", code, userID, userOrgID)
 		}
-		aclUserType := security.GetACLUserType(code)
-
-		if accessToALlTypes, accessibleObjectTypes, err := security.CheckObjectTypesCanBeAccessByGivenUser(orgID, aclUserType, userID); err != nil {
-			return make([]common.MetaData, 0), err
-		} else if accessToALlTypes {
+		if objectType == common.MANIFEST_OBJECT_TYPE && code == security.AuthNodeUser {
 			if trace.IsLogging(logger.DEBUG) {
-				trace.Debug("Given user (%d, %s, %s) have access to all object types\n", code, userID, userOrgID)
+				trace.Debug("AuthNodeUser(%d, %s, %s) is getting manifest file\n", code, userID, userOrgID)
 			}
+			// authNodeUser can read all manifest from its own org
 			accessibleObjects = append(accessibleObjects, objects...)
 		} else {
-			for _, objmeta := range objects {
-				if objmeta.Public || common.StringListContains(accessibleObjectTypes, objmeta.ObjectType) {
-					if trace.IsLogging(logger.DEBUG) {
-						trace.Debug("Object type %s is accessble by user %s:%s in orgID %s\n", objmeta.ObjectType, aclUserType, userID, orgID)
+			aclUserType := security.GetACLUserType(code)
+
+			if accessToALlTypes, accessibleObjectTypes, err := security.CheckObjectTypesCanBeAccessByGivenUser(orgID, aclUserType, userID); err != nil {
+				return make([]common.MetaData, 0), err
+			} else if accessToALlTypes {
+				if trace.IsLogging(logger.DEBUG) {
+					trace.Debug("Given user (%d, %s, %s) have access to all object types\n", code, userID, userOrgID)
+				}
+				accessibleObjects = append(accessibleObjects, objects...)
+			} else {
+				for _, objmeta := range objects {
+					if objmeta.Public || common.StringListContains(accessibleObjectTypes, objmeta.ObjectType) {
+						if trace.IsLogging(logger.DEBUG) {
+							trace.Debug("Object type %s is accessble by user %s:%s in orgID %s\n", objmeta.ObjectType, aclUserType, userID, orgID)
+						}
+						//add object to accessableObjects
+						accessibleObjects = append(accessibleObjects, objmeta)
+					} else if objmeta.ObjectType == common.MANIFEST_OBJECT_TYPE && code == security.AuthNodeUser {
+						if trace.IsLogging(logger.DEBUG) {
+							trace.Debug("Object type %s is accessble by user %s:%s in orgID %s\n", objmeta.ObjectType, aclUserType, userID, orgID)
+						}
+						//add object to accessableObjects
+						accessibleObjects = append(accessibleObjects, objmeta)
 					}
-					//add object to accessableObjects
-					accessibleObjects = append(accessibleObjects, objmeta)
 				}
 			}
 		}

@@ -365,7 +365,6 @@ func GetStartAndEndRangeFromContentRangeHeader(request *http.Request) (int64, in
 	return totalSize, startOffset, endOffset, nil
 }
 
-
 // MetaData is the metadata that identifies and defines the sync service object.
 // Every object includes metadata (mandatory) and data (optional). The metadata and data can be updated independently.
 // Each sync service node (ESS) has an address that is composed of the node's ID, Type, and Organization.
@@ -863,6 +862,8 @@ const (
 	Sha256 = "SHA256"
 )
 
+const MANIFEST_OBJECT_TYPE = "agent_upgrade_manifests"
+
 func init() {
 	ServingAPIs = true
 }
@@ -1107,4 +1108,3 @@ func init() {
 	Version.Major = 1
 	Version.Minor = 0
 }
-

@@ -28,8 +28,11 @@ const (
 	// AuthEdgeNode is returned by Authenticate when the authenticated user is an embedded ESS edge node. userID is in the format of "{destinationType}/{destinationID}"
 	AuthEdgeNode
 
-	// AuthAdmin is returned by Authenticate when the authenticated user is an org admin
+	// AuthAdmin is returned by Authenticate when the authenticated user is an org admin, have admin access of objects and manifests
 	AuthAdmin
+
+	// AuthObjectAdmin is returned by Authenticate when the authenticated user is an org admin, have admin access of objects (no admin access of manifest)
+	AuthObjectAdmin
 
 	// AuthUser is returned by Authenticate when the authenticated user is a regular user
 	AuthUser
