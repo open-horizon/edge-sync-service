@@ -16,7 +16,6 @@ import (
 	"github.com/open-horizon/edge-sync-service/core/communications"
 	"github.com/open-horizon/edge-sync-service/core/dataURI"
 	"github.com/open-horizon/edge-sync-service/core/dataVerifier"
-	"github.com/open-horizon/edge-sync-service/core/leader"
 	"github.com/open-horizon/edge-sync-service/core/storage"
 	"github.com/open-horizon/edge-utilities/logger"
 	"github.com/open-horizon/edge-utilities/logger/log"
@@ -553,6 +552,53 @@ func GetObjectData(orgID string, objectType string, objectID string) (io.Reader,
 	return store.RetrieveObjectData(orgID, objectType, objectID, false)
 }
 
+// GetObjectDataByChunk delivers object partial data to the app
+// Call the storage module to get the object's data within range and send it to the app
+func GetObjectDataByChunk(orgID string, objectType string, objectID string, startOffset int64, endOffset int64) (int64, io.Reader, bool, int, common.SyncServiceError) {
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In GetObjectDataByChunk. Get data %s %s in range %d-%d\n", objectType, objectID, startOffset, endOffset)
+	}
+
+	common.HealthStatus.ClientRequestReceived()
+
+	lockIndex := common.HashStrings(orgID, objectType, objectID)
+	apiObjectLocks.RLock(lockIndex)
+	defer apiObjectLocks.RUnlock(lockIndex)
+
+	dataLength := int(endOffset - startOffset + 1)
+	metaData, status, err := store.RetrieveObjectAndStatus(orgID, objectType, objectID)
+	if err != nil {
+		return 0, nil, false, 0, err
+	}
+	if metaData == nil || status == common.NotReadyToSend || status == common.Verifying || status == common.VerificationFailed || status == common.ReceiverVerifying || status == common.ReceiverVerificationFailed || status == common.PartiallyReceived {
+		return 0, nil, false, 0, nil
+	}
+
+	var dataChunk []byte
+	var eof bool
+	var nofBytes int
+	if metaData.DestinationDataURI != "" && status == common.CompletelyReceived {
+		dataChunk, eof, nofBytes, err = dataURI.GetDataChunk(metaData.DestinationDataURI, dataLength, startOffset)
+	} else if metaData.SourceDataURI != "" && status == common.ReadyToSend {
+		dataChunk, eof, nofBytes, err = dataURI.GetDataChunk(metaData.SourceDataURI, dataLength, startOffset)
+	} else {
+		dataChunk, eof, nofBytes, err = store.ReadObjectData(orgID, objectType, objectID, dataLength, startOffset)
+	}
+
+	if err != nil {
+		return 0, nil, eof, nofBytes, err
+	}
+	if trace.IsLogging(logger.DEBUG) {
+		trace.Debug("In GetObjectDataByChunk. Get data %s %s in range %d-%d, eof: %t, nofBytes: %d\n", objectType, objectID, startOffset, endOffset, eof, nofBytes)
+	}
+
+	if len(dataChunk) == 0 {
+		return metaData.ObjectSize, nil, eof, nofBytes, nil
+	}
+
+	return metaData.ObjectSize, bytes.NewReader(dataChunk), eof, nofBytes, nil
+}
+
 // GetRemovedDestinationPolicyServicesFromESS get the removedDestinationPolicyServices list
 // Call the storage module to get the object's removedDestinationPolicyServices
 func GetRemovedDestinationPolicyServicesFromESS(orgID string, objectType string, objectID string) ([]common.ServiceID, common.SyncServiceError) {
@@ -710,28 +756,10 @@ func PutObjectAllData(orgID string, objectType string, objectID string, dataRead
 	return true, nil
 }
 
-func PutObjectChunkData(orgID string, objectType string, objectID string, dataReader io.Reader, startOffset int64, endOffset int64, totalSize int64, uploadOwnerID string) (bool, common.SyncServiceError) {
+func PutObjectChunkData(orgID string, objectType string, objectID string, dataReader io.Reader, startOffset int64, endOffset int64, totalSize int64) (bool, common.SyncServiceError) {
 	if trace.IsLogging(logger.DEBUG) {
-		trace.Debug("In PutObjectChunkData. Update data %s %s %s, startOffset: %d, endOffset: %d. Check if is leader: %t. UploadOwnerID: %s, current CSS ID: %s\n", orgID, objectType, objectID, startOffset, endOffset, leader.CheckIfLeader(), uploadOwnerID, leader.GetLeaderID())
+		trace.Debug("In PutObjectChunkData. Update data %s %s %s, startOffset: %d, endOffset: %d.\n", orgID, objectType, objectID, startOffset, endOffset)
 	}
-
-	if !leader.CheckIfLeader() {
-		if trace.IsLogging(logger.DEBUG) {
-			trace.Debug("In PutObjectChunkData. This is not leader, ignore...")
-		}
-		return false, &common.IgnoredRequest{Message: "Request Ignored by non-leader"}
-	}
-
-	if uploadOwnerID != "" && uploadOwnerID != leader.GetLeaderID() {
-		if log.IsLogging(logger.ERROR) {
-			log.Error("Failed to put chunk data for %s %s %s. It is leader, but uploadOwnerID (%s) != CSSID (%s)", orgID, objectType, objectID, uploadOwnerID, leader.GetLeaderID())
-		}
-		return false, &common.InternalError{Message: "leader changed during the chunk uploading"}
-	}
-
-	// 2 situations when reach here:
-	// It is leader && uploadOwnerID == leader.GetLeaderID()
-	// It is leader && uploadOwnerID == ""
 
 	common.HealthStatus.ClientRequestReceived()
 
@@ -767,7 +795,9 @@ func PutObjectChunkData(orgID string, objectType string, objectID string, dataRe
 
 	// append Data to temp file/data
 	isTempData := false
-	if common.NeedDataVerification(*metaData) {
+
+	// For MongoDB implementation, all data uploaded in chunks will be written to temp storage and then combined later. The dataVerifier will be a pass-thru if signature verification unneeded
+	if common.Configuration.StorageProvider == common.Mongo || common.NeedDataVerification(*metaData) {
 		isTempData = true
 	}
 
