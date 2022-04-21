@@ -178,6 +178,21 @@ func CanUserCreateObject(request *http.Request, orgID string, metaData *common.M
 		return true, userOrgID, userID
 	}
 
+	if code == AuthObjectAdmin {
+		if userOrgID != orgID {
+			code = AuthUser
+			// continue on code == authUser section
+		} else {
+			if metaData.ObjectType == common.MANIFEST_OBJECT_TYPE {
+				// AuthObjectAdmin doesn't have write access to manifest files
+				return false, userOrgID, userID
+			} else {
+				// AuthObjectAdmin have write access to other objects
+				return true, userOrgID, userID
+			}
+		}
+	}
+
 	aclUserType := GetACLUserType(code)
 
 	// check if given user has aclWriter access
@@ -245,6 +260,11 @@ func CanUserAccessAllObjects(request *http.Request, orgID, objectType string) (b
 	}
 
 	// CSS
+	// AuthObjectAdmin and AuthAdmin have same level of read acess
+	if code == AuthObjectAdmin {
+		code = AuthAdmin
+	}
+
 	if code == AuthAdmin {
 		if userOrgID != orgID {
 			code = AuthUser
@@ -252,13 +272,17 @@ func CanUserAccessAllObjects(request *http.Request, orgID, objectType string) (b
 		} else {
 			return true, code, userID
 		}
-
 	}
 
 	if code == AuthUser || code == AuthNodeUser {
 		if userOrgID != orgID {
 			// only display public object
 			return false, code, userID
+		}
+
+		if objectType == common.MANIFEST_OBJECT_TYPE && code == AuthNodeUser {
+			// AuthNodeUser have read access to manifest file
+			return true, code, userID
 		}
 
 		aclUserType := GetACLUserType(code)

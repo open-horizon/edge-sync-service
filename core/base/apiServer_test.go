@@ -907,6 +907,80 @@ func testHandleObjectHelper(nodeType string, storageType string, t *testing.T) {
 	}
 }
 
+func TestHandleManifest(t *testing.T) {
+	testHandleManifestHelper(common.CSS, common.Mongo, t)
+	testHandleManifestHelper(common.CSS, common.Bolt, t)
+}
+
+func testHandleManifestHelper(nodeType string, storageType string, t *testing.T) {
+	if status := testAPIServerSetup(nodeType, storageType); status != "" {
+		t.Errorf(status)
+	}
+	defer communications.Store.Stop()
+
+	testData := []struct {
+		method             string
+		appKey             string
+		orgID              string
+		objectType         string
+		objectID           string
+		metaData           *common.MetaData
+		data               []byte
+		expectedHTTPStatus int
+		testID             int
+	}{
+
+		{http.MethodPut, "testerAdmin@myorg222", "myorg222", common.MANIFEST_OBJECT_TYPE, "manifest1",
+			&common.MetaData{ObjectID: "manifest1", ObjectType: common.MANIFEST_OBJECT_TYPE, DestOrgID: "myorg222"},
+			[]byte("abc"), http.StatusNoContent, 0},
+		{http.MethodGet, "testerObjectAdmin@myorg222", "myorg222", common.MANIFEST_OBJECT_TYPE, "manifest1",
+			nil, nil, http.StatusOK, 1},
+		{http.MethodGet, "testerNode@myorg222", "myorg222", common.MANIFEST_OBJECT_TYPE, "manifest1",
+			nil, nil, http.StatusOK, 2},
+		// AuthObjectAdmin, authUser, and authNode don't have write access to manifest files
+		{http.MethodPut, "testerObjectAdmin@myorg222", "myorg222", common.MANIFEST_OBJECT_TYPE, "manifest1",
+			&common.MetaData{ObjectID: "manifest1", ObjectType: common.MANIFEST_OBJECT_TYPE, DestOrgID: "myorg222"},
+			[]byte("abc"), http.StatusForbidden, 3},
+		{http.MethodPut, "testerUser@myorg222", "myorg222", common.MANIFEST_OBJECT_TYPE, "manifest2",
+			&common.MetaData{ObjectID: "manifest2", ObjectType: common.MANIFEST_OBJECT_TYPE, DestOrgID: "myorg222"},
+			[]byte("abc"), http.StatusForbidden, 4},
+		{http.MethodPut, "testerNode@myorg222", "myorg222", common.MANIFEST_OBJECT_TYPE, "manifest2",
+			&common.MetaData{ObjectID: "manifest2", ObjectType: common.MANIFEST_OBJECT_TYPE, DestOrgID: "myorg222"},
+			[]byte("abc"), http.StatusForbidden, 5},
+	}
+
+	for _, test := range testData {
+		urlString := test.orgID + "/" + test.objectType + "/" + test.objectID
+
+		var buffer bytes.Buffer
+		if test.method == http.MethodPut {
+			encoder := json.NewEncoder(&buffer)
+			if test.metaData != nil {
+				payload := objectUpdate{Meta: *test.metaData}
+				if err := encoder.Encode(payload); err != nil {
+					t.Errorf("Failed to encode metaData. Error: %s\n", err)
+				}
+			}
+		}
+
+		writer := newAPIServerTestResponseWriter()
+		request, _ := http.NewRequest(test.method, urlString, ioutil.NopCloser(&buffer))
+		request.SetBasicAuth(test.appKey, "")
+
+		handleObjects(writer, request)
+		if writer.statusCode != test.expectedHTTPStatus {
+			t.Errorf("handle Manifest of %s returned a status of %d instead of %d for test %d under %s and %s database\n", urlString,
+				writer.statusCode, test.expectedHTTPStatus, test.testID, test.appKey, storageType)
+		}
+	}
+
+	// cleanup
+	if err := deleteOrganization("myorg222"); err != nil {
+		t.Errorf("deleteOrganization failed. Error: %s", err.Error())
+	}
+
+}
+
 func TestInvalidURLs(t *testing.T) {
 	testInvalidURLs(common.Bolt, t)
 	testInvalidURLs(common.Mongo, t)
