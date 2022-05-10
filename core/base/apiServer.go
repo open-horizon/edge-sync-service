@@ -1117,7 +1117,7 @@ func handleListObjectTypes(orgID string, writer http.ResponseWriter, request *ht
 
 	// only allow AuthSyncAdmin, AuthAdmin, AuthUser and AuthNodeUser to access, it is okay if orgID != userOrgID to display "public" object
 	code, userOrgID, userID := security.Authenticate(request)
-	if code == security.AuthFailed || (code != security.AuthSyncAdmin && code != security.AuthAdmin && code != security.AuthUser && code != security.AuthNodeUser) {
+	if code == security.AuthFailed || (code != security.AuthSyncAdmin && code != security.AuthAdmin && code != security.AuthObjectAdmin && code != security.AuthUser && code != security.AuthNodeUser) {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
 		return
@@ -2844,7 +2844,7 @@ func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWr
 	}
 
 	// only allow AuthSyncAdmin, AuthAdmin, AuthUser and AuthNodeUser to access, it is okay if orgID != userOrgID to display "public" object
-	if code == security.AuthFailed || (code != security.AuthSyncAdmin && code != security.AuthAdmin && code != security.AuthUser && code != security.AuthNodeUser) {
+	if code == security.AuthFailed || (code != security.AuthSyncAdmin && code != security.AuthAdmin && code != security.AuthObjectAdmin && code != security.AuthUser && code != security.AuthNodeUser) {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Write(unauthorizedBytes)
 		return
@@ -4032,7 +4032,7 @@ func GetAccessibleObjectsDestinationPolicy(code int, orgID string, userOrgID str
 
 	accessibleObjects := make([]common.ObjectDestinationPolicy, 0)
 
-	if code == security.AuthSyncAdmin || (code == security.AuthAdmin && orgID == userOrgID) {
+	if code == security.AuthSyncAdmin || (code == security.AuthAdmin && orgID == userOrgID) || (code == security.AuthObjectAdmin && orgID == userOrgID) {
 		// AuthSyncAdmin: show all objects
 		// AuthAdmin in this org: show all objects
 		accessibleObjects = append(accessibleObjects, objects...)
