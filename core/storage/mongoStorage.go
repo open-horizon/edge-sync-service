@@ -1126,25 +1126,38 @@ func (store *MongoStorage) RemoveObjectTempData(orgID string, objectType string,
 		trace.Trace(fmt.Sprintf("RemoveObjectTempData for org - %s, type - %s, id - %s", orgID, objectType, objectID))
 	}
 
-	foundChunk := true
-	chunkNum := 1
-	for foundChunk == true {
-		id := createTempObjectCollectionID(orgID, objectType, objectID, chunkNum)
-		fileHandle := store.getFileHandle(id)
-		if fileHandle != nil {
-			store.CloseDataReader(fileHandle.file)
-			store.deleteFileHandle(id)
-			if err := store.removeFile(id); err != nil && err != mgo.ErrNotFound {
-				return err
-			}
-			if trace.IsLogging(logger.TRACE) {
-				trace.Trace(fmt.Sprintf("Removed file %s)", id))
-			}
-		} else {
-			foundChunk = false
-		}
-		chunkNum += 1
+	metaData, err := store.RetrieveObject(orgID, objectType, objectID)
+	if err != nil || metaData == nil {
+		return &Error{fmt.Sprintf("Error in retrieving object metadata.\n")}
 	}
+
+	var offset int64 = 0
+	chunkNumber := 1
+
+	// Will be 0 if data was uploaded with streaming 
+	if metaData.UploadChunkSize > 0 {
+
+		for offset < metaData.ObjectSize {
+
+			id := createTempObjectCollectionID(orgID, objectType, objectID, chunkNumber)
+			if trace.IsLogging(logger.TRACE) {
+				trace.Trace(fmt.Sprintf("RemoveObjectTempData for org - %s, type - %s, id - %s, chunkNum - %d", orgID, objectType, objectID, chunkNumber))
+			}
+			fileHandle,_ := store.retrieveObjectTempData(id)
+
+			if fileHandle != nil {
+				store.CloseDataReader(fileHandle.file)
+				store.deleteFileHandle(id)
+
+				//Don't return on errors 
+				store.removeFile(id)
+			}
+
+			chunkNumber += 1
+			offset += metaData.UploadChunkSize
+		}
+	}
+
 
 	return nil
 }
@@ -1179,8 +1192,6 @@ func (store *MongoStorage) RetrieveObjectTempData(orgID string, objectType strin
 			}
 
 			if fileHandle != nil {
-				// Store the fileHandle so we can delete it when done; needed for RemoveObjectTempData 
-				store.putFileHandle(id, fileHandle)
 				readers = append(readers, fileHandle.file)
 			}
 
