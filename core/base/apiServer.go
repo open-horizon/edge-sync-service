@@ -4223,7 +4223,7 @@ func handleHealth(writer http.ResponseWriter, request *http.Request) {
 // Set HTTP cache control headers for http 1.0 and 1.1 clients.
 func setResponseHeaders(writer http.ResponseWriter) {
 	// Set HTTP cache control headers for http 1.0 and 1.1 clients.
-	writer.Header().Set("Cache-Control", "no-store")
+	writer.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
 	writer.Header().Set("Pragma", "no-cache")
 
 	// Set Strict-Transport-Security headers
