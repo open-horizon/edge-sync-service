@@ -24,7 +24,7 @@ func ParseSemVer(input string) (*SemVer, error) {
 	if trimmed == "INFINITY" {
 		return &SemVer{-1, -1, -1, true}, nil
 	}
-	parts := strings.Split(trimmed, ".")
+	parts := strings.Split(trimmed, ".") //[1, 0, 0]
 	if len(parts) > 3 {
 		return nil, fmt.Errorf("A semantic version (%s) must only have three parts, separated by periods", trimmed)
 	}
@@ -115,6 +115,7 @@ func ParseSemVerRange(input string) (*SemVerRange, error) {
 		if lastChar == ']' || lastChar == ')' {
 			return nil, fmt.Errorf("The semantic version range %s has no start character, but has an end character", trimmed)
 		}
+		// single version
 		semVer, err := ParseSemVer(trimmed)
 		if err != nil {
 			return nil, fmt.Errorf("Failed to parse sematic version range %s. Error: %s", trimmed, err.Error())
@@ -122,7 +123,8 @@ func ParseSemVerRange(input string) (*SemVerRange, error) {
 		if semVer.Infinity {
 			return nil, errors.New("A semantic version range of one value can not be INFIITY")
 		}
-		return &SemVerRange{semVer, semVer, true, true}, nil
+		// single version needs to be turned to version range: "1.0.0" -> "[1.0.0, INFINITY)"
+		return &SemVerRange{semVer, &SemVer{-1, -1, -1, true}, true, false}, nil
 	}
 
 	if lastChar == ']' {
