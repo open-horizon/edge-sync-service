@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"sort"
 	"sync"
@@ -1848,7 +1849,7 @@ func getOffsetsForResendFromScratch(notification common.Notification, metaData c
 		return offsets
 	}
 
-	maxInflightChunks := 1
+	maxInflightChunks := math.MaxInt32
 	if protocol == common.MQTTProtocol {
 		maxInflightChunks = common.Configuration.MaxInflightChunks
 	}
@@ -1861,7 +1862,7 @@ func getOffsetsForResendFromScratch(notification common.Notification, metaData c
 		return offsets
 	}
 
-	if metaData.ChunkSize <= 0 || metaData.ObjectSize <= 0 {
+	if metaData.ChunkSize <= 0 || metaData.ObjectSize <= 0 || !common.Configuration.EnableDataChunk {
 		offsets = append(offsets, 0)
 	} else {
 		var offset int64

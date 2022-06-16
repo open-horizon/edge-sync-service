@@ -919,6 +919,7 @@ func (communication *HTTP) GetDataByChunk(metaData common.MetaData, offset int64
 		return nil
 	}
 
+	// update ESS notification to "getdata"
 	if err := updateGetDataNotification(metaData, metaData.OriginType, metaData.OriginID, offset); err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
 		return err
