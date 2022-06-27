@@ -118,6 +118,20 @@ func IsIgnoredRequest(err error) bool {
 	return ok
 }
 
+// TooManyRequestError is the error for too many request
+type TooManyRequestError struct {
+	Message string
+}
+
+func (e *TooManyRequestError) Error() string {
+	return e.Message
+}
+
+func IsTooManyRequestError(err error) bool {
+	_, ok := err.(*TooManyRequestError)
+	return ok
+}
+
 // Destination describes a sync service node.
 // Each sync service edge node (ESS) has an address that is composed of the node's ID, Type, and Organization.
 // An ESS node communicates with the CSS using either MQTT or HTTP.

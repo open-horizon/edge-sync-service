@@ -1687,7 +1687,7 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 		if trace.IsLogging(logger.TRACE) {
 			trace.Trace("Failed to acquire semaphore for handleGetData of %s %s %s %s \n", objectType, objectID, destType, destID)
 		}
-		err := &Error{"Error in handleGetData: Unable to acquire object semaphore."}
+		err := &common.TooManyRequestError{Message: "Error in handleGetData: Unable to acquire object semaphore."}
 		SendErrorResponse(writer, err, "", http.StatusTooManyRequests)
 		return
 	}
