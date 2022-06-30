@@ -2159,6 +2159,19 @@ func handleObjectGetData(orgID string, objectType string, objectID string, canAc
 		}
 	}
 
+	if common.ObjectDownloadSemaphore.TryAcquire(1) == false {
+		// If too many downloads are in flight, agent will get error and retry. Originally, there was a lock around the download that
+		// caused the downloads to be serial. It was changed to use a semaphore to allow limited concurrency.
+		if trace.IsLogging(logger.TRACE) {
+			trace.Trace("Failed to acquire semaphore for handleObjects of %s %s %s \n", orgID, objectType, objectID)
+		}
+		err := &common.TooManyRequestError{Message: "Error in handleObjects: Unable to acquire object semaphore."}
+		communications.SendErrorResponse(writer, err, "", 0)
+		return
+	}
+
+	defer common.ObjectDownloadSemaphore.Release(1)
+
 	// Get range from the header "Range:bytes={startOffset}-{endOffset}"
 	var dataReader io.Reader
 	var eof bool

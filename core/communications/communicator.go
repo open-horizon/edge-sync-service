@@ -147,6 +147,8 @@ func SendErrorResponse(writer http.ResponseWriter, err error, message string, st
 			statusCode = http.StatusConflict
 		case *common.IgnoredRequest:
 			statusCode = http.StatusTemporaryRedirect
+		case *common.TooManyRequestError:
+			statusCode = http.StatusTooManyRequests
 		case *Error:
 			// Don't return an error if it's a communication error
 			statusCode = http.StatusNoContent
@@ -198,7 +200,7 @@ func IsTransportError(pResp *http.Response, err error) bool {
 			// 503: service unavailable
 			return true
 		} else if pResp.StatusCode == http.StatusRequestTimeout {
-			// 408: request time out 
+			// 408: request time out
 			return true
 		} else if pResp.StatusCode == http.StatusTooManyRequests {
 			// 429: too many requests
