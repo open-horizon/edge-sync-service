@@ -1214,6 +1214,21 @@ func DeleteObject(orgID string, objectType string, objectID string) common.SyncS
 		return err
 	}
 
+	if destinations, err := store.GetObjectDestinations(*metaData); err != nil {
+		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
+		return err
+	} else if len(destinations) == 0 {
+		// If this object doesn't have any destinations, delete metadata and data
+		if trace.IsLogging(logger.DEBUG) {
+			trace.Debug("In DeleteObject. Object %s %s has no destinations, delete metadata and data\n", objectType, objectID)
+		}
+		err = storage.DeleteStoredObject(store, *metaData)
+		common.ObjectLocks.Unlock(lockIndex)
+		apiObjectLocks.Unlock(lockIndex)
+		return err
+	}
+
 	if err := storage.DeleteStoredData(store, *metaData); err != nil {
 		common.ObjectLocks.Unlock(lockIndex)
 		apiObjectLocks.Unlock(lockIndex)
