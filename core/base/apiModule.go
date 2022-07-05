@@ -559,6 +559,20 @@ func GetObjectDataByChunk(orgID string, objectType string, objectID string, star
 		trace.Debug("In GetObjectDataByChunk. Get data %s %s in range %d-%d\n", objectType, objectID, startOffset, endOffset)
 	}
 
+	// Add semaphore here to prevent OOM when scaled agents try to download install packages during auto-upgrade at same time
+	// Semaphore is not applied to GetObjectData because agent-install.sh can't handle it. GetObjectData will just stream the data back without using CSS memory
+	if common.ObjectDownloadSemaphore.TryAcquire(1) == false {
+		// If too many downloads are in flight, agent will get error and retry. Originally, there was a lock around the download that
+		// caused the downloads to be serial. It was changed to use a semaphore to allow limited concurrency.
+		if trace.IsLogging(logger.TRACE) {
+			trace.Trace("Failed to acquire semaphore for handleObjects of %s %s %s \n", orgID, objectType, objectID)
+		}
+		err := &common.TooManyRequestError{Message: "Error in handleObjects: Unable to acquire object semaphore."}
+		return 0, nil, false, 0, err
+	}
+
+	defer common.ObjectDownloadSemaphore.Release(1)
+
 	common.HealthStatus.ClientRequestReceived()
 
 	lockIndex := common.HashStrings(orgID, objectType, objectID)
