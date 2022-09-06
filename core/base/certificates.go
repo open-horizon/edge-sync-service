@@ -29,10 +29,31 @@ const (
 
 func setupCertificates() error {
 	if common.Configuration.NodeType == common.ESS && common.ServingAPIs {
+		if log.IsLogging(logger.INFO) {
+			log.Info("Server certificate is %s\n", common.Configuration.ServerCertificate)
+			log.Info("Server key is %s\n", common.Configuration.ServerKey)
+		}
 		_, err := tls.X509KeyPair([]byte(common.Configuration.ServerCertificate), []byte(common.Configuration.ServerKey))
 		if err == nil {
 			// common.Configuration.ServerCertificate) and common.Configuration.ServerKey are pem format strings
+			if log.IsLogging(logger.INFO) {
+				log.Info("No error from load key pair, return nil error\n")
+			}
 			return nil
+		}
+		if log.IsLogging(logger.INFO) {
+			log.Info("error from load key pair: %v\n", err)
+		}
+		_, err = tls.LoadX509KeyPair(common.Configuration.ServerCertificate, common.Configuration.ServerKey)
+		if err == nil {
+			// common.Configuration.ServerCertificate) and common.Configuration.ServerKey are path to pem file
+			if log.IsLogging(logger.INFO) {
+				log.Info("No error from load key pair from file, return nil error\n")
+			}
+			return nil
+		}
+		if log.IsLogging(logger.INFO) {
+			log.Info("error from load cert and key file: %v\n", err)
 		}
 
 		common.Configuration.ServerCertificate = certDir + certName
