@@ -177,11 +177,19 @@ func setupServerTLSConfig() error {
 		keyFile = common.Configuration.PersistenceRootPath + common.Configuration.ServerKey
 	}
 
+	if log.IsLogging(logger.INFO) {
+		log.Info("certFile %s, keyFile: %s\n", certFile, keyFile)
+	}
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
+		log.Info("Load certificate key pair with certFile and keyFile has error: %v\n", err)
 		if _, ok := err.(*os.PathError); ok {
+			log.Info("Load certificate key pair with certFile and keyFile has path error, will try to load content...\n")
 			// The ServerCertificate and ServerKey are likely pem file contents
 			cert, err = tls.X509KeyPair([]byte(common.Configuration.ServerCertificate), []byte(common.Configuration.ServerKey))
+			if err != nil {
+				log.Info("Load with certFile byte and keyFile byte has error: %v\n", err)
+			}
 		}
 	}
 
