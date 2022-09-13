@@ -159,17 +159,17 @@ func Start(swaggerFile string, registerHandlers bool) common.SyncServiceError {
 
 	objectQueue = NewObjectWorkQueue(objectQueueBufferSize)
 	if trace.IsLogging(logger.INFO) {
-		trace.Info("ObjectQueue initialzed with buffer size %d", objectQueueBufferSize)
+		trace.Info("ObjectQueue initialized with buffer size %d", objectQueueBufferSize)
 	}
 
 	objectDataVerifyQueue = NewObjectVerifyQueue(objectDataVerifyQueueBufferSize)
 	if trace.IsLogging(logger.INFO) {
-		trace.Info("ObjectVerifyQueue initialzed with buffer size %d", objectDataVerifyQueueBufferSize)
+		trace.Info("ObjectVerifyQueue initialized with buffer size %d", objectDataVerifyQueueBufferSize)
 	}
 
 	destReqQueue = communications.NewDestinationRequestQueue(objectQueueBufferSize)
 	if trace.IsLogging(logger.INFO) {
-		trace.Info("DestinationRequestQueue initialzed with buffer size %d", objectQueueBufferSize)
+		trace.Info("DestinationRequestQueue initialized with buffer size %d", objectQueueBufferSize)
 	}
 	communications.DestReqQueue = destReqQueue
 
