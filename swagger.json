@@ -2672,6 +2672,12 @@
           "type": "string",
           "x-go-name": "SourceDataURI"
         },
+        "uploadChunkSize": {
+          "description": "UploadChunkSize is an internal field indicating the upload chunk size used when uploading the\nthe model (if chunking was used)\nThis field should not be set by users.",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "UploadChunkSize"
+        },
         "version": {
           "description": "Version is the object's version (as used by the application).\nOptional field, empty by default.",
           "type": "string",
