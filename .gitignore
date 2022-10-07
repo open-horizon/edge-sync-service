@@ -4,5 +4,6 @@ core/communications/persist
 core/storage/persist
 core/dataVerifier/dataURITmp
 core/dataVerifier/persist
+swagger-ui/*
 .DS_STORE
 vendor/*/
