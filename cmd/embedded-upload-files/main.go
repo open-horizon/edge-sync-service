@@ -151,7 +151,7 @@ func main() {
 	}
 	goOn = false
 	waitGroup.Wait()
-	syncClient.Stop(1)
+	syncClient.Stop(1, false)
 }
 
 func curTime() float64 {
