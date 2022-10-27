@@ -90,7 +90,7 @@ func main() {
 	os.Stdin.Read(buffer)
 	goOn = false
 	syncClient.StopPollingForUpdates()
-	syncClient.Stop(5)
+	syncClient.Stop(5, false)
 	close(stopChannel)
 	waitGroup.Wait()
 }
@@ -115,7 +115,7 @@ func fileReceiver(syncClient *client.SyncServiceClient, updatesChannel chan *cli
 }
 
 func deleteFile(syncClient *client.SyncServiceClient, object *client.ObjectMetaData) {
-	syncClient.MarkObjectDeleted(object)
+	syncClient.MarkObjectDeleted("", object)
 }
 
 func receiveFile(syncClient *client.SyncServiceClient, object *client.ObjectMetaData) {
