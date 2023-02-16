@@ -216,6 +216,10 @@ type Config struct {
 	// default is 1
 	HTTPCSSObjDownloadConcurrencyMultiplier int `env:"HTTPCSSObjDownloadConcurrencyMultiplier"`
 
+	// HTTPServerReadHeaderTimeout is to specifyt the http server ReadHeaderTimout in second
+	// default is 60
+	HTTPServerReadHeaderTimeout int `env:"HTTPServerReadHeaderTimeout"`
+
 	// LogLevel specifies the logging level in string format
 	LogLevel string `env:"LOG_LEVEL"`
 
@@ -760,6 +764,7 @@ func SetDefaultConfig(config *Config) {
 	config.HTTPESSClientTimeout = 120
 	config.HTTPESSObjClientTimeout = 600
 	config.HTTPCSSObjDownloadConcurrencyMultiplier = 1
+	config.HTTPServerReadHeaderTimeout = 60
 	config.MessagingGroupCacheExpiration = 60
 	config.ShutdownQuiesceTime = 60
 	config.ESSConsumedObjectsKept = 1000
