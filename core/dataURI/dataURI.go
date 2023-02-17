@@ -41,7 +41,7 @@ func AppendData(uri string, dataReader io.Reader, dataLength uint32, offset int6
 	if err != nil {
 		return isLastChunk, common.CreateError(err, fmt.Sprintf("Failed to open file %s to append data. Error: ", dataURI.Path))
 	}
-	defer file.Close()
+	defer closeFileLogError(file)
 	if _, err = file.Seek(offset, io.SeekStart); err != nil {
 		return isLastChunk, &common.IOError{Message: fmt.Sprintf("Failed to seek to the offset %d of a file. Error: %s", offset, err.Error())}
 	}
@@ -89,7 +89,7 @@ func StoreData(uri string, dataReader io.Reader, dataLength uint32) (int64, comm
 	if err != nil {
 		return 0, common.CreateError(err, fmt.Sprintf("Failed to open file %s to write data. Error: ", dataURI.Path))
 	}
-	defer file.Close()
+	defer closeFileLogError(file)
 
 	if _, err = file.Seek(0, io.SeekStart); err != nil {
 		return 0, &common.IOError{Message: "Failed to seek to the start of a file. Error: " + err.Error()}
@@ -123,7 +123,7 @@ func StoreTempData(uri string, dataReader io.Reader, dataLength uint32) (int64, 
 	if err != nil {
 		return 0, common.CreateError(err, fmt.Sprintf("Failed to open file %s to write data. Error: ", dataURI.Path))
 	}
-	defer file.Close()
+	defer closeFileLogError(file)
 
 	if _, err = file.Seek(0, io.SeekStart); err != nil {
 		return 0, &common.IOError{Message: "Failed to seek to the start of a file. Error: " + err.Error()}
@@ -204,7 +204,7 @@ func GetDataChunk(uri string, size int, offset int64) ([]byte, bool, int, common
 		}
 		return nil, true, 0, common.CreateError(err, fmt.Sprintf("Failed to open file %s to read data. Error: ", dataURI.Path))
 	}
-	defer file.Close()
+	defer closeFileLogError(file)
 
 	eof := false
 	result := make([]byte, size)
@@ -251,4 +251,16 @@ func DeleteStoredData(uri string, isTempData bool) common.SyncServiceError {
 		return &common.IOError{Message: "Failed to delete data. Error: " + err.Error()}
 	}
 	return nil
+}
+
+// closeFileLogError will close the given file and log any error encountered if logging is enabled
+func closeFileLogError(f *os.File) {
+	if f == nil {
+		return
+	}
+	if err := f.Close(); err != nil {
+		if trace.IsLogging(logger.TRACE) {
+			trace.Trace("Error closing file: %v", err.Error())
+		}
+	}
 }
