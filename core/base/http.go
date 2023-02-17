@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/open-horizon/edge-sync-service/common"
 	"github.com/open-horizon/edge-utilities/logger"
@@ -21,8 +22,8 @@ var secureHTTPServer http.Server
 var unsecureHTTPServer http.Server
 
 func startHTTPServer(ipAddress string, registerHandlers bool, swaggerFile string) common.SyncServiceError {
-	secureHTTPServer = http.Server{}
-	unsecureHTTPServer = http.Server{}
+	secureHTTPServer = http.Server{ReadHeaderTimeout: time.Second * time.Duration(common.Configuration.HTTPServerReadHeaderTimeout)}
+	unsecureHTTPServer = http.Server{ReadHeaderTimeout: time.Second * time.Duration(common.Configuration.HTTPServerReadHeaderTimeout)}
 
 	secureHTTPServer.Addr =
 		fmt.Sprintf("%s:%d", common.Configuration.ListeningAddress,
