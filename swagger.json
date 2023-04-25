@@ -2919,7 +2919,6 @@
         },
         "value": {
           "description": "Value is the value of the property",
-          "type": "object",
           "x-go-name": "Value"
         }
       },
