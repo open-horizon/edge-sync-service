@@ -712,8 +712,8 @@ func (store *BoltStorage) RetrieveObjects(orgID string, destType string, destID 
 
 	function := func(object boltObject) (*boltObject, common.SyncServiceError) {
 		if object.Meta.DestinationPolicy == nil && orgID == object.Meta.DestOrgID &&
-			(object.Meta.DestType == "" || object.Meta.DestType == destType) &&
-			(object.Meta.DestID == "" || object.Meta.DestID == destID) {
+			(((object.Meta.DestType == "" && len(object.Meta.DestinationsList) == 0) || object.Meta.DestType == destType) && (object.Meta.DestID == "" || object.Meta.DestID == destID) ||
+				common.StringListContains(object.Meta.DestinationsList, fmt.Sprintf("%s:%s", destType, destID))) {
 			status := common.Pending
 			if object.Status == common.ReadyToSend && !object.Meta.Inactive {
 				status = common.Delivering
