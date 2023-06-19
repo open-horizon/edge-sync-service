@@ -900,8 +900,8 @@ OUTER:
 			if r.MetaData.DestinationPolicy != nil {
 				continue
 			}
-			if (r.MetaData.DestType == "" || r.MetaData.DestType == destType) &&
-				(r.MetaData.DestID == "" || r.MetaData.DestID == destID) {
+			if (((r.MetaData.DestType == "" && len(r.MetaData.DestinationsList) == 0) || r.MetaData.DestType == destType) && (r.MetaData.DestID == "" || r.MetaData.DestID == destID)) ||
+				common.StringListContains(r.MetaData.DestinationsList, fmt.Sprintf("%s:%s", destType, destID)) {
 				status := common.Pending
 				if r.Status == common.ReadyToSend && !r.MetaData.Inactive {
 					status = common.Delivering
@@ -1134,7 +1134,7 @@ func (store *MongoStorage) RemoveObjectTempData(orgID string, objectType string,
 	var offset int64 = 0
 	chunkNumber := 1
 
-	// Will be 0 if data was uploaded with streaming 
+	// Will be 0 if data was uploaded with streaming
 	if metaData.UploadChunkSize > 0 {
 
 		for offset < metaData.ObjectSize {
@@ -1143,13 +1143,13 @@ func (store *MongoStorage) RemoveObjectTempData(orgID string, objectType string,
 			if trace.IsLogging(logger.TRACE) {
 				trace.Trace(fmt.Sprintf("RemoveObjectTempData for org - %s, type - %s, id - %s, chunkNum - %d", orgID, objectType, objectID, chunkNumber))
 			}
-			fileHandle,_ := store.retrieveObjectTempData(id)
+			fileHandle, _ := store.retrieveObjectTempData(id)
 
 			if fileHandle != nil {
 				store.CloseDataReader(fileHandle.file)
 				store.deleteFileHandle(id)
 
-				//Don't return on errors 
+				//Don't return on errors
 				store.removeFile(id)
 			}
 
@@ -1157,7 +1157,6 @@ func (store *MongoStorage) RemoveObjectTempData(orgID string, objectType string,
 			offset += metaData.UploadChunkSize
 		}
 	}
-
 
 	return nil
 }
@@ -1188,7 +1187,7 @@ func (store *MongoStorage) RetrieveObjectTempData(orgID string, objectType strin
 			}
 			fileHandle, err := store.retrieveObjectTempData(id)
 			if err != nil {
-				return  nil, &Error{fmt.Sprintf("Error in retrieving objects chunk data. Error: %s.\n", err)}
+				return nil, &Error{fmt.Sprintf("Error in retrieving objects chunk data. Error: %s.\n", err)}
 			}
 
 			if fileHandle != nil {
@@ -1226,7 +1225,6 @@ func (store *MongoStorage) retrieveObjectTempData(id string) (*fileHandle, commo
 func (store *MongoStorage) AppendObjectData(orgID string, objectType string, objectID string, dataReader io.Reader,
 	dataLength uint32, offset int64, total int64, isFirstChunk bool, isLastChunk bool, isTempData bool) (bool, common.SyncServiceError) {
 
-
 	var n int
 	var err error
 	var data []byte
@@ -1259,7 +1257,7 @@ func (store *MongoStorage) AppendObjectData(orgID string, objectType string, obj
 
 	// Figure out which chunk this is by looking at offset + length of data
 	var chunkNumber int
-	if ( offset + n_int64 ) < total {
+	if (offset + n_int64) < total {
 		chunkNumber = (int(offset) + n) / n
 	} else {
 		updatedLastChunk = true
@@ -1276,8 +1274,8 @@ func (store *MongoStorage) AppendObjectData(orgID string, objectType string, obj
 				return isLastChunk, &Error{fmt.Sprintf("Failed to read the upload chunk size. Error: %s.", err)}
 			}
 
-			chunkNumber = (int)(total / chunkSize )
-			if total % chunkSize != 0 {
+			chunkNumber = (int)(total / chunkSize)
+			if total%chunkSize != 0 {
 				chunkNumber += 1
 			}
 		}
@@ -1335,12 +1333,11 @@ func (store *MongoStorage) AppendObjectData(orgID string, objectType string, obj
 	return updatedLastChunk, nil
 }
 
-
 // Handles storing the upload data chunk size and the total size
 func (store *MongoStorage) setUploadDataInfo(orgID string, objectType string, objectID string, chunkSize int64, totalSize int64) common.SyncServiceError {
 	id := createObjectCollectionID(orgID, objectType, objectID)
-	if err := store.update(objects, bson.M{"_id": id}, bson.M{ "$set": bson.M{"metadata.upload-chunk-size": chunkSize, "metadata.object-size": totalSize}}); err != nil {
-					 return &Error{fmt.Sprintf("Failed to set uploadDataChunkSize. Error: %s.", err)}
+	if err := store.update(objects, bson.M{"_id": id}, bson.M{"$set": bson.M{"metadata.upload-chunk-size": chunkSize, "metadata.object-size": totalSize}}); err != nil {
+		return &Error{fmt.Sprintf("Failed to set uploadDataChunkSize. Error: %s.", err)}
 	}
 	return nil
 }
@@ -1462,7 +1459,7 @@ func (store *MongoStorage) DeleteStoredData(orgID string, objectType string, obj
 	var id string
 	if isTempData {
 		// Make sure we have all the temp data by calling RetrieveObjectTempData here
-		_,err := store.RetrieveObjectTempData(orgID, objectType, objectID)
+		_, err := store.RetrieveObjectTempData(orgID, objectType, objectID)
 		if err == nil {
 			return store.RemoveObjectTempData(orgID, objectType, objectID)
 		} else {
