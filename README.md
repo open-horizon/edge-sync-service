@@ -67,7 +67,9 @@ The following is a list of the main features provided by the sync service:
      1. `export GOPATH=$(pwd)`
      2. `go get -d github.com/open-horizon/edge-sync-service`
      3. `cd src/github.com/open-horizon/edge-sync-service`
-     4. `./get_dependencies.sh`
+     4. `go mod tidy`
+     5. `go mod vendor`
+     6. `./get_dependencies.sh`
 
 ### Build
 
