@@ -744,7 +744,7 @@ func SetDefaultConfig(config *Config) {
 	config.EnableDataChunk = true
 	config.MaxDataChunkSize = 5120 * 1024
 	config.MaxInflightChunks = 1
-	config.MongoAddressCsv = "localhost:27017"
+	config.MongoAddressCsv = "mongodb://localhost:27017"
 	config.MongoDbName = "d_edge"
 	config.MongoAuthDbName = "admin"
 	config.MongoUsername = ""

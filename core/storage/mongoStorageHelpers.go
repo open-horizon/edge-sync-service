@@ -1,28 +1,30 @@
 package storage
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"strings"
 	"time"
 
-	"github.com/globalsign/mgo"
-	"github.com/globalsign/mgo/bson"
 	"github.com/open-horizon/edge-sync-service/common"
 	"github.com/open-horizon/edge-utilities/logger"
 	"github.com/open-horizon/edge-utilities/logger/log"
 	"github.com/open-horizon/edge-utilities/logger/trace"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/gridfs"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-func (store *MongoStorage) getSession() *mgo.Session {
-	if store.cacheSize < 2 {
-		return store.session
-	}
+func (store *MongoStorage) getMongoClient() *mongo.Client {
+	// Need lock??
 	store.lock()
-	session := store.sessionCache[store.cacheIndex]
-	store.cacheIndex = (store.cacheIndex + 1) % store.cacheSize
+	client := store.client
 	store.unLock()
-	return session
+	return client
 }
 
 func (store *MongoStorage) checkObjects() {
@@ -32,20 +34,20 @@ func (store *MongoStorage) checkObjects() {
 
 	currentTime := time.Now().UTC().Format(time.RFC3339)
 	query := bson.M{
-		"$and": []bson.M{
+		"$and": bson.A{
 			bson.M{"metadata.expiration": bson.M{"$ne": ""}},
 			bson.M{"metadata.expiration": bson.M{"$lte": currentTime}},
-			bson.M{"$or": []bson.M{
+			bson.M{"$or": bson.A{
 				bson.M{"status": common.NotReadyToSend},
 				bson.M{"status": common.ReadyToSend},
 				bson.M{"status": common.Verifying},
 				bson.M{"status": common.VerificationFailed}}}},
 	}
 
-	selector := bson.M{"metadata": bson.ElementDocument, "last-update": bson.ElementTimestamp}
+	selector := bson.M{"metadata": 1, "last-update": 1}
 	result := []object{}
 	if err := store.fetchAll(objects, query, selector, &result); err != nil {
-		if err != mgo.ErrNotFound && log.IsLogging(logger.ERROR) {
+		if err != mongo.ErrNoDocuments && log.IsLogging(logger.ERROR) {
 			log.Error("Error in mongoStorage.checkObjects: failed to remove expired objects. Error: %s\n", err)
 		}
 		return
@@ -64,18 +66,19 @@ func (store *MongoStorage) checkObjects() {
 	}
 }
 
-func (store *MongoStorage) deleteObject(orgID string, objectType string, objectID string, timestamp bson.MongoTimestamp) common.SyncServiceError {
+func (store *MongoStorage) deleteObject(orgID string, objectType string, objectID string, timestamp time.Time) common.SyncServiceError {
 	id := createObjectCollectionID(orgID, objectType, objectID)
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Deleting object %s\n", id)
 	}
 
 	query := bson.M{"_id": id}
-	if timestamp != -1 {
+	if !timestamp.IsZero() {
 		query = bson.M{"_id": id, "last-update": timestamp}
 	}
+
 	if err := store.removeAll(objects, query); err != nil {
-		if err == mgo.ErrNotFound && timestamp != -1 {
+		if err == mongo.ErrNoDocuments && !timestamp.IsZero() {
 			return nil
 		}
 		return &Error{fmt.Sprintf("Failed to delete object. Error: %s.", err)}
@@ -89,52 +92,24 @@ func (store *MongoStorage) deleteObject(orgID string, objectType string, objectI
 	return nil
 }
 
-func (store *MongoStorage) copyDataToFile(id string, dataReader io.Reader, isFirstChunk bool, isLastChunk bool) (fileHanlde *fileHandle,
-	written int64, err common.SyncServiceError) {
-	if isFirstChunk {
-		store.removeFile(id)
-		fileHanlde, err = store.createFile(id)
-	} else {
-		fileHanlde = store.getFileHandle(id)
-		if fileHanlde == nil {
-			err = &Error{fmt.Sprintf("Failed to append the data, the file doesn't exist.")}
-			return
-		}
-	}
+// append data stream to mongodb data
+func (store *MongoStorage) copyDataToFile(id string, dataReader io.Reader) (err common.SyncServiceError) {
+	store.removeFile(id)
+	err = store.createFile(id, dataReader)
 	if err != nil {
 		err = &Error{fmt.Sprintf("Failed to create file to store the data. Error: %s.", err)}
 		return
 	}
-	written, err = io.Copy(fileHanlde.file, dataReader)
-	if err != nil {
-		err = &Error{fmt.Sprintf("Failed to write the data to the file. Error: %s.", err)}
-		return
-	}
-	if isLastChunk {
-		if err = fileHanlde.file.Close(); err != nil {
-			err = &Error{fmt.Sprintf("Failed to close the file. Error: %s.", err)}
-			return
-		}
-		store.deleteFileHandle(id)
-	}
+
 	return
 }
 
+// stores the data bytes into mongodb
 func (store *MongoStorage) storeDataInFile(id string, data []byte) common.SyncServiceError {
 	store.removeFile(id)
-	fileHanlde, err := store.createFile(id)
-	if err != nil {
+	br := bytes.NewReader(data)
+	if err := store.createFile(id, br); err != nil {
 		return &Error{fmt.Sprintf("Failed to create file to store the data. Error: %s.", err)}
-	}
-	n, err := fileHanlde.file.Write(data)
-	if err != nil {
-		return &Error{fmt.Sprintf("Failed to write the data to the file. Error: %s.", err)}
-	}
-	if n != len(data) {
-		return &Error{fmt.Sprintf("Failed to write all the data: wrote %d instead of %d.", n, len(data))}
-	}
-	if err = fileHanlde.file.Close(); err != nil {
-		return &Error{fmt.Sprintf("Failed to close the file. Error: %s.", err)}
 	}
 	return nil
 }
@@ -142,14 +117,14 @@ func (store *MongoStorage) storeDataInFile(id string, data []byte) common.SyncSe
 func (store *MongoStorage) retrievePolicies(query interface{}) ([]common.ObjectDestinationPolicy, common.SyncServiceError) {
 	results := []object{}
 
-	selectedFields := bson.M{"metadata.destination-org-id": bson.ElementString,
-		"metadata.object-type": bson.ElementString, "metadata.object-id": bson.ElementString,
-		"metadata.destination-policy": bson.ElementDocument,
-		"destinations":                bson.ElementArray,
+	selectedFields := bson.M{"metadata.destination-org-id": 1,
+		"metadata.object-type": 1, "metadata.object-id": 1,
+		"metadata.destination-policy": 1,
+		"destinations":                1,
 	}
 	if err := store.fetchAll(objects, query, selectedFields, &results); err != nil {
 		switch err {
-		case mgo.ErrNotFound:
+		case mongo.ErrNoDocuments:
 			return nil, nil
 		default:
 			return nil, &Error{fmt.Sprintf("Failed to fetch the objects with a Destination Policy. Error: %s", err)}
@@ -174,8 +149,8 @@ func (store *MongoStorage) retrievePolicies(query interface{}) ([]common.ObjectD
 }
 
 func (store *MongoStorage) removeAll(collectionName string, query interface{}) common.SyncServiceError {
-	function := func(collection *mgo.Collection) error {
-		_, err := collection.RemoveAll(query)
+	function := func(collection *mongo.Collection) error {
+		_, err := collection.DeleteMany(context.TODO(), query)
 		return err
 	}
 
@@ -191,8 +166,16 @@ func (store *MongoStorage) removeAll(collectionName string, query interface{}) c
 }
 
 func (store *MongoStorage) fetchAll(collectionName string, query interface{}, selector interface{}, result interface{}) common.SyncServiceError {
-	function := func(collection *mgo.Collection) error {
-		return collection.Find(query).Select(selector).All(result)
+	function := func(collection *mongo.Collection) error {
+		opts := options.Find().SetProjection(selector)
+		// selector looks like: bson.D{{"field1", 1}, {"field2", 1}}, 1 means include
+
+		cursor, err := collection.Find(context.TODO(), query, opts)
+		if err != nil {
+			return err
+		}
+
+		return cursor.All(context.TODO(), result)
 	}
 
 	retry, err := store.withCollectionHelper(collectionName, function, true)
@@ -207,8 +190,9 @@ func (store *MongoStorage) fetchAll(collectionName string, query interface{}, se
 }
 
 func (store *MongoStorage) fetchOne(collectionName string, query interface{}, selector interface{}, result interface{}) common.SyncServiceError {
-	function := func(collection *mgo.Collection) error {
-		return collection.Find(query).Select(selector).One(result)
+	function := func(collection *mongo.Collection) error {
+		opts := options.FindOne()
+		return collection.FindOne(context.TODO(), query, opts).Decode(result)
 	}
 
 	retry, err := store.withCollectionHelper(collectionName, function, true)
@@ -222,9 +206,16 @@ func (store *MongoStorage) fetchOne(collectionName string, query interface{}, se
 	return nil
 }
 
-func (store *MongoStorage) update(collectionName string, selector interface{}, update interface{}) common.SyncServiceError {
-	function := func(collection *mgo.Collection) error {
-		return collection.Update(selector, update)
+func (store *MongoStorage) update(collectionName string, filter interface{}, update interface{}) common.SyncServiceError {
+	function := func(collection *mongo.Collection) error {
+		opts := options.Update()
+		updatedResult, err := collection.UpdateOne(context.TODO(), filter, update, opts)
+		v := int64(0)
+		if updatedResult.MatchedCount == v {
+			return &NotFound{}
+		}
+
+		return err
 	}
 
 	retry, err := store.withCollectionHelper(collectionName, function, false)
@@ -233,14 +224,15 @@ func (store *MongoStorage) update(collectionName string, selector interface{}, u
 	}
 
 	if retry {
-		return store.update(collectionName, selector, update)
+		return store.update(collectionName, filter, update)
 	}
 	return nil
 }
 
-func (store *MongoStorage) upsert(collectionName string, selector interface{}, update interface{}) common.SyncServiceError {
-	function := func(collection *mgo.Collection) error {
-		_, err := collection.Upsert(selector, update)
+func (store *MongoStorage) upsert(collectionName string, filter interface{}, update interface{}) common.SyncServiceError {
+	function := func(collection *mongo.Collection) error {
+		opts := options.Update().SetUpsert(true)
+		_, err := collection.UpdateOne(context.TODO(), filter, update, opts)
 		return err
 	}
 
@@ -250,14 +242,15 @@ func (store *MongoStorage) upsert(collectionName string, selector interface{}, u
 	}
 
 	if retry {
-		return store.upsert(collectionName, selector, update)
+		return store.upsert(collectionName, filter, update)
 	}
 	return nil
 }
 
 func (store *MongoStorage) insert(collectionName string, doc interface{}) common.SyncServiceError {
-	function := func(collection *mgo.Collection) error {
-		return collection.Insert(doc)
+	function := func(collection *mongo.Collection) error {
+		_, err := collection.InsertOne(context.TODO(), doc)
+		return err
 	}
 
 	retry, err := store.withCollectionHelper(collectionName, function, false)
@@ -271,11 +264,10 @@ func (store *MongoStorage) insert(collectionName string, doc interface{}) common
 	return nil
 }
 
-func (store *MongoStorage) count(collectionName string, selector interface{}) (uint32, common.SyncServiceError) {
+func (store *MongoStorage) count(collectionName string, filter interface{}) (uint32, common.SyncServiceError) {
 	var count uint32
-	function := func(collection *mgo.Collection) error {
-		var err error
-		countInt, err := collection.Find(selector).Count()
+	function := func(collection *mongo.Collection) error {
+		countInt, err := collection.CountDocuments(context.TODO(), filter)
 		count = uint32(countInt)
 		return err
 	}
@@ -286,14 +278,51 @@ func (store *MongoStorage) count(collectionName string, selector interface{}) (u
 	}
 
 	if retry {
-		return store.count(collectionName, selector)
+		return store.count(collectionName, filter)
 	}
 	return count, nil
 }
 
+func (store *MongoStorage) getFileInfo(id string) (*gridfsFile, common.SyncServiceError) {
+	filter := bson.D{{"filename", id}}
+
+	if store.gridfsBucket == nil {
+		gridfsBucket, err := gridfs.NewBucket(store.database)
+		if err != nil {
+			return nil, err
+		}
+		store.gridfsBucket = gridfsBucket
+	}
+	cursor, err := store.gridfsBucket.Find(filter)
+	if err != nil {
+		return nil, err
+	}
+	var foundFiles []gridfsFile
+	if err = cursor.All(context.TODO(), &foundFiles); err != nil {
+		return nil, err
+	} else if len(foundFiles) == 0 {
+		return nil, &NotFound{fmt.Sprintf("File %v not found in mongo db", id)}
+	}
+
+	return &foundFiles[0], nil
+}
+
 func (store *MongoStorage) removeFile(id string) common.SyncServiceError {
-	function := func(db *mgo.Database) error {
-		return db.GridFS("fs").Remove(id)
+	function := func(db *mongo.Database) error {
+		file, err := store.getFileInfo(id)
+		if err != nil {
+			return err
+		}
+
+		gridfsBucket, err := gridfs.NewBucket(db)
+		if err != nil {
+			return err
+		}
+		dbId, err := primitive.ObjectIDFromHex(file.Id)
+		if err != nil {
+			return err
+		}
+		return gridfsBucket.Delete(dbId)
 	}
 
 	retry, err := store.withDBHelper(function, false)
@@ -308,12 +337,12 @@ func (store *MongoStorage) removeFile(id string) common.SyncServiceError {
 	return nil
 }
 
-func (store *MongoStorage) openFile(id string) (*fileHandle, common.SyncServiceError) {
-	function := func(db *mgo.Database) (*mgo.GridFile, error) {
-		return db.GridFS("fs").Open(id)
+func (store *MongoStorage) openFile(id string) (*gridfs.DownloadStream, common.SyncServiceError) {
+	function := func(db *mongo.Database) (*gridfs.DownloadStream, error) {
+		return store.gridfsBucket.OpenDownloadStreamByName(id)
 	}
 
-	file, session, retry, err := store.withDBAndReturnHelper(function, true)
+	downloadStream, retry, err := store.withDBAndReturnHelper(function, true)
 	if err != nil {
 		return nil, err
 	}
@@ -322,29 +351,42 @@ func (store *MongoStorage) openFile(id string) (*fileHandle, common.SyncServiceE
 		return store.openFile(id)
 	}
 
-	return &fileHandle{file, session, 0, nil}, nil
+	return downloadStream, nil
 }
 
-func (store *MongoStorage) createFile(id string) (*fileHandle, common.SyncServiceError) {
-	function := func(db *mgo.Database) (*mgo.GridFile, error) {
-		return db.GridFS("fs").Create(id)
-	}
+// Save file into mongo gridFS
+func (store *MongoStorage) createFile(id string, data io.Reader) common.SyncServiceError {
 
-	file, session, retry, err := store.withDBAndReturnHelper(function, false)
-	if err != nil {
+	function := func(db *mongo.Database) (*gridfs.DownloadStream, error) {
+		var err error
+		bucket := store.gridfsBucket
+		if bucket == nil {
+			if bucket, err = gridfs.NewBucket(db); err != nil {
+				return nil, err
+			}
+		}
+
+		uploadOpts := options.GridFSUpload().SetChunkSizeBytes(int32(common.Configuration.MaxDataChunkSize))
+		// filename of the object in fs.File is the value of id
+		_, err = bucket.UploadFromStream(id, data, uploadOpts)
 		return nil, err
 	}
 
-	if retry {
-		return store.createFile(id)
+	_, retry, err := store.withDBAndReturnHelper(function, false)
+	if err != nil {
+		return err
 	}
-	file.SetChunkSize(common.Configuration.MaxDataChunkSize)
-	return &fileHandle{file, session, 0, nil}, nil
+
+	if retry {
+		return store.createFile(id, data)
+	}
+
+	return nil
 }
 
 func (store *MongoStorage) run(cmd interface{}, result interface{}) common.SyncServiceError {
-	function := func(db *mgo.Database) error {
-		return db.Run(cmd, result)
+	function := func(db *mongo.Database) error {
+		return db.RunCommand(context.TODO(), cmd).Decode(&result)
 	}
 
 	retry, err := store.withDBHelper(function, true)
@@ -358,40 +400,55 @@ func (store *MongoStorage) run(cmd interface{}, result interface{}) common.SyncS
 	return nil
 }
 
-func (store *MongoStorage) withDBHelper(function func(*mgo.Database) error, isRead bool) (bool, common.SyncServiceError) {
+func (store *MongoStorage) withDBHelper(function func(*mongo.Database) error, isRead bool) (bool, common.SyncServiceError) {
 	if !store.connected {
 		return false, &NotConnected{"Disconnected from the database"}
 	}
 
-	session := store.getSession()
-	db := session.DB(common.Configuration.MongoDbName)
+	mongoClient := store.getMongoClient()
+	db := mongoClient.Database(common.Configuration.MongoDbName)
 
 	err := function(db)
+	if err == nil || err == mongo.ErrNoDocuments || err == mongo.ErrNilCursor || mongo.IsDuplicateKeyError(err) || IsNotFound(err) {
+		return false, err
+	}
 
-	if err == nil || err == mgo.ErrNotFound || err == mgo.ErrCursor || mgo.IsDup(err) {
-		return false, err
-	}
-	pingErr := session.Ping()
+	pingErr := mongoClient.Ping(context.Background(), nil)
 	if pingErr == nil {
 		if isRead {
 			common.HealthStatus.DBReadFailed()
 		} else {
 			common.HealthStatus.DBWriteFailed()
 		}
+		return false, pingErr
+	}
+
+	// reach here if has ping err
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(20*time.Second))
+	defer cancel()
+	mongoClient, err = mongo.Connect(ctx, store.clientConnectOpts)
+	if err != nil {
 		return false, err
 	}
-	session.Refresh()
-	pingErr = session.Ping()
+	pingErr = mongoClient.Ping(context.Background(), nil)
 	if pingErr == nil {
-		db := session.DB(common.Configuration.MongoDbName)
-		err := function(db)
-		if err == nil || err == mgo.ErrNotFound || err == mgo.ErrCursor || mgo.IsDup(err) {
-			return false, err
+		db := mongoClient.Database(common.Configuration.MongoDbName)
+		store.database = db
+		gridfsBucket, err := gridfs.NewBucket(db)
+		if err != nil {
+			return false, nil
 		}
-		if isRead {
-			common.HealthStatus.DBReadFailed()
-		} else {
-			common.HealthStatus.DBWriteFailed()
+		store.gridfsBucket = gridfsBucket
+		err = function(db)
+		if err == nil {
+			return false, nil
+		}
+		if err == nil || err == mongo.ErrNoDocuments || err == mongo.ErrNilCursor || mongo.IsDuplicateKeyError(err) || IsNotFound(err) {
+			if isRead {
+				common.HealthStatus.DBReadFailed()
+			} else {
+				common.HealthStatus.DBWriteFailed()
+			}
 		}
 		return false, err
 	}
@@ -402,89 +459,117 @@ func (store *MongoStorage) withDBHelper(function func(*mgo.Database) error, isRe
 	return false, &NotConnected{"Disconnected from the database"}
 }
 
-func (store *MongoStorage) withDBAndReturnHelper(function func(*mgo.Database) (*mgo.GridFile, error), isRead bool) (*mgo.GridFile,
-	*mgo.Session, bool, common.SyncServiceError) {
+func (store *MongoStorage) withDBAndReturnHelper(function func(*mongo.Database) (*gridfs.DownloadStream, error), isRead bool) (*gridfs.DownloadStream, bool, common.SyncServiceError) {
 	if !store.connected {
-		return nil, nil, false, &NotConnected{"Disconnected from the database"}
+		return nil, false, &NotConnected{"Disconnected from the database"}
 	}
-	session := store.getSession()
-	db := session.DB(common.Configuration.MongoDbName)
 
-	file, err := function(db)
+	mongoClient := store.getMongoClient()
+	db := mongoClient.Database(common.Configuration.MongoDbName)
+
+	fileHandler, err := function(db)
 	if err == nil {
-		return file, session, false, nil
+		return fileHandler, false, nil
 	}
-	if err == mgo.ErrNotFound || err == mgo.ErrCursor || mgo.IsDup(err) {
-		return nil, nil, false, err
+	if err == mongo.ErrNoDocuments || err == mongo.ErrNilCursor || mongo.IsDuplicateKeyError(err) || IsNotFound(err) {
+		return nil, false, err
 	}
-	pingErr := session.Ping()
+	pingErr := mongoClient.Ping(context.Background(), nil)
 	if pingErr == nil {
 		if isRead {
 			common.HealthStatus.DBReadFailed()
 		} else {
 			common.HealthStatus.DBWriteFailed()
 		}
-		return nil, nil, false, err
+		return nil, false, pingErr
 	}
-	session.Refresh()
-	pingErr = session.Ping()
+
+	// reach here if has ping err
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(20*time.Second))
+	defer cancel()
+	mongoClient, err = mongo.Connect(ctx, store.clientConnectOpts)
+	if err != nil {
+		return nil, false, err
+	}
+	pingErr = mongoClient.Ping(context.Background(), nil)
 	if pingErr == nil {
-		db := session.DB(common.Configuration.MongoDbName)
-		file, err := function(db)
-		if err == nil {
-			return file, session, false, nil
+		db := mongoClient.Database(common.Configuration.MongoDbName)
+		store.database = db
+		gridfsBucket, err := gridfs.NewBucket(db)
+		if err != nil {
+			return nil, false, err
 		}
-		if err != mgo.ErrNotFound && err != mgo.ErrCursor || mgo.IsDup(err) {
+		store.gridfsBucket = gridfsBucket
+
+		fileHandler, err := function(db)
+		if err == nil {
+			return fileHandler, false, nil
+		}
+		if err != mongo.ErrNoDocuments && !IsNotFound(err) && err != mongo.ErrNilCursor || mongo.IsDuplicateKeyError(err) {
 			if isRead {
 				common.HealthStatus.DBReadFailed()
 			} else {
 				common.HealthStatus.DBWriteFailed()
 			}
 		}
-		return nil, nil, false, err
+		return nil, false, err
 	}
 
 	if connected := store.reconnect(true); connected {
-		return nil, nil, true, nil
+		return nil, true, nil
 	}
-	return nil, nil, false, &NotConnected{"Disconnected from the database"}
+	return nil, false, &NotConnected{"Disconnected from the database"}
 }
 
-func (store *MongoStorage) withCollectionHelper(collectionName string, function func(*mgo.Collection) error, isRead bool) (bool,
+func (store *MongoStorage) withCollectionHelper(collectionName string, function func(*mongo.Collection) error, isRead bool) (bool,
 	common.SyncServiceError) {
 	if !store.connected {
 		return false, &NotConnected{"Disconnected from the database"}
 	}
 
-	session := store.getSession()
-	collection := session.DB(common.Configuration.MongoDbName).C(collectionName)
-
+	mongoClient := store.getMongoClient()
+	collection := mongoClient.Database(common.Configuration.MongoDbName).Collection(collectionName)
 	err := function(collection)
+	if err == nil || err == mongo.ErrNoDocuments || err == mongo.ErrNilCursor || mongo.IsDuplicateKeyError(err) || IsNotFound(err) {
+		return false, err
+	}
 
-	if err == nil || err == mgo.ErrNotFound || err == mgo.ErrCursor || mgo.IsDup(err) {
-		return false, err
-	}
-	pingErr := session.Ping()
+	pingErr := mongoClient.Ping(context.Background(), nil)
 	if pingErr == nil {
 		if isRead {
 			common.HealthStatus.DBReadFailed()
 		} else {
 			common.HealthStatus.DBWriteFailed()
 		}
+		return false, pingErr
+	}
+
+	// reach here if has ping err
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(20*time.Second))
+	defer cancel()
+	mongoClient, err = mongo.Connect(ctx, store.clientConnectOpts)
+	if err != nil {
 		return false, err
 	}
-	session.Refresh()
-	pingErr = session.Ping()
+	pingErr = mongoClient.Ping(context.Background(), nil)
+
 	if pingErr == nil {
-		collection := session.DB(common.Configuration.MongoDbName).C(collectionName)
-		err := function(collection)
-		if err == nil || err == mgo.ErrNotFound || err == mgo.ErrCursor || mgo.IsDup(err) {
-			return false, err
+		db := mongoClient.Database(common.Configuration.MongoDbName)
+		store.database = db
+		gridfsBucket, err := gridfs.NewBucket(db)
+		if err != nil {
+			return false, nil
 		}
-		if isRead {
-			common.HealthStatus.DBReadFailed()
-		} else {
-			common.HealthStatus.DBWriteFailed()
+		store.gridfsBucket = gridfsBucket
+		collection = db.Collection(collectionName)
+
+		err = function(collection)
+		if err == nil || err == mongo.ErrNoDocuments || IsNotFound(err) || err == mongo.ErrNilCursor || mongo.IsDuplicateKeyError(err) {
+			if isRead {
+				common.HealthStatus.DBReadFailed()
+			} else {
+				common.HealthStatus.DBWriteFailed()
+			}
 		}
 		return false, err
 	}
@@ -492,6 +577,7 @@ func (store *MongoStorage) withCollectionHelper(collectionName string, function 
 	if connected := store.reconnect(true); connected {
 		return true, nil
 	}
+
 	return false, &NotConnected{"Disconnected from the database"}
 }
 
@@ -510,7 +596,8 @@ func (store *MongoStorage) reconnect(timeout bool) bool {
 		return false
 	}
 
-	pingErr := store.session.Ping()
+	c := store.getMongoClient()
+	pingErr := c.Ping(context.Background(), nil)
 	if pingErr == nil {
 		store.connected = true
 		return true
@@ -526,11 +613,14 @@ func (store *MongoStorage) reconnect(timeout bool) bool {
 		log.Error("Disconnected from the database")
 	}
 
-	var session *mgo.Session
+	var mongoClient *mongo.Client
 	var dialErr error
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(20*time.Second))
+	defer cancel()
+
 	for i := 0; i < 3; {
-		session, dialErr = mgo.DialWithInfo(store.dialInfo)
-		if dialErr == nil && session != nil {
+		mongoClient, dialErr = mongo.Connect(ctx, store.clientConnectOpts)
+		if dialErr == nil && mongoClient != nil {
 			break
 		}
 		if timeout {
@@ -538,20 +628,13 @@ func (store *MongoStorage) reconnect(timeout bool) bool {
 		}
 	}
 
-	if dialErr != nil || session == nil {
+	if dialErr != nil || mongoClient == nil {
 		go store.reconnect(false)
 		return false
 	}
 
-	session.SetSafe(&mgo.Safe{})
-	store.session = session
+	store.client = mongoClient
 	store.connected = true
-	if store.cacheSize > 1 {
-		for i := 0; i < store.cacheSize; i++ {
-			store.sessionCache[i].Close()
-			store.sessionCache[i] = store.session.Copy()
-		}
-	}
 
 	common.HealthStatus.ReconnectedToDatabase()
 
@@ -573,25 +656,6 @@ func (store *MongoStorage) unLock() {
 	store.lockChannel <- 1
 }
 
-func (store *MongoStorage) getFileHandle(id string) (fH *fileHandle) {
-	<-store.mapLock
-	fH = store.openFiles[id]
-	store.mapLock <- 1
-	return
-}
-
-func (store *MongoStorage) putFileHandle(id string, fH *fileHandle) {
-	<-store.mapLock
-	store.openFiles[id] = fH
-	store.mapLock <- 1
-}
-
-func (store *MongoStorage) deleteFileHandle(id string) {
-	<-store.mapLock
-	delete(store.openFiles, id)
-	store.mapLock <- 1
-}
-
 func (store *MongoStorage) addUsersToACLHelper(collection string, aclType string, orgID string, key string, users []common.ACLentry) common.SyncServiceError {
 	var id string
 	if key == "" {
@@ -606,14 +670,14 @@ func (store *MongoStorage) addUsersToACLHelper(collection string, aclType string
 	result := &aclObject{}
 	for i := 0; i < maxUpdateTries; i++ {
 		if err := store.fetchOne(collection, bson.M{"_id": id}, nil, &result); err != nil {
-			if err == mgo.ErrNotFound {
+			if err == mongo.ErrNoDocuments {
 				result.Users = make([]common.ACLentry, 0)
 				result.Users = append(result.Users, users...)
 				result.ID = id
 				result.OrgID = orgID
 				result.ACLType = aclType
 				if err = store.insert(collection, result); err != nil {
-					if mgo.IsDup(err) {
+					if mongo.IsDuplicateKeyError(err) {
 						continue
 					}
 					return &Error{fmt.Sprintf("Failed to insert a %s ACL. Error: %s.", aclType, err)}
@@ -650,9 +714,9 @@ func (store *MongoStorage) addUsersToACLHelper(collection string, aclType string
 		if err := store.update(collection, bson.M{"_id": id, "last-update": result.LastUpdate},
 			bson.M{
 				"$set":         bson.M{"users": integratedUsernames},
-				"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+				"$currentDate": bson.M{"last-update": bson.M{"$type": "date"}},
 			}); err != nil {
-			if err == mgo.ErrNotFound {
+			if IsNotFound(err) {
 				continue
 			}
 			return &Error{fmt.Sprintf("Failed to add a %s ACL. Error: %s.", aclType, err)}
@@ -690,7 +754,7 @@ func (store *MongoStorage) removeUsersFromACLHelper(collection string, aclType s
 					if len(result.Users) == 1 {
 						// Deleting the last username, delete the ACL
 						if err := store.removeAll(collection, bson.M{"_id": id}); err != nil {
-							if err == mgo.ErrNotFound {
+							if err == mongo.ErrNoDocuments {
 								return nil
 							}
 							return &Error{fmt.Sprintf("Failed to delete a %s ACL. Error: %s.", aclType, err)}
@@ -710,9 +774,9 @@ func (store *MongoStorage) removeUsersFromACLHelper(collection string, aclType s
 			if err := store.update(collection, bson.M{"_id": id, "last-update": result.LastUpdate},
 				bson.M{
 					"$set":         bson.M{"users": result.Users},
-					"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+					"$currentDate": bson.M{"last-update": bson.M{"$type": "date"}},
 				}); err != nil {
-				if err == mgo.ErrNotFound {
+				if IsNotFound(err) {
 					continue
 				}
 				return &Error{fmt.Sprintf("Failed to delete a %s ACL. Error: %s.", aclType, err)}
@@ -736,7 +800,7 @@ func (store *MongoStorage) retrieveACLHelper(collection string, aclType string, 
 	}
 	result := &aclObject{}
 	if err := store.fetchOne(collection, bson.M{"_id": id}, nil, &result); err != nil {
-		if err == mgo.ErrNotFound {
+		if err == mongo.ErrNoDocuments {
 			return make([]common.ACLentry, 0), nil
 		}
 		return nil, err
@@ -763,7 +827,7 @@ func (store *MongoStorage) retrieveACLsInOrgHelper(collection string, aclType st
 
 	var docs []aclObject
 	query := bson.M{"org-id": orgID, "acl-type": aclType}
-	selector := bson.M{"_id": bson.ElementString}
+	selector := bson.M{"_id": 1}
 	if err := store.fetchAll(collection, query, selector, &docs); err != nil {
 		return nil, err
 	}
@@ -789,7 +853,7 @@ func (store *MongoStorage) retrieveObjOrDestTypeForGivenACLUserHelper(collection
 		subquery = bson.M{
 			"$elemMatch": bson.M{
 				"aclusertype": aclUserType,
-				"$or": []bson.M{
+				"$or": bson.A{
 					bson.M{"username": aclUsername},
 					bson.M{"username": "*"},
 				},
@@ -800,7 +864,7 @@ func (store *MongoStorage) retrieveObjOrDestTypeForGivenACLUserHelper(collection
 			"$elemMatch": bson.M{
 				"aclusertype": aclUserType,
 				"aclrole":     aclRole,
-				"$or": []bson.M{
+				"$or": bson.A{
 					bson.M{"username": aclUsername},
 					bson.M{"username": "*"},
 				},
@@ -815,7 +879,7 @@ func (store *MongoStorage) retrieveObjOrDestTypeForGivenACLUserHelper(collection
 		"users":    subquery,
 	}
 
-	selector := bson.M{"_id": bson.ElementString}
+	selector := bson.M{"_id": 1}
 	if err := store.fetchAll(collection, query, selector, &docs); err != nil {
 		return nil, err
 	}

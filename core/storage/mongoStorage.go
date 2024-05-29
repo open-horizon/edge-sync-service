@@ -1,42 +1,43 @@
 package storage
 
 import (
+	"bytes"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"io"
 	"io/ioutil"
-	"net"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/globalsign/mgo"
-	"github.com/globalsign/mgo/bson"
 	"github.com/open-horizon/edge-sync-service/common"
 	"github.com/open-horizon/edge-utilities/logger"
 	"github.com/open-horizon/edge-utilities/logger/log"
 	"github.com/open-horizon/edge-utilities/logger/trace"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/gridfs"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-type fileHandle struct {
-	file    *mgo.GridFile
-	session *mgo.Session
-	offset  int64
-	chunks  map[int64][]byte
+type gridfsFile struct {
+	Id     string `bson:"_id"`
+	Name   string `bson:"filename"`
+	Length int64  `bson:"length"`
 }
 
 // MongoStorage is a MongoDB based store
 type MongoStorage struct {
-	session      *mgo.Session
-	dialInfo     *mgo.DialInfo
-	openFiles    map[string]*fileHandle
-	connected    bool
-	lockChannel  chan int
-	mapLock      chan int
-	sessionCache []*mgo.Session
-	cacheSize    int
-	cacheIndex   int
+	client            *mongo.Client
+	clientConnectOpts *options.ClientOptions
+	database          *mongo.Database
+	gridfsBucket      *gridfs.Bucket
+	connected         bool
+	lockChannel       chan int
+	mapLock           chan int
 }
 
 type object struct {
@@ -47,13 +48,13 @@ type object struct {
 	RemainingConsumers int                             `bson:"remaining-consumers"`
 	RemainingReceivers int                             `bson:"remaining-receivers"`
 	Destinations       []common.StoreDestinationStatus `bson:"destinations"`
-	LastUpdate         bson.MongoTimestamp             `bson:"last-update"`
+	LastUpdate         time.Time                       `bson:"last-update"`
 }
 
 type destinationObject struct {
-	ID           string              `bson:"_id"`
-	Destination  common.Destination  `bson:"destination"`
-	LastPingTime bson.MongoTimestamp `bson:"last-ping-time"`
+	ID           string             `bson:"_id"`
+	Destination  common.Destination `bson:"destination"`
+	LastPingTime time.Time          `bson:"last-ping-time"`
 }
 
 type notificationObject struct {
@@ -62,11 +63,11 @@ type notificationObject struct {
 }
 
 type leaderDocument struct {
-	ID               int32               `bson:"_id"`
-	UUID             string              `bson:"uuid"`
-	LastHeartbeatTS  bson.MongoTimestamp `bson:"last-heartbeat-ts"`
-	HeartbeatTimeout int32               `bson:"heartbeat-timeout"`
-	Version          int64               `bson:"version"`
+	ID               int32     `bson:"_id"`
+	UUID             string    `bson:"uuid"`
+	LastHeartbeatTS  time.Time `bson:"last-heartbeat-ts"`
+	HeartbeatTimeout int32     `bson:"heartbeat-timeout"`
+	Version          int64     `bson:"version"`
 }
 
 type isMasterResult struct {
@@ -76,9 +77,9 @@ type isMasterResult struct {
 }
 
 type messagingGroupObject struct {
-	ID         string              `bson:"_id"`
-	GroupName  string              `bson:"group-name"`
-	LastUpdate bson.MongoTimestamp `bson:"last-update"`
+	ID         string    `bson:"_id"`
+	GroupName  string    `bson:"group-name"`
+	LastUpdate time.Time `bson:"last-update"`
 }
 
 // This is almost the same type as common.StoredOrganization except for the timestamp type.
@@ -86,30 +87,30 @@ type messagingGroupObject struct {
 type organizationObject struct {
 	ID           string              `bson:"_id"`
 	Organization common.Organization `bson:"org"`
-	LastUpdate   bson.MongoTimestamp `bson:"last-update"`
+	LastUpdate   time.Time           `bson:"last-update"`
 }
 
 type webhookObject struct {
-	ID         string              `bson:"_id"`
-	Hooks      []string            `bson:"hooks"`
-	LastUpdate bson.MongoTimestamp `bson:"last-update"`
+	ID         string    `bson:"_id"`
+	Hooks      []string  `bson:"hooks"`
+	LastUpdate time.Time `bson:"last-update"`
 }
 
 type aclObject struct {
-	ID         string              `bson:"_id"`
-	Users      []common.ACLentry   `bson:"users"`
-	OrgID      string              `bson:"org-id"`
-	ACLType    string              `bson:"acl-type"`
-	LastUpdate bson.MongoTimestamp `bson:"last-update"`
+	ID         string            `bson:"_id"`
+	Users      []common.ACLentry `bson:"users"`
+	OrgID      string            `bson:"org-id"`
+	ACLType    string            `bson:"acl-type"`
+	LastUpdate time.Time         `bson:"last-update"`
 }
 
 type dataInfoObject struct {
-	ID         string              `bson:"_id"`
-	ChunkSize  int32               `bson:"chunkSize"`
-	UploadDate bson.MongoTimestamp `bson:"uploadDate"`
-	Length     int32               `bson:"length"`
-	MD5        string              `bson:"md5"`
-	Filename   string              `bson:"filename"`
+	ID         string    `bson:"_id"`
+	ChunkSize  int32     `bson:"chunkSize"`
+	UploadDate time.Time `bson:"uploadDate"`
+	Length     int32     `bson:"length"`
+	MD5        string    `bson:"md5"`
+	Filename   string    `bson:"filename"`
 }
 
 const maxUpdateTries = 5
@@ -123,15 +124,26 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 	store.mapLock = make(chan int, 1)
 	store.mapLock <- 1
 
-	store.dialInfo = &mgo.DialInfo{
-		Addrs:        strings.Split(common.Configuration.MongoAddressCsv, ","),
-		Source:       common.Configuration.MongoAuthDbName,
-		Username:     common.Configuration.MongoUsername,
-		Password:     common.Configuration.MongoPassword,
-		Timeout:      time.Duration(20 * time.Second),
-		ReadTimeout:  time.Duration(60 * time.Second),
-		WriteTimeout: time.Duration(60 * time.Second),
+	/*
+		store.dialInfo = &mgo.DialInfo{
+			Addrs:        strings.Split(common.Configuration.MongoAddressCsv, ","),
+			Source:       common.Configuration.MongoAuthDbName,
+			Username:     common.Configuration.MongoUsername,
+			Password:     common.Configuration.MongoPassword,
+			Timeout:      time.Duration(20 * time.Second),
+			ReadTimeout:  time.Duration(60 * time.Second),
+			WriteTimeout: time.Duration(60 * time.Second),
+		}*/
+
+	var mongoClient *mongo.Client
+	var err error
+	if trace.IsLogging(logger.INFO) {
+		trace.Info("CConnecting to mongo...")
 	}
+	// Set up MongoDB client options
+	clientOptions := options.Client().ApplyURI(common.Configuration.MongoAddressCsv)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(20*time.Second))
+	defer cancel()
 
 	if common.Configuration.MongoUseSSL {
 		tlsConfig := &tls.Config{}
@@ -163,21 +175,18 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 			tlsConfig.InsecureSkipVerify = true
 		}
 
-		store.dialInfo.DialServer = func(addr *mgo.ServerAddr) (net.Conn, error) {
-			return tls.Dial("tcp", addr.String(), tlsConfig)
-		}
+		// Sets TLS options in options instance
+		clientOptions.SetTLSConfig(tlsConfig)
 	}
 
-	var session *mgo.Session
-	var err error
-	if trace.IsLogging(logger.INFO) {
-		trace.Info("Connecting to mongo...")
-	}
 	for connectTime := 0; connectTime < common.Configuration.DatabaseConnectTimeout; connectTime += 10 {
-		session, err = mgo.DialWithInfo(store.dialInfo)
-		if err == nil {
+		trace.Info("connect to mongo...")
+		if mongoClient, err = mongo.Connect(ctx, clientOptions); err == nil {
 			break
+		} else {
+			trace.Error("Error connecting to mongo. Error was: " + err.Error())
 		}
+
 		if connectTime == 0 && trace.IsLogging(logger.ERROR) {
 			trace.Error("Failed to dial mgo. Error: " + err.Error())
 		}
@@ -190,10 +199,15 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 		if connectTime == 0 && trace.IsLogging(logger.ERROR) {
 			trace.Error("Retrying to connect to mongo")
 		}
+
 	}
-	if session == nil {
-		message := fmt.Sprintf("Failed to dial mgo. Error: %s.", err)
+	if err = mongoClient.Ping(ctx, nil); err != nil {
+		message := fmt.Sprintf("Failed to ping mgo. Error: %s.", err)
 		return &Error{message}
+	}
+
+	if trace.IsLogging(logger.INFO) {
+		trace.Info("Connected to mongo...")
 	}
 
 	store.connected = true
@@ -205,58 +219,63 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 		log.Info("Connected to the database")
 	}
 
-	session.SetSafe(&mgo.Safe{})
-	//session.SetMode(mgo.Monotonic, true)
+	db := mongoClient.Database(common.Configuration.MongoDbName)
+	destinationsCollection := db.Collection(destinations)
+	indexModel := mongo.IndexModel{Keys: bson.D{{"destination.destination-org-id", -1}}}
+	destinationsCollection.Indexes().CreateOne(context.TODO(), indexModel)
 
-	db := session.DB(common.Configuration.MongoDbName)
-	db.C(destinations).EnsureIndexKey("destination.destination-org-id")
-	notificationsCollection := db.C(notifications)
-	notificationsCollection.EnsureIndexKey("notification.destination-org-id", "notification.destination-id", "notification.destination-type")
-	notificationsCollection.EnsureIndexKey("notification.resend-time", "notification.status")
-	objectsCollection := db.C(objects)
-	objectsCollection.EnsureIndexKey("metadata.destination-org-id")
-	err = objectsCollection.EnsureIndex(
-		mgo.Index{
-			Key: []string{
-				"metadata.destination-org-id",
-				"metadata.destination-policy.services.org-id",
-				"metadata.destination-policy.services.service-name",
+	notificationsCollection := db.Collection(notifications)
+	indexModel1 := mongo.IndexModel{
+		Keys: bson.D{
+			{"notification.destination-org-id", -1},
+			{"notification.destination-id", -1},
+			{"notification.destination-type", -1},
+		},
+	}
+	indexModel2 := mongo.IndexModel{Keys: bson.D{{"notification.resend-time", -1}, {"notification.status", -1}}}
+	notificationsCollection.Indexes().CreateMany(context.TODO(), []mongo.IndexModel{indexModel1, indexModel2})
+
+	objectsCollection := db.Collection(objects)
+	indexModel = mongo.IndexModel{Keys: bson.D{{"metadata.destination-org-id", -1}}}
+	objectsCollection.Indexes().CreateOne(context.TODO(), indexModel)
+	_, err = objectsCollection.Indexes().CreateOne(
+		context.TODO(),
+		mongo.IndexModel{
+			Keys: bson.D{
+				{"metadata.destination-org-id", -1},
+				{"metadata.destination-policy.services.org-id", -1},
+				{"metadata.destination-policy.services.service-name", -1},
 			},
-			Name:       "syncObjects-destination-policy.services.service-id",
-			Unique:     false,
-			DropDups:   false,
-			Background: false,
-			Sparse:     true,
+			Options: options.Index().SetName("syncObjects-destination-policy.services.service-id").SetSparse(true),
+			// need to set index name???
 		})
 	if err != nil {
 		log.Error("Failed to create an index on %s. Error: %s", objects, err)
 	}
-	err = objectsCollection.EnsureIndex(
-		mgo.Index{
-			Key: []string{
-				"metadata.destination-org-id",
-				"metadata.destination-policy.timestamp",
+
+	_, err = objectsCollection.Indexes().CreateOne(
+		context.TODO(),
+		mongo.IndexModel{
+			Keys: bson.D{
+				{"metadata.destination-org-id", -1},
+				{"metadata.destination-policy.timestamp", -1},
 			},
-			Unique:     false,
-			DropDups:   false,
-			Background: false,
-			Sparse:     true,
+			Options: options.Index().SetSparse(true),
 		})
 	if err != nil {
 		log.Error("Failed to create an index on %s. Error: %s", objects, err)
 	}
-	db.C(acls).EnsureIndexKey("org-id", "acl-type")
-
-	store.session = session
-	store.cacheSize = common.Configuration.MongoSessionCacheSize
-	if store.cacheSize > 1 {
-		store.sessionCache = make([]*mgo.Session, store.cacheSize)
-		for i := 0; i < store.cacheSize; i++ {
-			store.sessionCache[i] = store.session.Copy()
-		}
+	db.Collection(acls).Indexes().CreateOne(context.TODO(), mongo.IndexModel{Keys: bson.D{{"org-id", 1}, {"acl-type", 1}}})
+	gridfsBucket, err := gridfs.NewBucket(db)
+	if err != nil {
+		trace.Error("Error creating gridfs buket Error was: " + err.Error())
 	}
 
-	store.openFiles = make(map[string]*fileHandle)
+	store.client = mongoClient
+	store.database = db
+	store.gridfsBucket = gridfsBucket
+
+	//store.openFiles = make(map[string]*fileHandle2)
 
 	sleepInMS = common.Configuration.MongoSleepTimeBetweenRetry
 
@@ -269,12 +288,11 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 
 // Stop stops the MongoStorage store
 func (store *MongoStorage) Stop() {
-	if store.cacheSize > 1 {
-		for i := 0; i < store.cacheSize; i++ {
-			store.sessionCache[i].Close()
-		}
+	c := store.client
+	if c != nil {
+		c.Disconnect(context.TODO())
 	}
-	store.session.Close()
+
 }
 
 // PerformMaintenance performs store's maintenance
@@ -290,16 +308,17 @@ func (store *MongoStorage) Cleanup(isTest bool) common.SyncServiceError {
 // GetObjectsToActivate returns inactive objects that are ready to be activated
 func (store *MongoStorage) GetObjectsToActivate() ([]common.MetaData, common.SyncServiceError) {
 	currentTime := time.Now().UTC().Format(time.RFC3339)
-	query := bson.M{"$or": []bson.M{
+	query := bson.M{"$or": bson.A{
 		bson.M{"status": common.NotReadyToSend},
 		bson.M{"status": common.ReadyToSend},
 		bson.M{"status": common.Verifying},
 		bson.M{"status": common.VerificationFailed}},
 		"metadata.inactive": true,
-		"$and": []bson.M{
+		"$and": bson.A{
 			bson.M{"metadata.activation-time": bson.M{"$ne": ""}},
 			bson.M{"metadata.activation-time": bson.M{"$lte": currentTime}}}}
-	selector := bson.M{"metadata": bson.ElementDocument}
+
+	selector := bson.D{{"metadata", 1}}
 	result := []object{}
 	if err := store.fetchAll(objects, query, selector, &result); err != nil {
 		return nil, err
@@ -348,7 +367,7 @@ func (store *MongoStorage) StoreObject(metaData common.MetaData, data []byte, st
 
 	existingObject := &object{}
 	if err := store.fetchOne(objects, bson.M{"_id": id}, nil, existingObject); err != nil {
-		if err != mgo.ErrNotFound {
+		if err != mongo.ErrNoDocuments {
 			return nil, &Error{fmt.Sprintf("Failed to retrieve object's status. Error: %s.", err)}
 		}
 		existingObject = nil
@@ -372,10 +391,12 @@ func (store *MongoStorage) StoreObject(metaData common.MetaData, data []byte, st
 		}
 	}
 
-	newObject := object{ID: id, MetaData: metaData, Status: status, PolicyReceived: false,
-		RemainingConsumers: metaData.ExpectedConsumers,
-		RemainingReceivers: metaData.ExpectedConsumers, Destinations: dests}
-	if err := store.upsert(objects, bson.M{"_id": id, "metadata.destination-org-id": metaData.DestOrgID}, newObject); err != nil {
+	newObj := bson.M{"$set": bson.M{"_id": id, "metadata": metaData, "status": status, "policy-received": false,
+		"remaining-consumers": metaData.ExpectedConsumers,
+		"remaining-receivers": metaData.ExpectedConsumers, "destinations": dests,
+		"last-update": primitive.NewDateTimeFromTime(time.Now())}}
+
+	if err := store.upsert(objects, bson.M{"_id": id, "metadata.destination-org-id": metaData.DestOrgID}, newObj); err != nil {
 		return nil, &Error{fmt.Sprintf("Failed to store an object. Error: %s.", err)}
 	}
 
@@ -386,9 +407,10 @@ func (store *MongoStorage) StoreObject(metaData common.MetaData, data []byte, st
 func (store *MongoStorage) GetObjectDestinations(metaData common.MetaData) ([]common.Destination, common.SyncServiceError) {
 	result := object{}
 	id := getObjectCollectionID(metaData)
-	if err := store.fetchOne(objects, bson.M{"_id": id}, bson.M{"destinations": bson.ElementArray}, &result); err != nil {
+	// TODO: check if selector bson.A{"destinations", 1} is correct. Or should use bson.D{{"destinations", 1}}
+	if err := store.fetchOne(objects, bson.M{"_id": id}, bson.A{"destinations", 1}, &result); err != nil {
 		switch err {
-		case mgo.ErrNotFound:
+		case mongo.ErrNoDocuments:
 			return nil, nil
 		default:
 			return nil, &Error{fmt.Sprintf("Failed to retrieve object's destinations. Error: %s.", err)}
@@ -406,9 +428,10 @@ func (store *MongoStorage) GetObjectDestinationsList(orgID string, objectType st
 	objectID string) ([]common.StoreDestinationStatus, common.SyncServiceError) {
 	result := object{}
 	id := createObjectCollectionID(orgID, objectType, objectID)
-	if err := store.fetchOne(objects, bson.M{"_id": id}, bson.M{"destinations": bson.ElementArray}, &result); err != nil {
+	// TODO: check if selector bson.A{"destinations", 1} is correct. Or should use bson.D{{"destinations", 1}}
+	if err := store.fetchOne(objects, bson.M{"_id": id}, bson.A{"destinations", 1}, &result); err != nil {
 		switch err {
-		case mgo.ErrNotFound:
+		case mongo.ErrNoDocuments:
 			return nil, nil
 		default:
 			return nil, &Error{fmt.Sprintf("Failed to retrieve object's destinations. Error: %s.", err)}
@@ -425,7 +448,8 @@ func (store *MongoStorage) UpdateObjectDestinations(orgID string, objectType str
 
 	result := object{}
 	id := createObjectCollectionID(orgID, objectType, objectID)
-	selector := bson.M{"metadata": bson.ElementDocument, "destinations": bson.ElementArray, "last-update": bson.ElementTimestamp, "status": bson.ElementString}
+	// bson.D{{"title", 1}, {"enrollment", 1}}
+	selector := bson.D{{"metadata", 1}, {"destinations", 1}, {"last-update", 1}, {"status", 1}}
 	for i := 0; i < maxUpdateTries; i++ {
 		if err := store.fetchOne(objects, bson.M{"_id": id}, selector, &result); err != nil {
 			return nil, "", nil, nil, &Error{fmt.Sprintf("Failed to retrieve object's destinations. Error: %s.", err)}
@@ -436,12 +460,12 @@ func (store *MongoStorage) UpdateObjectDestinations(orgID string, objectType str
 			return nil, "", nil, nil, err
 		}
 
-		query := bson.M{
+		update := bson.M{
 			"$set":         bson.M{"destinations": dests},
-			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+			"$currentDate": bson.M{"last-update": bson.M{"$type": "date"}},
 		}
-		if err := store.update(objects, bson.M{"_id": id, "last-update": result.LastUpdate}, query); err != nil {
-			if err == mgo.ErrNotFound {
+		if err := store.update(objects, bson.M{"_id": id, "last-update": result.LastUpdate}, update); err != nil {
+			if IsNotFound(err) {
 				time.Sleep(time.Duration(sleepInMS) * time.Millisecond)
 				continue
 			}
@@ -457,7 +481,8 @@ func (store *MongoStorage) UpdateObjectDestinations(orgID string, objectType str
 func (store *MongoStorage) AddObjectDestinations(orgID string, objectType string, objectID string, destinationsList []string) (*common.MetaData, string, []common.StoreDestinationStatus, common.SyncServiceError) {
 	result := object{}
 	id := createObjectCollectionID(orgID, objectType, objectID)
-	selector := bson.M{"metadata": bson.ElementDocument, "destinations": bson.ElementArray, "last-update": bson.ElementTimestamp, "status": bson.ElementString}
+	//selector: bson.D{{"title", 1}, {"enrollment", 1}}
+	selector := bson.M{"metadata": 1, "destinations": 1, "last-update": 1, "status": 1}
 	for i := 0; i < maxUpdateTries; i++ {
 		if err := store.fetchOne(objects, bson.M{"_id": id}, selector, &result); err != nil {
 			return nil, "", nil, &Error{fmt.Sprintf("Failed to retrieve object's destinations. Error: %s.", err)}
@@ -470,10 +495,10 @@ func (store *MongoStorage) AddObjectDestinations(orgID string, objectType string
 
 		query := bson.M{
 			"$set":         bson.M{"destinations": updatedDests},
-			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+			"$currentDate": bson.M{"last-update": bson.M{"$type": "date"}},
 		}
 		if err := store.update(objects, bson.M{"_id": id, "last-update": result.LastUpdate}, query); err != nil {
-			if err == mgo.ErrNotFound {
+			if IsNotFound(err) {
 				time.Sleep(time.Duration(sleepInMS) * time.Millisecond)
 				continue
 			}
@@ -489,7 +514,7 @@ func (store *MongoStorage) AddObjectDestinations(orgID string, objectType string
 func (store *MongoStorage) DeleteObjectDestinations(orgID string, objectType string, objectID string, destinationsList []string) (*common.MetaData, string, []common.StoreDestinationStatus, common.SyncServiceError) {
 	result := object{}
 	id := createObjectCollectionID(orgID, objectType, objectID)
-	selector := bson.M{"metadata": bson.ElementDocument, "destinations": bson.ElementArray, "last-update": bson.ElementTimestamp, "status": bson.ElementString}
+	selector := bson.M{"metadata": 1, "destinations": 1, "last-update": 1, "status": 1}
 	for i := 0; i < maxUpdateTries; i++ {
 		if err := store.fetchOne(objects, bson.M{"_id": id}, selector, &result); err != nil {
 			return nil, "", nil, &Error{fmt.Sprintf("Failed to retrieve object's destinations. Error: %s.", err)}
@@ -502,10 +527,10 @@ func (store *MongoStorage) DeleteObjectDestinations(orgID string, objectType str
 
 		query := bson.M{
 			"$set":         bson.M{"destinations": updatedDests},
-			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+			"$currentDate": bson.M{"last-update": bson.M{"$type": "date"}},
 		}
 		if err := store.update(objects, bson.M{"_id": id, "last-update": result.LastUpdate}, query); err != nil {
-			if err == mgo.ErrNotFound {
+			if IsNotFound(err) {
 				time.Sleep(time.Duration(sleepInMS) * time.Millisecond)
 				continue
 			}
@@ -530,7 +555,7 @@ func (store *MongoStorage) UpdateObjectDeliveryStatus(status string, message str
 
 	for i := 0; i < maxUpdateTries; i++ {
 		if err := store.fetchOne(objects, bson.M{"_id": id},
-			bson.M{"metadata": bson.ElementDocument, "destinations": bson.ElementArray, "last-update": bson.ElementTimestamp},
+			bson.M{"metadata": 1, "destinations": 1, "last-update": 1},
 			&result); err != nil {
 			return false, &Error{fmt.Sprintf("Failed to retrieve object. Error: %s.", err)}
 		}
@@ -560,18 +585,18 @@ func (store *MongoStorage) UpdateObjectDeliveryStatus(status string, message str
 
 		query := bson.M{
 			"$set":         bson.M{"destinations": result.Destinations},
-			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+			"$currentDate": bson.M{"last-update": bson.M{"$type": "date"}},
 		}
 		if result.MetaData.AutoDelete && status == common.Consumed && allConsumed && result.MetaData.Expiration == "" {
 			// Delete the object by setting its expiration time to one hour
 			expirationTime := time.Now().Add(time.Hour * time.Duration(1)).UTC().Format(time.RFC3339)
 			query = bson.M{
 				"$set":         bson.M{"destinations": result.Destinations, "metadata.expiration": expirationTime},
-				"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+				"$currentDate": bson.M{"last-update": bson.M{"$type": "date"}},
 			}
 		}
 		if err := store.update(objects, bson.M{"_id": id, "last-update": result.LastUpdate}, query); err != nil {
-			if err == mgo.ErrNotFound {
+			if IsNotFound(err) {
 				time.Sleep(time.Duration(sleepInMS) * time.Millisecond)
 				continue
 			}
@@ -588,7 +613,7 @@ func (store *MongoStorage) UpdateObjectDelivering(orgID string, objectType strin
 	id := createObjectCollectionID(orgID, objectType, objectID)
 	for i := 0; i < maxUpdateTries; i++ {
 		if err := store.fetchOne(objects, bson.M{"_id": id},
-			bson.M{"destinations": bson.ElementArray, "last-update": bson.ElementTimestamp},
+			bson.M{"destinations": 1, "last-update": 1},
 			&result); err != nil {
 			return &Error{fmt.Sprintf("Failed to retrieve object. Error: %s.", err)}
 		}
@@ -599,9 +624,9 @@ func (store *MongoStorage) UpdateObjectDelivering(orgID string, objectType strin
 		if err := store.update(objects, bson.M{"_id": id, "last-update": result.LastUpdate},
 			bson.M{
 				"$set":         bson.M{"destinations": result.Destinations},
-				"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+				"$currentDate": bson.M{"last-update": bson.M{"$type": "date"}},
 			}); err != nil {
-			if err == mgo.ErrNotFound {
+			if IsNotFound(err) {
 				time.Sleep(time.Duration(sleepInMS) * time.Millisecond)
 				continue
 			}
@@ -616,9 +641,9 @@ func (store *MongoStorage) UpdateObjectDelivering(orgID string, objectType strin
 func (store *MongoStorage) RetrieveObjectStatus(orgID string, objectType string, objectID string) (string, common.SyncServiceError) {
 	result := object{}
 	id := createObjectCollectionID(orgID, objectType, objectID)
-	if err := store.fetchOne(objects, bson.M{"_id": id}, bson.M{"status": bson.ElementString}, &result); err != nil {
+	if err := store.fetchOne(objects, bson.M{"_id": id}, bson.M{"status": 1}, &result); err != nil {
 		switch err {
-		case mgo.ErrNotFound:
+		case mongo.ErrNoDocuments:
 			return "", nil
 		default:
 			return "", &Error{fmt.Sprintf("Failed to retrieve object's status. Error: %s.", err)}
@@ -632,7 +657,7 @@ func (store *MongoStorage) RetrieveObjectStatus(orgID string, objectType string,
 func (store *MongoStorage) RetrieveObjectRemainingConsumers(orgID string, objectType string, objectID string) (int, common.SyncServiceError) {
 	result := object{}
 	id := createObjectCollectionID(orgID, objectType, objectID)
-	if err := store.fetchOne(objects, bson.M{"_id": id}, bson.M{"remaining-consumers": bson.ElementInt32}, &result); err != nil {
+	if err := store.fetchOne(objects, bson.M{"_id": id}, bson.M{"remaining-consumers": 1}, &result); err != nil {
 		return 0, &Error{fmt.Sprintf("Failed to retrieve object's remaining comsumers. Error: %s.", err)}
 	}
 	return result.RemainingConsumers, nil
@@ -645,12 +670,12 @@ func (store *MongoStorage) DecrementAndReturnRemainingConsumers(orgID string, ob
 	if err := store.update(objects, bson.M{"_id": id},
 		bson.M{
 			"$inc":         bson.M{"remaining-consumers": -1},
-			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+			"$currentDate": bson.M{"last-update": bson.M{"$type": "date"}},
 		}); err != nil {
 		return 0, &Error{fmt.Sprintf("Failed to decrement object's remaining consumers. Error: %s.", err)}
 	}
 	result := object{}
-	if err := store.fetchOne(objects, bson.M{"_id": id}, bson.M{"remaining-consumers": bson.ElementInt32}, &result); err != nil {
+	if err := store.fetchOne(objects, bson.M{"_id": id}, bson.M{"remaining-consumers": 1}, &result); err != nil {
 		return 0, &Error{fmt.Sprintf("Failed to retrieve object's remaining consumers. Error: %s.", err)}
 	}
 	return result.RemainingConsumers, nil
@@ -663,12 +688,12 @@ func (store *MongoStorage) DecrementAndReturnRemainingReceivers(orgID string, ob
 	if err := store.update(objects, bson.M{"_id": id},
 		bson.M{
 			"$inc":         bson.M{"remaining-receivers": -1},
-			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+			"$currentDate": bson.M{"last-update": bson.M{"$type": "date"}},
 		}); err != nil {
 		return 0, &Error{fmt.Sprintf("Failed to decrement object's remaining receivers. Error: %s.", err)}
 	}
 	result := object{}
-	if err := store.fetchOne(objects, bson.M{"_id": id}, bson.M{"remaining-receivers": bson.ElementInt32}, &result); err != nil {
+	if err := store.fetchOne(objects, bson.M{"_id": id}, bson.M{"remaining-receivers": 1}, &result); err != nil {
 		return 0, &Error{fmt.Sprintf("Failed to retrieve object's remaining receivers. Error: %s.", err)}
 	}
 	return result.RemainingReceivers, nil
@@ -678,14 +703,14 @@ func (store *MongoStorage) DecrementAndReturnRemainingReceivers(orgID string, ob
 func (store *MongoStorage) ResetObjectRemainingConsumers(orgID string, objectType string, objectID string) common.SyncServiceError {
 	id := createObjectCollectionID(orgID, objectType, objectID)
 	result := object{}
-	if err := store.fetchOne(objects, bson.M{"_id": id}, bson.M{"metadata": bson.ElementDocument}, &result); err != nil {
+	if err := store.fetchOne(objects, bson.M{"_id": id}, bson.M{"metadata": 1}, &result); err != nil {
 		return &Error{fmt.Sprintf("Failed to retrieve object. Error: %s.", err)}
 	}
 
 	if err := store.update(objects, bson.M{"_id": id},
 		bson.M{
 			"$set":         bson.M{"remaining-consumers": result.MetaData.ExpectedConsumers},
-			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+			"$currentDate": bson.M{"last-update": bson.M{"$type": "date"}},
 		}); err != nil {
 		return &Error{fmt.Sprintf("Failed to reset object's remaining comsumers. Error: %s.", err)}
 	}
@@ -698,20 +723,20 @@ func (store *MongoStorage) RetrieveUpdatedObjects(orgID string, objectType strin
 	result := []object{}
 	var query interface{}
 	if received {
-		query = bson.M{"$or": []bson.M{
+		query = bson.M{"$or": bson.A{
 			bson.M{"status": common.CompletelyReceived},
 			bson.M{"status": common.ObjReceived},
 			bson.M{"status": common.ObjDeleted}},
 			"metadata.destination-org-id": orgID, "metadata.object-type": objectType}
 	} else {
-		query = bson.M{"$or": []bson.M{
+		query = bson.M{"$or": bson.A{
 			bson.M{"status": common.CompletelyReceived},
 			bson.M{"status": common.ObjDeleted}},
 			"metadata.destination-org-id": orgID, "metadata.object-type": objectType}
 	}
 	if err := store.fetchAll(objects, query, nil, &result); err != nil {
 		switch err {
-		case mgo.ErrNotFound:
+		case mongo.ErrNoDocuments:
 			return nil, nil
 		default:
 			return nil, &Error{fmt.Sprintf("Failed to fetch the objects. Error: %s.", err)}
@@ -732,7 +757,7 @@ func (store *MongoStorage) RetrieveObjectsWithDestinationPolicy(orgID string, re
 	if received {
 		query = bson.M{
 			"metadata.destination-org-id": orgID,
-			"$and": []bson.M{
+			"$and": bson.A{
 				bson.M{"status": bson.M{"$ne": common.ObjDeleted}},
 				bson.M{"metadata.destination-policy": bson.M{"$ne": nil}},
 			},
@@ -741,7 +766,7 @@ func (store *MongoStorage) RetrieveObjectsWithDestinationPolicy(orgID string, re
 		query = bson.M{
 			"metadata.destination-org-id": orgID,
 			"policy-received":             false,
-			"$and": []bson.M{
+			"$and": bson.A{
 				bson.M{"status": bson.M{"$ne": common.ObjDeleted}},
 				bson.M{"metadata.destination-policy": bson.M{"$ne": nil}},
 			},
@@ -815,14 +840,14 @@ func (store *MongoStorage) RetrieveObjectsWithFilters(orgID string, destinationP
 	}
 
 	if destinationType != "" {
-		var subquery []bson.M
+		var subquery bson.A
 		if destinationID == "" {
-			subquery = []bson.M{
+			subquery = bson.A{
 				bson.M{"metadata.destination-type": destinationType},
 				bson.M{"metadata.destinations-list": bson.M{"$regex": destinationType + ":*"}},
 			}
 		} else {
-			subquery = []bson.M{
+			subquery = bson.A{
 				bson.M{"metadata.destination-type": destinationType, "metadata.destination-id": destinationID},
 				bson.M{"metadata.destinations-list": destinationType + ":" + destinationID},
 			}
@@ -849,7 +874,7 @@ func (store *MongoStorage) RetrieveObjectsWithFilters(orgID string, destinationP
 
 	if err := store.fetchAll(objects, query, nil, &result); err != nil {
 		switch err {
-		case mgo.ErrNotFound:
+		case mongo.ErrNoDocuments:
 			return nil, nil
 		default:
 			return nil, &Error{fmt.Sprintf("Failed to fetch the objects. Error: %s.", err)}
@@ -879,7 +904,7 @@ func (store *MongoStorage) RetrieveAllObjects(orgID string, objectType string) (
 func (store *MongoStorage) RetrieveObjects(orgID string, destType string, destID string, resend int) ([]common.MetaData, common.SyncServiceError) {
 	result := []object{}
 	query := bson.M{"metadata.destination-org-id": orgID,
-		"$or": []bson.M{
+		"$or": bson.A{
 			bson.M{"status": common.ReadyToSend},
 			bson.M{"status": common.NotReadyToSend},
 		}}
@@ -888,7 +913,7 @@ OUTER:
 	for i := 0; i < maxUpdateTries; i++ {
 		if err := store.fetchAll(objects, query, nil, &result); err != nil {
 			switch err {
-			case mgo.ErrNotFound:
+			case mongo.ErrNoDocuments:
 				return nil, nil
 			default:
 				return nil, &Error{fmt.Sprintf("Failed to fetch the objects. Error: %s.", err)}
@@ -937,9 +962,9 @@ OUTER:
 						if err := store.update(objects, bson.M{"_id": id, "last-update": r.LastUpdate},
 							bson.M{
 								"$set":         bson.M{"destinations": r.Destinations},
-								"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+								"$currentDate": bson.M{"last-update": bson.M{"$type": "date"}},
 							}); err != nil {
-							if err == mgo.ErrNotFound {
+							if IsNotFound(err) {
 								time.Sleep(time.Duration(sleepInMS) * time.Millisecond)
 								continue OUTER
 							}
@@ -964,9 +989,9 @@ func (store *MongoStorage) RetrieveConsumedObjects() ([]common.ConsumedObject, c
 func (store *MongoStorage) RetrieveObject(orgID string, objectType string, objectID string) (*common.MetaData, common.SyncServiceError) {
 	result := object{}
 	id := createObjectCollectionID(orgID, objectType, objectID)
-	if err := store.fetchOne(objects, bson.M{"_id": id}, bson.M{"metadata": bson.ElementDocument}, &result); err != nil {
+	if err := store.fetchOne(objects, bson.M{"_id": id}, bson.M{"metadata": 1}, &result); err != nil {
 		switch err {
-		case mgo.ErrNotFound:
+		case mongo.ErrNoDocuments:
 			return nil, nil
 		default:
 			return nil, &Error{fmt.Sprintf("Failed to fetch the object. Error: %s.", err)}
@@ -977,11 +1002,11 @@ func (store *MongoStorage) RetrieveObject(orgID string, objectType string, objec
 
 // RetrieveObjectAndStatus returns the object meta data and status with the specified parameters
 func (store *MongoStorage) RetrieveObjectAndStatus(orgID string, objectType string, objectID string) (*common.MetaData, string, common.SyncServiceError) {
-	result := object{}
+	result := &object{}
 	id := createObjectCollectionID(orgID, objectType, objectID)
-	if err := store.fetchOne(objects, bson.M{"_id": id}, nil, &result); err != nil {
+	if err := store.fetchOne(objects, bson.M{"_id": id}, nil, result); err != nil {
 		switch err {
-		case mgo.ErrNotFound:
+		case mongo.ErrNoDocuments:
 			return nil, "", nil
 		default:
 			return nil, "", &Error{fmt.Sprintf("Failed to fetch the object. Error: %s.", err)}
@@ -999,30 +1024,34 @@ func (store *MongoStorage) RetrieveObjectData(orgID string, objectType string, o
 		id = createObjectCollectionID(orgID, objectType, objectID)
 	}
 
-	fileHandle, err := store.openFile(id)
-	if err != nil {
-		switch err {
-		case mgo.ErrNotFound:
-			return nil, nil
-		default:
-			return nil, &Error{fmt.Sprintf("Failed to open file to read the data. Error: %s.", err)}
+	if store.gridfsBucket == nil {
+		if bucket, err := gridfs.NewBucket(store.database); err != nil {
+			return nil, err
+		} else {
+			store.gridfsBucket = bucket
 		}
 	}
-	store.putFileHandle(id, fileHandle)
-	return fileHandle.file, nil
+
+	downloadStream, err := store.gridfsBucket.OpenDownloadStreamByName(id)
+	if err != nil {
+		switch err {
+		case mongo.ErrNoDocuments:
+			return nil, nil
+		case gridfs.ErrFileNotFound:
+			return nil, nil
+		default:
+			return nil, &Error{fmt.Sprintf("Failed to find file to read the data. Error: %s.", err)}
+		}
+	}
+	return downloadStream, nil
 }
 
 // CloseDataReader closes the data reader if necessary
 func (store *MongoStorage) CloseDataReader(dataReader io.Reader) common.SyncServiceError {
 	switch v := dataReader.(type) {
-	case *mgo.GridFile:
-		err := v.Close()
-		if id, ok := v.Id().(string); ok {
-			if fileHandle := store.getFileHandle(id); fileHandle != nil {
-				store.deleteFileHandle(id)
-			}
-		}
-		return err
+	case *gridfs.DownloadStream:
+		v.Close()
+		return nil
 	default:
 		return nil
 	}
@@ -1033,42 +1062,53 @@ func (store *MongoStorage) ReadObjectData(orgID string, objectType string, objec
 	id := createObjectCollectionID(orgID, objectType, objectID)
 	fileHandle, err := store.openFile(id)
 	if err != nil {
-		if err == mgo.ErrNotFound {
+		if err == mongo.ErrNoDocuments {
 			return nil, true, 0, &common.NotFound{}
 		}
 		return nil, true, 0, &Error{fmt.Sprintf("Failed to open file to read the data. Error: %s.", err)}
 	}
 
 	offset64 := int64(offset)
-	if offset64 >= fileHandle.file.Size() {
-		fileHandle.file.Close()
+	if offset64 >= fileHandle.GetFile().Length {
+		fileHandle.Close()
 		return make([]byte, 0), true, 0, nil
 	}
 
-	_, err = fileHandle.file.Seek(offset64, 0)
+	b := make([]byte, fileHandle.GetFile().Length)
+	_, err = fileHandle.Read(b)
 	if err != nil {
-		fileHandle.file.Close()
+		fileHandle.Close()
 		return nil, true, 0, &Error{fmt.Sprintf("Failed to read the data. Error: %s.", err)}
 	}
-	s := int64(size)
-	if s > fileHandle.file.Size()-offset64 {
-		s = fileHandle.file.Size() - offset64
-	}
-	b := make([]byte, s)
-	n, err := fileHandle.file.Read(b)
-	if err != nil {
-		fileHandle.file.Close()
-		return nil, true, 0, &Error{fmt.Sprintf("Failed to read the data. Error: %s.", err)}
-	}
-	if err = fileHandle.file.Close(); err != nil {
+
+	if err = fileHandle.Close(); err != nil {
 		return nil, true, 0, &Error{fmt.Sprintf("Failed to close the file. Error: %s.", err)}
 	}
+
+	br := bytes.NewReader(b)
+	_, err = br.Seek(offset64, 0)
+	if err != nil {
+		return nil, true, 0, &Error{fmt.Sprintf("Failed to read the data. Error: %s.", err)}
+	}
+
+	s := int64(size)
+	if s > fileHandle.GetFile().Length-offset64 {
+		s = fileHandle.GetFile().Length - offset64
+	}
+
+	ret := make([]byte, s)
+	n, err := br.Read(ret)
+
+	if err != nil {
+		return nil, true, 0, &Error{fmt.Sprintf("Failed to read the data. Error: %s.", err)}
+	}
+
 	eof := false
-	if fileHandle.file.Size()-offset64 == int64(n) {
+	if fileHandle.GetFile().Length-offset64 == int64(n) {
 		eof = true
 	}
 
-	return b, eof, n, nil
+	return ret, eof, n, nil
 }
 
 // StoreObjectData stores object's data
@@ -1077,9 +1117,9 @@ func (store *MongoStorage) ReadObjectData(orgID string, objectType string, objec
 func (store *MongoStorage) StoreObjectData(orgID string, objectType string, objectID string, dataReader io.Reader) (bool, common.SyncServiceError) {
 	id := createObjectCollectionID(orgID, objectType, objectID)
 	result := object{}
-	if err := store.fetchOne(objects, bson.M{"_id": id}, bson.M{"status": bson.ElementString}, &result); err != nil {
+	if err := store.fetchOne(objects, bson.M{"_id": id}, bson.M{"status": 1}, &result); err != nil {
 		switch err {
-		case mgo.ErrNotFound:
+		case mongo.ErrNoDocuments:
 			return false, nil
 		default:
 			return false, &Error{fmt.Sprintf("Failed to store the data. Error: %s.", err)}
@@ -1096,18 +1136,22 @@ func (store *MongoStorage) StoreObjectData(orgID string, objectType string, obje
 		if err := store.update(objects, bson.M{"_id": id},
 			bson.M{
 				"$set":         bson.M{"metadata.data-id": newID, "metadata.instance-id": newID},
-				"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+				"$currentDate": bson.M{"last-update": bson.M{"$type": "date"}},
 			}); err != nil {
 			return false, &Error{fmt.Sprintf("Failed to set instance id. Error: %s.", err)}
 		}
 	}
-	_, size, err := store.copyDataToFile(id, dataReader, true, true)
-	if err != nil {
+	if err := store.copyDataToFile(id, dataReader); err != nil {
 		return false, err
 	}
 
+	fileInfo, err := store.getFileInfo(id)
+	if err != nil {
+		return false, &Error{fmt.Sprintf("Failed to get mongo file information. Error: %s.", err)}
+	}
+
 	// Update object size
-	if err := store.update(objects, bson.M{"_id": id}, bson.M{"$set": bson.M{"metadata.object-size": size}}); err != nil {
+	if err := store.update(objects, bson.M{"_id": id}, bson.M{"$set": bson.M{"metadata.object-size": fileInfo.Length}}); err != nil {
 		return false, &Error{fmt.Sprintf("Failed to update object's size. Error: %s.", err)}
 	}
 
@@ -1146,8 +1190,8 @@ func (store *MongoStorage) RemoveObjectTempData(orgID string, objectType string,
 			fileHandle, _ := store.retrieveObjectTempData(id)
 
 			if fileHandle != nil {
-				store.CloseDataReader(fileHandle.file)
-				store.deleteFileHandle(id)
+				fileHandle.Close()
+				//store.deleteFileHandle(id)
 
 				//Don't return on errors
 				store.removeFile(id)
@@ -1191,7 +1235,7 @@ func (store *MongoStorage) RetrieveObjectTempData(orgID string, objectType strin
 			}
 
 			if fileHandle != nil {
-				readers = append(readers, fileHandle.file)
+				readers = append(readers, fileHandle)
 			}
 
 			chunkNumber += 1
@@ -1207,11 +1251,11 @@ func (store *MongoStorage) RetrieveObjectTempData(orgID string, objectType strin
 
 }
 
-func (store *MongoStorage) retrieveObjectTempData(id string) (*fileHandle, common.SyncServiceError) {
+func (store *MongoStorage) retrieveObjectTempData(id string) (*gridfs.DownloadStream, common.SyncServiceError) {
 	fileHandle, err := store.openFile(id)
 	if err != nil {
 		switch err {
-		case mgo.ErrNotFound:
+		case mongo.ErrNoDocuments:
 			return nil, nil
 		default:
 			return nil, &Error{fmt.Sprintf("Failed to open file to read the data. Error: %s.", err)}
@@ -1284,38 +1328,11 @@ func (store *MongoStorage) AppendObjectData(orgID string, objectType string, obj
 	// In Mongo implementation, all data passed to this function is to be stored in temp data
 	id := createTempObjectCollectionID(orgID, objectType, objectID, chunkNumber)
 
-	var fileHandle *fileHandle
+	//var fileHandle *fileHandle
 	store.removeFile(id)
-	fh, err := store.createFile(id)
-	if err != nil {
+	br := bytes.NewReader(data)
+	if err = store.createFile(id, br); err != nil {
 		return isLastChunk, err
-	}
-	fileHandle = fh
-	store.putFileHandle(id, fileHandle)
-
-	for {
-		if trace.IsLogging(logger.TRACE) {
-			trace.Trace("Put data (data size: %d) in file %s\n", len(data), id)
-		}
-		n, err = fileHandle.file.Write(data)
-		if err != nil {
-			return isLastChunk, &Error{fmt.Sprintf("Failed to write the data to the file. Error: %s.", err)}
-		}
-		if n != len(data) {
-			return isLastChunk, &Error{fmt.Sprintf("Failed to write all the data to the file. Wrote %d instead of %d.", n, len(data))}
-		}
-		fileHandle.offset += int64(n)
-		if fileHandle.chunks == nil {
-			break
-		}
-		data = fileHandle.chunks[fileHandle.offset]
-		if data == nil {
-			break
-		}
-		delete(fileHandle.chunks, fileHandle.offset)
-		if trace.IsLogging(logger.TRACE) {
-			trace.Trace(" Get data (%d) from map at offset %d\n", len(data), offset)
-		}
 	}
 
 	if updatedLastChunk {
@@ -1324,8 +1341,8 @@ func (store *MongoStorage) AppendObjectData(orgID string, objectType string, obj
 		}
 	}
 
-	store.deleteFileHandle(id)
-	err = fileHandle.file.Close()
+	//store.deleteFileHandle(id)
+	//err = fileHandle.Close()
 	if err != nil {
 		return updatedLastChunk, &Error{fmt.Sprintf("Failed to close the file. Error: %s.", err)}
 	}
@@ -1362,9 +1379,9 @@ func (store *MongoStorage) HandleObjectInfoForLastDataChunk(orgID string, object
 	id := createObjectCollectionID(orgID, objectType, objectID)
 
 	result := object{}
-	if err := store.fetchOne(objects, bson.M{"_id": id}, bson.M{"status": bson.ElementString}, &result); err != nil {
+	if err := store.fetchOne(objects, bson.M{"_id": id}, bson.M{"status": 1}, &result); err != nil {
 		switch err {
-		case mgo.ErrNotFound:
+		case mongo.ErrNoDocuments:
 			return false, nil
 		default:
 			return false, &Error{fmt.Sprintf("Failed to store the data. Error: %s.", err)}
@@ -1379,7 +1396,7 @@ func (store *MongoStorage) HandleObjectInfoForLastDataChunk(orgID string, object
 		if err := store.update(objects, bson.M{"_id": id},
 			bson.M{
 				"$set":         bson.M{"metadata.data-id": newID, "metadata.instance-id": newID},
-				"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+				"$currentDate": bson.M{"last-update": bson.M{"$type": "date"}},
 			}); err != nil {
 			return false, &Error{fmt.Sprintf("Failed to set instance id. Error: %s.", err)}
 		}
@@ -1399,7 +1416,7 @@ func (store *MongoStorage) UpdateObjectStatus(orgID string, objectType string, o
 	if err := store.update(objects, bson.M{"_id": id},
 		bson.M{
 			"$set":         bson.M{"status": status},
-			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+			"$currentDate": bson.M{"last-update": bson.M{"$type": "date"}},
 		}); err != nil {
 		return &Error{fmt.Sprintf("Failed to update object's status. Error: %s.", err)}
 	}
@@ -1417,7 +1434,7 @@ func (store *MongoStorage) MarkObjectDeleted(orgID string, objectType string, ob
 	if err := store.update(objects, bson.M{"_id": id},
 		bson.M{
 			"$set":         bson.M{"status": common.ObjDeleted, "metadata.deleted": true},
-			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+			"$currentDate": bson.M{"last-update": bson.M{"$type": "date"}},
 		}); err != nil {
 		return &Error{fmt.Sprintf("Failed to mark object as deleted. Error: %s.", err)}
 	}
@@ -1430,7 +1447,7 @@ func (store *MongoStorage) MarkDestinationPolicyReceived(orgID string, objectTyp
 	if err := store.update(objects, bson.M{"_id": id},
 		bson.M{
 			"$set":         bson.M{"policy-received": true},
-			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+			"$currentDate": bson.M{"last-update": bson.M{"$type": "date"}},
 		}); err != nil {
 		return &Error{fmt.Sprintf("Failed to mark an object's destination policy as received. Error: %s", err)}
 	}
@@ -1442,7 +1459,7 @@ func (store *MongoStorage) ActivateObject(orgID string, objectType string, objec
 	id := createObjectCollectionID(orgID, objectType, objectID)
 	if err := store.update(objects, bson.M{"_id": id},
 		bson.M{"$set": bson.M{"metadata.inactive": false},
-			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+			"$currentDate": bson.M{"last-update": bson.M{"$type": "date"}},
 		}); err != nil {
 		return &Error{fmt.Sprintf("Failed to mark object as active. Error: %s.", err)}
 	}
@@ -1451,7 +1468,8 @@ func (store *MongoStorage) ActivateObject(orgID string, objectType string, objec
 
 // DeleteStoredObject deletes the object
 func (store *MongoStorage) DeleteStoredObject(orgID string, objectType string, objectID string) common.SyncServiceError {
-	return store.deleteObject(orgID, objectType, objectID, -1)
+	t := time.Date(0001, 1, 1, 00, 00, 00, 00, time.UTC)
+	return store.deleteObject(orgID, objectType, objectID, t)
 }
 
 // DeleteStoredData deletes the object's data
@@ -1492,7 +1510,7 @@ func (store *MongoStorage) CleanObjects() common.SyncServiceError {
 // currently stored in this node's storage
 func (store *MongoStorage) GetNumberOfStoredObjects() (uint32, common.SyncServiceError) {
 	query := bson.M{
-		"$or": []bson.M{
+		"$or": bson.A{
 			bson.M{"status": common.ReadyToSend},
 			bson.M{"status": common.NotReadyToSend},
 			bson.M{"status": common.Verifying},
@@ -1510,12 +1528,12 @@ func (store *MongoStorage) AddWebhook(orgID string, objectType string, url strin
 	result := &webhookObject{}
 	for i := 0; i < maxUpdateTries; i++ {
 		if err := store.fetchOne(webhooks, bson.M{"_id": id}, nil, &result); err != nil {
-			if err == mgo.ErrNotFound {
+			if err == mongo.ErrNoDocuments {
 				result.Hooks = make([]string, 0)
 				result.Hooks = append(result.Hooks, url)
 				result.ID = id
 				if err = store.insert(webhooks, result); err != nil {
-					if mgo.IsDup(err) {
+					if mongo.IsDuplicateKeyError(err) {
 						time.Sleep(time.Duration(sleepInMS) * time.Millisecond)
 						continue
 					}
@@ -1536,9 +1554,9 @@ func (store *MongoStorage) AddWebhook(orgID string, objectType string, url strin
 		if err := store.update(webhooks, bson.M{"_id": id, "last-update": result.LastUpdate},
 			bson.M{
 				"$set":         bson.M{"hooks": result.Hooks},
-				"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+				"$currentDate": bson.M{"last-update": bson.M{"$type": "date"}},
 			}); err != nil {
-			if err == mgo.ErrNotFound {
+			if IsNotFound(err) {
 				time.Sleep(time.Duration(sleepInMS) * time.Millisecond)
 				continue
 			}
@@ -1575,9 +1593,9 @@ func (store *MongoStorage) DeleteWebhook(orgID string, objectType string, url st
 		if err := store.update(webhooks, bson.M{"_id": id, "last-update": result.LastUpdate},
 			bson.M{
 				"$set":         bson.M{"hooks": result.Hooks},
-				"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+				"$currentDate": bson.M{"last-update": bson.M{"$type": "date"}},
 			}); err != nil {
-			if err == mgo.ErrNotFound {
+			if IsNotFound(err) {
 				time.Sleep(time.Duration(sleepInMS) * time.Millisecond)
 				continue
 			}
@@ -1611,7 +1629,7 @@ func (store *MongoStorage) RetrieveDestinations(orgID string, destType string) (
 
 	if orgID == "" {
 		if destType == "" {
-			err = store.fetchAll(destinations, nil, nil, &result)
+			err = store.fetchAll(destinations, bson.M{}, nil, &result)
 		} else {
 			err = store.fetchAll(destinations, bson.M{"destination.destination-type": destType}, nil, &result)
 		}
@@ -1622,7 +1640,7 @@ func (store *MongoStorage) RetrieveDestinations(orgID string, destType string) (
 			err = store.fetchAll(destinations, bson.M{"destination.destination-org-id": orgID, "destination.destination-type": destType}, nil, &result)
 		}
 	}
-	if err != nil && err != mgo.ErrNotFound {
+	if err != nil && err != mongo.ErrNoDocuments {
 		return nil, &Error{fmt.Sprintf("Failed to fetch the destinations. Error: %s.", err)}
 	}
 
@@ -1638,7 +1656,7 @@ func (store *MongoStorage) DestinationExists(orgID string, destType string, dest
 	result := destinationObject{}
 	id := createDestinationCollectionID(orgID, destType, destID)
 	if err := store.fetchOne(destinations, bson.M{"_id": id}, nil, &result); err != nil {
-		if err == mgo.ErrNotFound {
+		if err == mongo.ErrNoDocuments {
 			return false, nil
 		}
 		return false, err
@@ -1649,8 +1667,9 @@ func (store *MongoStorage) DestinationExists(orgID string, destType string, dest
 // StoreDestination stores the destination
 func (store *MongoStorage) StoreDestination(destination common.Destination) common.SyncServiceError {
 	id := getDestinationCollectionID(destination)
-	newObject := destinationObject{ID: id, Destination: destination}
-	err := store.upsert(destinations, bson.M{"_id": id, "destination.destination-org-id": destination.DestOrgID}, newObject)
+	filter := bson.D{{"_id", id}, {"destination.destination-org-id", destination.DestOrgID}}
+	newObject := bson.D{{"$set", bson.D{{"_id", id}, {"destination", destination}, {"last-ping-time", primitive.NewDateTimeFromTime(time.Now())}}}}
+	err := store.upsert(destinations, filter, newObject)
 	if err != nil {
 		return &Error{fmt.Sprintf("Failed to store a destination. Error: %s.", err)}
 	}
@@ -1671,11 +1690,11 @@ func (store *MongoStorage) UpdateDestinationLastPingTime(destination common.Dest
 	id := getDestinationCollectionID(destination)
 	err := store.update(destinations,
 		bson.M{"_id": id},
-		bson.M{"$currentDate": bson.M{"last-ping-time": bson.M{"$type": "timestamp"}}},
+		bson.M{"$currentDate": bson.M{"last-ping-time": bson.M{"$type": "date"}}},
 	)
 	if err != nil {
-		if err == mgo.ErrNotFound {
-			return &NotFound{}
+		if IsNotFound(err) {
+			return err
 		}
 		return &Error{fmt.Sprintf("Failed to update the last ping time for destination. Error: %s\n", err)}
 	}
@@ -1685,15 +1704,11 @@ func (store *MongoStorage) UpdateDestinationLastPingTime(destination common.Dest
 
 // RemoveInactiveDestinations removes destinations that haven't sent ping since the provided timestamp
 func (store *MongoStorage) RemoveInactiveDestinations(lastTimestamp time.Time) {
-	timestamp, err := bson.NewMongoTimestamp(lastTimestamp, 1)
-	if err != nil {
-		return
-	}
-	query := bson.M{"last-ping-time": bson.M{"$lte": timestamp}}
-	selector := bson.M{"destination": bson.ElementDocument}
+	query := bson.M{"last-ping-time": bson.M{"$lte": lastTimestamp}}
+	selector := bson.M{"destination": 1}
 	dests := []destinationObject{}
 	if err := store.fetchAll(destinations, query, selector, &dests); err != nil {
-		if err != mgo.ErrNotFound && log.IsLogging(logger.ERROR) {
+		if err != mongo.ErrNoDocuments && log.IsLogging(logger.ERROR) {
 			log.Error("Error in mongoStorage.RemoveInactiveDestinations: failed to remove inactive destinations. Error: %s\n", err)
 		}
 		return
@@ -1703,11 +1718,11 @@ func (store *MongoStorage) RemoveInactiveDestinations(lastTimestamp time.Time) {
 	}
 	for _, d := range dests {
 		if err := store.DeleteNotificationRecords(d.Destination.DestOrgID, "", "", d.Destination.DestType, d.Destination.DestID); err != nil &&
-			err != mgo.ErrNotFound && log.IsLogging(logger.ERROR) {
+			err != mongo.ErrNoDocuments && log.IsLogging(logger.ERROR) {
 			log.Error("Error in mongoStorage.RemoveInactiveDestinations: failed to remove notifications for inactive destinations. Error: %s\n", err)
 		}
 		if err := store.DeleteDestination(d.Destination.DestOrgID, d.Destination.DestType, d.Destination.DestID); err != nil &&
-			err != mgo.ErrNotFound && log.IsLogging(logger.ERROR) {
+			err != mongo.ErrNoDocuments && log.IsLogging(logger.ERROR) {
 			log.Error("Error in mongoStorage.RemoveInactiveDestinations: failed to remove inactive destination. Error: %s\n", err)
 		}
 	}
@@ -1733,7 +1748,7 @@ func (store *MongoStorage) RetrieveDestination(orgID string, destType string, de
 	result := destinationObject{}
 	id := createDestinationCollectionID(orgID, destType, destID)
 	if err := store.fetchOne(destinations, bson.M{"_id": id}, nil, &result); err != nil {
-		if err != mgo.ErrNotFound {
+		if err != mongo.ErrNoDocuments {
 			return nil, &Error{fmt.Sprintf("Failed to fetch the destination. Error: %s.", err)}
 		}
 		return nil, &NotFound{fmt.Sprintf(" The destination %s:%s does not exist", destType, destID)}
@@ -1744,7 +1759,7 @@ func (store *MongoStorage) RetrieveDestination(orgID string, destType string, de
 // GetObjectsForDestination retrieves objects that are in use on a given node
 func (store *MongoStorage) GetObjectsForDestination(orgID string, destType string, destID string) ([]common.ObjectStatus, common.SyncServiceError) {
 	notificationRecords := []notificationObject{}
-	query := bson.M{"$or": []bson.M{
+	query := bson.M{"$or": bson.A{
 		bson.M{"notification.status": common.Update},
 		bson.M{"notification.status": common.UpdatePending},
 		bson.M{"notification.status": common.Updated},
@@ -1755,7 +1770,7 @@ func (store *MongoStorage) GetObjectsForDestination(orgID string, destType strin
 		"notification.destination-id":     destID,
 		"notification.destination-type":   destType}
 
-	if err := store.fetchAll(notifications, query, nil, &notificationRecords); err != nil && err != mgo.ErrNotFound {
+	if err := store.fetchAll(notifications, query, nil, &notificationRecords); err != nil && err != mongo.ErrNoDocuments {
 		return nil, &Error{fmt.Sprintf("Failed to fetch the notifications. Error: %s.", err)}
 	}
 
@@ -1798,7 +1813,7 @@ func (store *MongoStorage) RetrieveAllObjectsAndUpdateDestinationListForDestinat
 
 	if err := store.fetchAll(objects, query, nil, &result); err != nil {
 		switch err {
-		case mgo.ErrNotFound:
+		case mongo.ErrNoDocuments:
 			return nil, nil
 		default:
 			return nil, &Error{fmt.Sprintf("Failed to fetch the objects for destination %s %s %s from storage. Error: %s.", destOrgID, destType, destID, err)}
@@ -1818,10 +1833,10 @@ func (store *MongoStorage) RetrieveAllObjectsAndUpdateDestinationListForDestinat
 
 		query := bson.M{
 			"$set":         bson.M{"destinations": updatedDestinationList},
-			"$currentDate": bson.M{"last-update": bson.M{"$type": "timestamp"}},
+			"$currentDate": bson.M{"last-update": bson.M{"$type": "date"}},
 		}
 		if err := store.update(objects, bson.M{"_id": r.ID, "last-update": r.LastUpdate}, query); err != nil {
-			if err == mgo.ErrNotFound {
+			if IsNotFound(err) {
 				continue
 			}
 			emptyMeta := make([]common.MetaData, 0)
@@ -1850,7 +1865,7 @@ func (store *MongoStorage) UpdateNotificationRecord(notification common.Notifica
 		resendTime := time.Now().Unix() + int64(common.Configuration.ResendInterval*6)
 		notification.ResendTime = resendTime
 	}
-	n := notificationObject{ID: id, Notification: notification}
+	n := bson.M{"$set": bson.M{"_id": id, "notification": notification}}
 	err := store.upsert(notifications,
 		bson.M{
 			"_id":                             id,
@@ -1862,6 +1877,9 @@ func (store *MongoStorage) UpdateNotificationRecord(notification common.Notifica
 	if err != nil {
 		return &Error{fmt.Sprintf("Failed to update notification record. Error: %s.", err)}
 	}
+
+	no := notificationObject{}
+	_ = store.fetchOne(notifications, bson.M{"_id": id}, nil, &no)
 	return nil
 }
 
@@ -1881,7 +1899,7 @@ func (store *MongoStorage) RetrieveNotificationRecord(orgID string, objectType s
 	id := createNotificationCollectionID(orgID, objectType, objectID, destType, destID)
 	result := notificationObject{}
 	if err := store.fetchOne(notifications, bson.M{"_id": id}, nil, &result); err != nil {
-		if err == mgo.ErrNotFound {
+		if err == mongo.ErrNoDocuments {
 			return nil, nil
 		}
 		return nil, &Error{fmt.Sprintf("Failed to fetch the notification. Error: %s.", err)}
@@ -1907,7 +1925,7 @@ func (store *MongoStorage) DeleteNotificationRecords(orgID string, objectType st
 				"notification.destination-id": destID})
 	}
 
-	if err != nil && err != mgo.ErrNotFound {
+	if err != nil && err != mongo.ErrNoDocuments {
 		return &Error{fmt.Sprintf("Failed to delete notification records. Error: %s.", err)}
 	}
 	return nil
@@ -1918,13 +1936,13 @@ func (store *MongoStorage) RetrieveNotifications(orgID string, destType string, 
 	result := []notificationObject{}
 	var query bson.M
 	if destType == "" && destID == "" {
-		currentTime := time.Now().Unix()
+		currentTime := primitive.NewDateTimeFromTime(time.Now())
 
-		query = bson.M{"$or": []bson.M{
+		query = bson.M{"$or": bson.A{
 			bson.M{"notification.status": common.Getdata},
 			bson.M{
 				"notification.resend-time": bson.M{"$lte": currentTime},
-				"$or": []bson.M{
+				"$or": bson.A{
 					bson.M{"notification.status": common.Update},
 					bson.M{"notification.status": common.Received},
 					bson.M{"notification.status": common.Consumed},
@@ -1934,7 +1952,7 @@ func (store *MongoStorage) RetrieveNotifications(orgID string, destType string, 
 					bson.M{"notification.status": common.Error}}}}}
 	} else {
 		if retrieveReceived {
-			query = bson.M{"$or": []bson.M{
+			query = bson.M{"$or": bson.A{
 				bson.M{"notification.status": common.Update},
 				bson.M{"notification.status": common.Updated},
 				bson.M{"notification.status": common.Received},
@@ -1947,7 +1965,7 @@ func (store *MongoStorage) RetrieveNotifications(orgID string, destType string, 
 				"notification.destination-id":     destID,
 				"notification.destination-type":   destType}
 		} else {
-			query = bson.M{"$or": []bson.M{
+			query = bson.M{"$or": bson.A{
 				bson.M{"notification.status": common.Update},
 				bson.M{"notification.status": common.Received},
 				bson.M{"notification.status": common.Consumed},
@@ -1959,7 +1977,7 @@ func (store *MongoStorage) RetrieveNotifications(orgID string, destType string, 
 				"notification.destination-type":   destType}
 		}
 	}
-	if err := store.fetchAll(notifications, query, nil, &result); err != nil && err != mgo.ErrNotFound {
+	if err := store.fetchAll(notifications, query, nil, &result); err != nil && err != mongo.ErrNoDocuments {
 		return nil, &Error{fmt.Sprintf("Failed to fetch the notifications. Error: %s.", err)}
 	}
 
@@ -1976,7 +1994,7 @@ func (store *MongoStorage) RetrievePendingNotifications(orgID string, destType s
 	var query bson.M
 
 	if destType == "" && destID == "" {
-		query = bson.M{"$or": []bson.M{
+		query = bson.M{"$or": bson.A{
 			bson.M{"notification.status": common.UpdatePending},
 			bson.M{"notification.status": common.ReceivedPending},
 			bson.M{"notification.status": common.ConsumedPending},
@@ -1984,7 +2002,7 @@ func (store *MongoStorage) RetrievePendingNotifications(orgID string, destType s
 			bson.M{"notification.status": common.DeletedPending}},
 			"notification.destination-org-id": orgID}
 	} else {
-		query = bson.M{"$or": []bson.M{
+		query = bson.M{"$or": bson.A{
 			bson.M{"notification.status": common.UpdatePending},
 			bson.M{"notification.status": common.ReceivedPending},
 			bson.M{"notification.status": common.ConsumedPending},
@@ -1994,7 +2012,7 @@ func (store *MongoStorage) RetrievePendingNotifications(orgID string, destType s
 			"notification.destination-id":     destID,
 			"notification.destination-type":   destType}
 	}
-	if err := store.fetchAll(notifications, query, nil, &result); err != nil && err != mgo.ErrNotFound {
+	if err := store.fetchAll(notifications, query, nil, &result); err != nil && err != mongo.ErrNoDocuments {
 		return nil, &Error{fmt.Sprintf("Failed to fetch the notifications. Error: %s.", err)}
 	}
 
@@ -2011,7 +2029,7 @@ func (store *MongoStorage) InsertInitialLeader(leaderID string) (bool, common.Sy
 	err := store.insert(leader, doc)
 
 	if err != nil {
-		if !mgo.IsDup(err) {
+		if !mongo.IsDuplicateKeyError(err) {
 			return false, &Error{fmt.Sprintf("Failed to insert document into syncLeaderElection collection. Error: %s\n", err)}
 		}
 		return false, nil
@@ -2026,10 +2044,10 @@ func (store *MongoStorage) LeaderPeriodicUpdate(leaderID string) (bool, common.S
 	for i := 0; i < maxUpdateTries; i++ {
 		err = store.update(leader,
 			bson.M{"_id": 1, "uuid": leaderID},
-			bson.M{"$currentDate": bson.M{"last-heartbeat-ts": bson.M{"$type": "timestamp"}}},
+			bson.M{"$currentDate": bson.M{"last-heartbeat-ts": bson.M{"$type": "date"}}},
 		)
 		if err != nil {
-			if err == mgo.ErrNotFound {
+			if IsNotFound(err) {
 				time.Sleep(time.Duration(sleepInMS) * time.Millisecond)
 				continue
 			}
@@ -2049,12 +2067,12 @@ func (store *MongoStorage) RetrieveLeader() (string, int32, time.Time, int64, co
 	doc := leaderDocument{}
 	err := store.fetchOne(leader, bson.M{"_id": 1}, nil, &doc)
 	if err != nil {
-		if err == mgo.ErrNotFound {
+		if err == mongo.ErrNoDocuments {
 			return "", 0, time.Now(), 0, &NotFound{}
 		}
 		return "", 0, time.Now(), 0, &Error{fmt.Sprintf("Failed to fetch the document in the syncLeaderElection collection. Error: %s", err)}
 	}
-	return doc.UUID, doc.HeartbeatTimeout, doc.LastHeartbeatTS.Time(), doc.Version, nil
+	return doc.UUID, doc.HeartbeatTimeout, doc.LastHeartbeatTS, doc.Version, nil
 }
 
 // UpdateLeader updates the leader entry for a leadership takeover
@@ -2062,7 +2080,7 @@ func (store *MongoStorage) UpdateLeader(leaderID string, version int64) (bool, c
 	err := store.update(leader,
 		bson.M{"_id": 1, "version": version},
 		bson.M{
-			"$currentDate": bson.M{"last-heartbeat-ts": bson.M{"$type": "timestamp"}},
+			"$currentDate": bson.M{"last-heartbeat-ts": bson.M{"$type": "date"}},
 			"$set": bson.M{
 				"uuid":              leaderID,
 				"heartbeat-timeout": common.Configuration.LeadershipTimeout,
@@ -2071,7 +2089,7 @@ func (store *MongoStorage) UpdateLeader(leaderID string, version int64) (bool, c
 		},
 	)
 	if err != nil {
-		if err != mgo.ErrNotFound {
+		if !IsNotFound(err) {
 			// Only complain if someone else didn't steal the leadership
 			return false, &Error{fmt.Sprintf("Failed to update the document in the syncLeaderElection collection. Error: %s\n", err)}
 		}
@@ -2082,11 +2100,9 @@ func (store *MongoStorage) UpdateLeader(leaderID string, version int64) (bool, c
 
 // ResignLeadership causes this sync service to give up the Leadership
 func (store *MongoStorage) ResignLeadership(leaderID string) common.SyncServiceError {
-	timestamp, err := bson.NewMongoTimestamp(time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC), 1)
-	if err != nil {
-		return err
-	}
-	err = store.update(leader,
+	timestamp := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	err := store.update(leader,
 		bson.M{"_id": 1, "uuid": leaderID},
 		bson.M{
 			"$set": bson.M{
@@ -2094,7 +2110,7 @@ func (store *MongoStorage) ResignLeadership(leaderID string) common.SyncServiceE
 			},
 		},
 	)
-	if err != nil && mgo.ErrNotFound != err {
+	if err != nil && !IsNotFound(err) {
 		return &Error{fmt.Sprintf("Failed to update the document in the syncLeaderElection collection. Error: %s\n", err)}
 	}
 
@@ -2103,8 +2119,28 @@ func (store *MongoStorage) ResignLeadership(leaderID string) common.SyncServiceE
 
 // RetrieveTimeOnServer retrieves the current time on the database server
 func (store *MongoStorage) RetrieveTimeOnServer() (time.Time, error) {
+	/*
+		> db.runCommand( { isMaster: 1 } )
+		{
+		ismaster: true,
+		topologyVersion: {
+			processId: ObjectId('66425e524a6e53adeab8efca'),
+			counter: Long('0')
+		},
+		maxBsonObjectSize: 16777216,
+		maxMessageSizeBytes: 48000000,
+		maxWriteBatchSize: 100000,
+		localTime: ISODate('2024-05-15T19:13:13.097Z'),
+		logicalSessionTimeoutMinutes: 30,
+		connectionId: 523,
+		minWireVersion: 0,
+		maxWireVersion: 17,
+		readOnly: false,
+		ok: 1
+		}
+	*/
 	result := isMasterResult{}
-	err := store.run("isMaster", &result)
+	err := store.run(bson.D{{"isMaster", 1}}, &result)
 	if err == nil && !result.OK {
 		err = &Error{"Failed running isMaster command on MongoDB server"}
 	}
@@ -2113,8 +2149,8 @@ func (store *MongoStorage) RetrieveTimeOnServer() (time.Time, error) {
 
 // StoreOrgToMessagingGroup inserts organization to messaging groups table
 func (store *MongoStorage) StoreOrgToMessagingGroup(orgID string, messagingGroup string) common.SyncServiceError {
-	object := messagingGroupObject{ID: orgID, GroupName: messagingGroup}
-	err := store.upsert(messagingGroups, bson.M{"_id": orgID}, object)
+	mg := bson.M{"$set": bson.M{"_id": orgID, "group-name": messagingGroup, "last-update": primitive.NewDateTimeFromTime(time.Now())}}
+	err := store.upsert(messagingGroups, bson.M{"_id": orgID}, mg)
 	if err != nil {
 		return &Error{fmt.Sprintf("Failed to store organization's messaging group. Error: %s.", err)}
 	}
@@ -2123,7 +2159,7 @@ func (store *MongoStorage) StoreOrgToMessagingGroup(orgID string, messagingGroup
 
 // DeleteOrgToMessagingGroup deletes organization from messaging groups table
 func (store *MongoStorage) DeleteOrgToMessagingGroup(orgID string) common.SyncServiceError {
-	if err := store.removeAll(messagingGroups, bson.M{"_id": orgID}); err != nil && err != mgo.ErrNotFound {
+	if err := store.removeAll(messagingGroups, bson.M{"_id": orgID}); err != nil && err != mongo.ErrNoDocuments {
 		return err
 	}
 	return nil
@@ -2133,7 +2169,7 @@ func (store *MongoStorage) DeleteOrgToMessagingGroup(orgID string) common.SyncSe
 func (store *MongoStorage) RetrieveMessagingGroup(orgID string) (string, common.SyncServiceError) {
 	result := messagingGroupObject{}
 	if err := store.fetchOne(messagingGroups, bson.M{"_id": orgID}, nil, &result); err != nil {
-		if err != mgo.ErrNotFound {
+		if err != mongo.ErrNoDocuments {
 			return "", err
 		}
 		return "", nil
@@ -2142,14 +2178,11 @@ func (store *MongoStorage) RetrieveMessagingGroup(orgID string) (string, common.
 }
 
 // RetrieveUpdatedMessagingGroups retrieves messaging groups that were updated after the specified time
-func (store *MongoStorage) RetrieveUpdatedMessagingGroups(time time.Time) ([]common.MessagingGroup,
+func (store *MongoStorage) RetrieveUpdatedMessagingGroups(timeToCheck time.Time) ([]common.MessagingGroup,
 	common.SyncServiceError) {
-	timestamp, err := bson.NewMongoTimestamp(time, 1)
-	if err != nil {
-		return nil, err
-	}
+
 	result := []messagingGroupObject{}
-	if err := store.fetchAll(messagingGroups, bson.M{"last-update": bson.M{"$gte": timestamp}}, nil, &result); err != nil {
+	if err := store.fetchAll(messagingGroups, bson.M{"last-update": bson.M{"$gte": timeToCheck}}, nil, &result); err != nil {
 		return nil, err
 	}
 	groups := make([]common.MessagingGroup, 0)
@@ -2165,15 +2198,15 @@ func (store *MongoStorage) DeleteOrganization(orgID string) common.SyncServiceEr
 		return err
 	}
 
-	if err := store.removeAll(destinations, bson.M{"destination.destination-org-id": orgID}); err != nil && err != mgo.ErrNotFound {
+	if err := store.removeAll(destinations, bson.M{"destination.destination-org-id": orgID}); err != nil && err != mongo.ErrNoDocuments {
 		return &Error{fmt.Sprintf("Failed to delete destinations. Error: %s.", err)}
 	}
 
-	if err := store.removeAll(notifications, bson.M{"notification.destination-org-id": orgID}); err != nil && err != mgo.ErrNotFound {
+	if err := store.removeAll(notifications, bson.M{"notification.destination-org-id": orgID}); err != nil && err != mongo.ErrNoDocuments {
 		return &Error{fmt.Sprintf("Failed to delete notifications. Error: %s.", err)}
 	}
 
-	if err := store.removeAll(acls, bson.M{"org-id": orgID}); err != nil && err != mgo.ErrNotFound {
+	if err := store.removeAll(acls, bson.M{"org-id": orgID}); err != nil && err != mongo.ErrNoDocuments {
 		return &Error{fmt.Sprintf("Failed to delete ACLs. Error: %s.", err)}
 	}
 
@@ -2181,14 +2214,14 @@ func (store *MongoStorage) DeleteOrganization(orgID string) common.SyncServiceEr
 		ID string `bson:"_id"`
 	}
 	results := []idstruct{}
-	if err := store.fetchAll(objects, bson.M{"metadata.destination-org-id": orgID}, bson.M{"_id": bson.ElementString}, &results); err != nil && err != mgo.ErrNotFound {
+	if err := store.fetchAll(objects, bson.M{"metadata.destination-org-id": orgID}, bson.M{"_id": 1}, &results); err != nil && err != mongo.ErrNoDocuments {
 		return &Error{fmt.Sprintf("Failed to fetch objects to delete. Error: %s.", err)}
 	}
 	for _, result := range results {
 		store.removeFile(result.ID)
 	}
 
-	if err := store.removeAll(objects, bson.M{"metadata.destination-org-id": orgID}); err != nil && err != mgo.ErrNotFound {
+	if err := store.removeAll(objects, bson.M{"metadata.destination-org-id": orgID}); err != nil && err != mongo.ErrNoDocuments {
 		return &Error{fmt.Sprintf("Failed to delete objects. Error: %s.", err)}
 	}
 
@@ -2203,34 +2236,37 @@ func (store *MongoStorage) IsConnected() bool {
 // StoreOrganization stores organization information
 // Returns the stored record timestamp for multiple CSS updates
 func (store *MongoStorage) StoreOrganization(org common.Organization) (time.Time, common.SyncServiceError) {
-	object := organizationObject{ID: org.OrgID, Organization: org}
-	err := store.upsert(organizations, bson.M{"_id": org.OrgID}, object)
+
+	timestamp := time.Now()
+	objectBson := bson.M{"$set": bson.M{"_id": org.OrgID, "org": org, "last-update": primitive.NewDateTimeFromTime(timestamp)}}
+	err := store.upsert(organizations, bson.M{"_id": org.OrgID}, objectBson)
 	if err != nil {
-		return time.Now(), &Error{fmt.Sprintf("Failed to store organization's info. Error: %s.", err)}
+		return timestamp, &Error{fmt.Sprintf("Failed to store organization's info. Error: %s.", err)}
 	}
 
+	object := organizationObject{}
 	if err := store.fetchOne(organizations, bson.M{"_id": org.OrgID}, nil, &object); err != nil {
-		return time.Now(), err
+		return timestamp, err
 	}
 
-	return object.LastUpdate.Time(), nil
+	return object.LastUpdate, nil
 }
 
 // RetrieveOrganizationInfo retrieves organization information
 func (store *MongoStorage) RetrieveOrganizationInfo(orgID string) (*common.StoredOrganization, common.SyncServiceError) {
 	result := organizationObject{}
 	if err := store.fetchOne(organizations, bson.M{"_id": orgID}, nil, &result); err != nil {
-		if err != mgo.ErrNotFound {
+		if err != mongo.ErrNoDocuments {
 			return nil, err
 		}
 		return nil, nil
 	}
-	return &common.StoredOrganization{Org: result.Organization, Timestamp: result.LastUpdate.Time()}, nil
+	return &common.StoredOrganization{Org: result.Organization, Timestamp: result.LastUpdate}, nil
 }
 
 // DeleteOrganizationInfo deletes organization information
 func (store *MongoStorage) DeleteOrganizationInfo(orgID string) common.SyncServiceError {
-	if err := store.removeAll(organizations, bson.M{"_id": orgID}); err != nil && err != mgo.ErrNotFound {
+	if err := store.removeAll(organizations, bson.M{"_id": orgID}); err != nil && err != mongo.ErrNoDocuments {
 		return err
 	}
 	return nil
@@ -2239,29 +2275,29 @@ func (store *MongoStorage) DeleteOrganizationInfo(orgID string) common.SyncServi
 // RetrieveOrganizations retrieves stored organizations' info
 func (store *MongoStorage) RetrieveOrganizations() ([]common.StoredOrganization, common.SyncServiceError) {
 	result := []organizationObject{}
-	if err := store.fetchAll(organizations, nil, nil, &result); err != nil {
+	query := bson.M{}
+	if err := store.fetchAll(organizations, query, nil, &result); err != nil {
 		return nil, err
 	}
 	orgs := make([]common.StoredOrganization, 0)
 	for _, org := range result {
-		orgs = append(orgs, common.StoredOrganization{Org: org.Organization, Timestamp: org.LastUpdate.Time()})
+		orgs = append(orgs, common.StoredOrganization{Org: org.Organization, Timestamp: org.LastUpdate})
 	}
 	return orgs, nil
 }
 
 // RetrieveUpdatedOrganizations retrieves organizations that were updated after the specified time
-func (store *MongoStorage) RetrieveUpdatedOrganizations(time time.Time) ([]common.StoredOrganization, common.SyncServiceError) {
-	timestamp, err := bson.NewMongoTimestamp(time, 1)
-	if err != nil {
-		return nil, err
-	}
+func (store *MongoStorage) RetrieveUpdatedOrganizations(timevalue time.Time) ([]common.StoredOrganization, common.SyncServiceError) {
+	//timestamp, err := bson.NewMongoTimestamp(timevalue, 1)
+	//timestamp := primitive.Timestamp{T: uint32(timevalue.Unix())}
+
 	result := []organizationObject{}
-	if err := store.fetchAll(organizations, bson.M{"last-update": bson.M{"$gte": timestamp}}, nil, &result); err != nil {
+	if err := store.fetchAll(organizations, bson.M{"last-update": bson.M{"$gte": timevalue}}, nil, &result); err != nil {
 		return nil, err
 	}
 	orgs := make([]common.StoredOrganization, 0)
 	for _, org := range result {
-		orgs = append(orgs, common.StoredOrganization{Org: org.Organization, Timestamp: org.LastUpdate.Time()})
+		orgs = append(orgs, common.StoredOrganization{Org: org.Organization, Timestamp: org.LastUpdate})
 	}
 	return orgs, nil
 }

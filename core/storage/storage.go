@@ -3,8 +3,8 @@ package storage
 import (
 	"fmt"
 	"io"
-	"strings"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/open-horizon/edge-sync-service/common"
@@ -388,7 +388,7 @@ func createObjectCollectionID(orgID string, objectType string, objectID string) 
 func createTempObjectCollectionID(orgID string, objectType string, objectID string, chunkNumber int) string {
 	chunkNum_str := strconv.FormatInt(int64(chunkNumber), 10)
 	var strBuilder strings.Builder
-	strBuilder.Grow(len(orgID) + len(objectType) + len(objectID) + len("chunk") + len(chunkNum_str)+ 4)
+	strBuilder.Grow(len(orgID) + len(objectType) + len(objectID) + len("chunk") + len(chunkNum_str) + 4)
 	strBuilder.WriteString(orgID)
 	strBuilder.WriteByte(':')
 	strBuilder.WriteString(objectType)
