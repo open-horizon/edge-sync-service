@@ -49,6 +49,13 @@ const (
 // DefaultLogTraceFileSize default value for log and trace file size in KB
 const DefaultLogTraceFileSize = 20000
 
+// AuthMechanism that MongoDB supports
+const (
+	MongoDBAuthMechanism_SHA256 = "SCRAM-SHA-256" // MongoDB 4.0 or later
+	MongoDBAuthMechanism_SHA1   = "SCRAM-SHA-1"   // MongoDB 3.0, 3.2, 3.4, and 3.6
+	MongoDBAuthMechanism_X509   = "MONGODB-X509"  // TLS with X.509 certificates
+)
+
 // Config contains the parsed contents of the configuration file
 type Config struct {
 	// NodeType specifies whether this node is a CSS or ESS
@@ -285,6 +292,12 @@ type Config struct {
 
 	// MongoAddressCsv specifies one or more addresses of the mongo database
 	MongoAddressCsv string `env:"MONGO_ADDRESS_CSV"`
+
+	// MongoAuthMechanism specifies the auth mechanism for mongo client to use
+	// MongoDB 4.0 or later: SCRAM-SHA-256
+	// MongoDB 3.0, 3.2, 3.4, and 3.6: SCRAM-SHA-1
+	// TLS with X.509 certificates: MONGODB-X509
+	MongoAuthMechanism string `env:"MONGO_AUTH_MECHANISM"`
 
 	// MongoAuthDbName specifies the name of the database used to establish credentials and privileges
 	MongoAuthDbName string `env:"MONGO_AUTH_DB_NAME"`
@@ -745,6 +758,7 @@ func SetDefaultConfig(config *Config) {
 	config.MaxDataChunkSize = 5120 * 1024
 	config.MaxInflightChunks = 1
 	config.MongoAddressCsv = "mongodb://localhost:27017"
+	config.MongoAuthMechanism = MongoDBAuthMechanism_SHA256
 	config.MongoDbName = "d_edge"
 	config.MongoAuthDbName = "admin"
 	config.MongoUsername = ""
