@@ -222,7 +222,11 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 	db := mongoClient.Database(common.Configuration.MongoDbName)
 	destinationsCollection := db.Collection(destinations)
 	indexModel := mongo.IndexModel{Keys: bson.D{{"destination.destination-org-id", -1}}}
-	destinationsCollection.Indexes().CreateOne(context.TODO(), indexModel)
+	if _, err = destinationsCollection.Indexes().CreateOne(context.TODO(), indexModel); err != nil {
+		message := fmt.Sprintf("Failed to create an index on %s. Error: %s", destinations, err)
+		log.Error(message)
+		return &Error{message}
+	}
 
 	notificationsCollection := db.Collection(notifications)
 	indexModel1 := mongo.IndexModel{
@@ -233,7 +237,11 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 		},
 	}
 	indexModel2 := mongo.IndexModel{Keys: bson.D{{"notification.resend-time", -1}, {"notification.status", -1}}}
-	notificationsCollection.Indexes().CreateMany(context.TODO(), []mongo.IndexModel{indexModel1, indexModel2})
+	if _, err = notificationsCollection.Indexes().CreateMany(context.TODO(), []mongo.IndexModel{indexModel1, indexModel2}); err != nil {
+		message := fmt.Sprintf("Failed to create an index on %s. Error: %s", notifications, err)
+		log.Error(message)
+		return &Error{message}
+	}
 
 	objectsCollection := db.Collection(objects)
 	indexModel = mongo.IndexModel{Keys: bson.D{{"metadata.destination-org-id", -1}}}
@@ -250,7 +258,9 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 			// need to set index name???
 		})
 	if err != nil {
-		log.Error("Failed to create an index on %s. Error: %s", objects, err)
+		message := fmt.Sprintf("Failed to create an index on %s. Error: %s", objects, err)
+		log.Error(message)
+		return &Error{message}
 	}
 
 	_, err = objectsCollection.Indexes().CreateOne(
@@ -263,20 +273,21 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 			Options: options.Index().SetSparse(true),
 		})
 	if err != nil {
-		log.Error("Failed to create an index on %s. Error: %s", objects, err)
+		message := fmt.Sprintf("Failed to create an index on %s. Error: %s", objects, err)
+		log.Error(message)
+		return &Error{message}
 	}
 	db.Collection(acls).Indexes().CreateOne(context.TODO(), mongo.IndexModel{Keys: bson.D{{"org-id", 1}, {"acl-type", 1}}})
 	gridfsBucket, err := gridfs.NewBucket(db)
 	if err != nil {
-		trace.Error("Error creating gridfs buket Error was: " + err.Error())
+		message := fmt.Sprintf("Error creating gridfs buket Error was: " + err.Error())
+		log.Error(message)
+		return &Error{message}
 	}
 
 	store.client = mongoClient
 	store.database = db
 	store.gridfsBucket = gridfsBucket
-
-	//store.openFiles = make(map[string]*fileHandle2)
-
 	sleepInMS = common.Configuration.MongoSleepTimeBetweenRetry
 
 	if trace.IsLogging(logger.TRACE) {
