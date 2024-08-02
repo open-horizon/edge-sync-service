@@ -142,6 +142,16 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 	}
 	// Set up MongoDB client options
 	clientOptions := options.Client().ApplyURI(common.Configuration.MongoAddressCsv)
+	if common.Configuration.MongoAuthMechanism != "" && common.Configuration.MongoAuthDbName != "" && common.Configuration.MongoUsername != "" && common.Configuration.MongoPassword != "" {
+		credential := options.Credential{
+			AuthMechanism: common.Configuration.MongoAuthMechanism,
+			AuthSource:    common.Configuration.MongoAuthDbName,
+			Username:      common.Configuration.MongoUsername,
+			Password:      common.Configuration.MongoPassword,
+		}
+		clientOptions = clientOptions.SetAuth(credential)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(20*time.Second))
 	defer cancel()
 
@@ -201,6 +211,12 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 		}
 
 	}
+
+	if mongoClient == nil {
+		message := fmt.Sprintf("Failed to connect to mongo Error was: %v", err.Error())
+		return &Error{message}
+	}
+
 	if err = mongoClient.Ping(ctx, nil); err != nil {
 		message := fmt.Sprintf("Failed to ping mgo. Error: %s.", err)
 		return &Error{message}
