@@ -71,7 +71,7 @@ type leaderDocument struct {
 }
 
 type isMasterResult struct {
-	IsMaster  bool      `bson:"isMaster"`
+	IsMaster  bool      `bson:"ismaster"`
 	LocalTime time.Time `bson:"localTime"`
 	OK        bool      `bson:"ok"`
 }
@@ -104,15 +104,6 @@ type aclObject struct {
 	LastUpdate time.Time         `bson:"last-update"`
 }
 
-type dataInfoObject struct {
-	ID         string    `bson:"_id"`
-	ChunkSize  int32     `bson:"chunkSize"`
-	UploadDate time.Time `bson:"uploadDate"`
-	Length     int32     `bson:"length"`
-	MD5        string    `bson:"md5"`
-	Filename   string    `bson:"filename"`
-}
-
 const maxUpdateTries = 5
 
 var sleepInMS int
@@ -138,7 +129,7 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 	var mongoClient *mongo.Client
 	var err error
 	if trace.IsLogging(logger.INFO) {
-		trace.Info("CConnecting to mongo...")
+		trace.Info("Connecting to mongo...")
 	}
 	// Set up MongoDB client options
 	clientOptions := options.Client().ApplyURI(common.Configuration.MongoAddressCsv)
@@ -271,12 +262,15 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 				{"metadata.destination-policy.services.service-name", -1},
 			},
 			Options: options.Index().SetName("syncObjects-destination-policy.services.service-id").SetSparse(true),
-			// need to set index name???
 		})
+
 	if err != nil {
-		message := fmt.Sprintf("Failed to create an index on %s. Error: %s", objects, err)
-		log.Error(message)
-		return &Error{message}
+		// check if error is IndexKeySpecsConflict
+		if casterr := err.(mongo.CommandError); casterr.Code != 86 {
+			message := fmt.Sprintf("Failed to create an index on %s. Error: %s", objects, err)
+			log.Error(message)
+			return &Error{message}
+		}
 	}
 
 	_, err = objectsCollection.Indexes().CreateOne(

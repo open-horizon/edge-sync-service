@@ -386,7 +386,7 @@ func (store *MongoStorage) createFile(id string, data io.Reader) common.SyncServ
 
 func (store *MongoStorage) run(cmd interface{}, result interface{}) common.SyncServiceError {
 	function := func(db *mongo.Database) error {
-		return db.RunCommand(context.TODO(), cmd).Decode(&result)
+		return db.RunCommand(context.TODO(), cmd).Decode(result)
 	}
 
 	retry, err := store.withDBHelper(function, true)
