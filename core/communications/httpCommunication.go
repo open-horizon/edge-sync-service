@@ -344,7 +344,7 @@ func (communication *HTTP) SendNotificationMessage(notificationTopic string, des
 		} else if err != nil {
 			return &Error{"Failed to send HTTP request. Error: " + err.Error()}
 		} else if response == nil {
-			return &Error{"Received nil response from HTTP request. Error: " + err.Error()}
+			return &Error{"Received nil response from HTTP request."}
 		} else {
 			if response.StatusCode == http.StatusNoContent {
 				switch notificationTopic {
@@ -1478,7 +1478,7 @@ func (communication *HTTP) handlePutData(orgID string, objectType string, object
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("Get Content-Range header, will handle put chunked data")
 		}
-		if isLastChunk, handlErr = communication.handlePutChunkedData(*metaData, request, startOffset, endOffset, totalSize); err != nil {
+		if isLastChunk, handlErr = communication.handlePutChunkedData(*metaData, request, startOffset, endOffset, totalSize); handlErr != nil {
 			common.ObjectLocks.Unlock(lockIndex)
 			return handlErr
 		}
@@ -1681,7 +1681,7 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 		trace.Trace("Handling object get data of %s %s %s %s \n", objectType, objectID, destType, destID)
 	}
 
-	if common.ObjectDownloadSemaphore.TryAcquire(1) == false {
+	if !common.ObjectDownloadSemaphore.TryAcquire(1) {
 		// If too many downloads are in flight, agent will get error and retry. Originally, there was a lock around the download that
 		// caused the downloads to be serial. It was changed to use a semaphore to allow limited concurrency.
 		if trace.IsLogging(logger.TRACE) {
@@ -2214,7 +2214,7 @@ func (communication *HTTP) SendFeedbackMessage(code int, retryInterval int32, re
 		} else if err != nil {
 			return &Error{"Failed to send HTTP request. Error: " + err.Error()}
 		} else if response == nil {
-			return &Error{"Received nil response from feedback HTTP request. Error: " + err.Error()}
+			return &Error{"Received nil response from feedback HTTP request."}
 		} else if response.StatusCode == http.StatusNoContent {
 			if trace.IsLogging(logger.DEBUG) {
 				trace.Debug("In SendFeedbackMessage, i: %d, received %d from feedback spi \n", i, response.StatusCode)
