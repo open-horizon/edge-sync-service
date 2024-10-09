@@ -20,8 +20,6 @@ var ConfigFile string
 
 var swaggerFile string
 
-var ipAddress string
-
 func init() {
 	if flag.CommandLine.Lookup("h") == nil {
 		flag.BoolVar(&help, "h", false, "Display usage information.")

@@ -68,7 +68,7 @@ func setupCertificates() error {
 				return &common.InvalidRequest{Message: fmt.Sprintf("%s is a directory", certFile)}
 			}
 			return nil
-		} else if err != nil && !os.IsNotExist(err) {
+		} else if !os.IsNotExist(err) {
 			return err
 		}
 

@@ -674,7 +674,7 @@ func (store *InMemoryStorage) CleanObjects() common.SyncServiceError {
 
 // GetObjectDestinations gets destinations that the object has to be sent to
 func (store *InMemoryStorage) GetObjectDestinations(metaData common.MetaData) ([]common.Destination, common.SyncServiceError) {
-	return []common.Destination{common.Destination{DestOrgID: metaData.DestOrgID, DestType: common.Configuration.DestinationType,
+	return []common.Destination{{DestOrgID: metaData.DestOrgID, DestType: common.Configuration.DestinationType,
 		DestID: common.Configuration.DestinationID, Communication: common.Configuration.CommunicationProtocol}}, nil
 }
 

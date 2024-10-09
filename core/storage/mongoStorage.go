@@ -655,7 +655,7 @@ func (store *MongoStorage) UpdateObjectDelivering(orgID string, objectType strin
 		}
 		return nil
 	}
-	return &Error{fmt.Sprintf("Failed to update object's destinations.")}
+	return &Error{"Failed to update object's destinations."}
 }
 
 // RetrieveObjectStatus finds the object and return its status
@@ -997,7 +997,7 @@ OUTER:
 		}
 		return metaDatas, nil
 	}
-	return nil, &Error{fmt.Sprintf("Failed to update object's destinations.")}
+	return nil, &Error{"Failed to update object's destinations."}
 }
 
 // RetrieveConsumedObjects returns all the consumed objects originated from this node
@@ -1040,7 +1040,7 @@ func (store *MongoStorage) RetrieveObjectAndStatus(orgID string, objectType stri
 func (store *MongoStorage) RetrieveObjectData(orgID string, objectType string, objectID string, isTempData bool) (io.Reader, common.SyncServiceError) {
 	var id string
 	if isTempData {
-		return nil, &Error{fmt.Sprintf("RetrieveObjectData with isTempData set true should not be called for Mongo DB.")}
+		return nil, &Error{"RetrieveObjectData with isTempData set true should not be called for Mongo DB."}
 	} else {
 		id = createObjectCollectionID(orgID, objectType, objectID)
 	}
@@ -1180,7 +1180,7 @@ func (store *MongoStorage) StoreObjectData(orgID string, objectType string, obje
 }
 
 func (store *MongoStorage) StoreObjectTempData(orgID string, objectType string, objectID string, dataReader io.Reader) (bool, common.SyncServiceError) {
-	return false, &Error{fmt.Sprintf("StoreObjectTempData should not be called for Mongo DB.")}
+	return false, &Error{"StoreObjectTempData should not be called for Mongo DB."}
 }
 
 // Removes all the temporary chunk files from Mongo. Depends on RetrieveObjectTempData putting the fileHandle of the temp file into the map
@@ -1193,7 +1193,7 @@ func (store *MongoStorage) RemoveObjectTempData(orgID string, objectType string,
 
 	metaData, err := store.RetrieveObject(orgID, objectType, objectID)
 	if err != nil || metaData == nil {
-		return &Error{fmt.Sprintf("Error in retrieving object metadata.\n")}
+		return &Error{fmt.Sprintf("Error in retrieving object metadata: %v", err)}
 	}
 
 	var offset int64 = 0
@@ -1212,8 +1212,6 @@ func (store *MongoStorage) RemoveObjectTempData(orgID string, objectType string,
 
 			if fileHandle != nil {
 				fileHandle.Close()
-				//store.deleteFileHandle(id)
-
 				//Don't return on errors
 				store.removeFile(id)
 			}
@@ -1235,7 +1233,7 @@ func (store *MongoStorage) RetrieveObjectTempData(orgID string, objectType strin
 	readers := make([]io.Reader, 0)
 	metaData, err := store.RetrieveObject(orgID, objectType, objectID)
 	if err != nil || metaData == nil {
-		return nil, &Error{fmt.Sprintf("Error in retrieving object metadata.\n")}
+		return nil, &Error{fmt.Sprintf("Error in retrieving object metadata: %v", err)}
 	}
 
 	var offset int64 = 0
@@ -1361,13 +1359,6 @@ func (store *MongoStorage) AppendObjectData(orgID string, objectType string, obj
 			trace.Trace("Model file completely written; set updatedLastChunk to %t\n", updatedLastChunk)
 		}
 	}
-
-	//store.deleteFileHandle(id)
-	//err = fileHandle.Close()
-	if err != nil {
-		return updatedLastChunk, &Error{fmt.Sprintf("Failed to close the file. Error: %s.", err)}
-	}
-
 	return updatedLastChunk, nil
 }
 
@@ -1385,7 +1376,7 @@ func (store *MongoStorage) getUploadDataChunkSize(orgID string, objectType strin
 
 	metaData, err := store.RetrieveObject(orgID, objectType, objectID)
 	if err != nil || metaData == nil || metaData.UploadChunkSize == 0 {
-		return 0, &Error{fmt.Sprintf("Error in getUploadDataChunkSize. Failed to find upload chunk size.\n")}
+		return 0, &Error{fmt.Sprintf("Error in getUploadDataChunkSize. Failed to find upload chunk size: %v\n", err)}
 	}
 
 	return metaData.UploadChunkSize, nil
@@ -1585,7 +1576,7 @@ func (store *MongoStorage) AddWebhook(orgID string, objectType string, url strin
 		}
 		return nil
 	}
-	return &Error{fmt.Sprintf("Failed to add a webhook.")}
+	return &Error{"Failed to add a webhook."}
 }
 
 // DeleteWebhook deletes a webhook for an object type
@@ -1624,7 +1615,7 @@ func (store *MongoStorage) DeleteWebhook(orgID string, objectType string, url st
 		}
 		return nil
 	}
-	return &Error{fmt.Sprintf("Failed to delete a webhook.")}
+	return &Error{"Failed to delete a webhook."}
 }
 
 // RetrieveWebhooks gets the webhooks for the object type

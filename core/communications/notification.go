@@ -461,7 +461,7 @@ func callWebhooks(metaData *common.MetaData) {
 			return
 		}
 		for _, url := range webhooks {
-			request, err := http.NewRequest("POST", url, bytes.NewReader(body))
+			request, _ := http.NewRequest("POST", url, bytes.NewReader(body))
 			request.ContentLength = int64(len(body))
 			request.Header.Add("Content-Type", "Application/JSON")
 			response, err := http.DefaultClient.Do(request)

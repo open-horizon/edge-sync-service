@@ -115,7 +115,7 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 	if metaData.DestinationsList != nil && metaData.DestType != "" {
 		return &common.InvalidRequest{Message: "Both destinations list and destination type are specified"}
 	}
-	if validatedDestList, _ := common.ValidateDestinationListInput(metaData.DestinationsList); validatedDestList == false {
+	if validatedDestList, _ := common.ValidateDestinationListInput(metaData.DestinationsList); !validatedDestList {
 		return &common.InvalidRequest{Message: "Unsupported char <, > in destinationsList."}
 	}
 
@@ -561,7 +561,7 @@ func GetObjectDataByChunk(orgID string, objectType string, objectID string, star
 
 	// Add semaphore here to prevent OOM when scaled agents try to download install packages during auto-upgrade at same time
 	// Semaphore is not applied to GetObjectData because agent-install.sh can't handle it. GetObjectData will just stream the data back without using CSS memory
-	if common.ObjectDownloadSemaphore.TryAcquire(1) == false {
+	if !common.ObjectDownloadSemaphore.TryAcquire(1) {
 		// If too many downloads are in flight, agent will get error and retry. Originally, there was a lock around the download that
 		// caused the downloads to be serial. It was changed to use a semaphore to allow limited concurrency.
 		if trace.IsLogging(logger.TRACE) {
@@ -1659,7 +1659,7 @@ func RegisterWebhook(orgID string, objectType string, webhook string) common.Syn
 	if err != nil {
 		return &common.InvalidRequest{Message: "Invalid webhook"}
 	}
-	if err != nil || (!strings.EqualFold(uri.Scheme, "http") && !strings.EqualFold(uri.Scheme, "https")) {
+	if !strings.EqualFold(uri.Scheme, "http") && !strings.EqualFold(uri.Scheme, "https") {
 		return &common.InvalidRequest{Message: "Invalid destination data URI"}
 	}
 
