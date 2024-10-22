@@ -452,7 +452,7 @@ func checkIPAddress(host string) (string, common.SyncServiceError) {
 	}
 
 	if ipAddress == "" {
-		return "", &common.SetupError{Message: fmt.Sprintf("Failed to get IP for the host.")}
+		return "", &common.SetupError{Message: "Failed to get IP for the host."}
 	}
 	return ipAddress, nil
 }
