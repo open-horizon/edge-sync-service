@@ -767,11 +767,13 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 		if trace.IsLogging(logger.DEBUG) {
 			trace.Debug("In handleObjects. Delete %s %s\n", objectType, objectID)
 		}
+		// authObjectAdmin will return as authAdmin in canUserAccessObject because they have same level of read access
+		// side-effect: all auth code (except authSyncAdmin) will need to be checked against security.CanUserCreateObject() function
 		if _, code, _ := canUserAccessObject(request, orgID, objectType, objectID, false); code == security.AuthFailed {
 			writer.WriteHeader(http.StatusForbidden)
 			writer.Write(unauthorizedBytes)
 			return
-		} else if (code == security.AuthUser || code == security.AuthNodeUser) && common.Configuration.NodeType == common.CSS {
+		} else if common.Configuration.NodeType == common.CSS && code != security.AuthSyncAdmin {
 			// Retrieve metadata, check object type and destination types againest acls
 			if metaData, err := GetObject(orgID, objectType, objectID); err != nil {
 				communications.SendErrorResponse(writer, err, "", 0)
@@ -3870,9 +3872,9 @@ func handleACLUpdate(request *http.Request, aclType string, orgID string, parts 
 }
 
 func canUserAccessObject(request *http.Request, orgID, objectType, objectID string, checkLastDestinationPolicyServices bool) (bool, int, string) {
-	accessToALlObject, code, userID := security.CanUserAccessAllObjects(request, orgID, objectType)
+	accessToAllObject, code, userID := security.CanUserAccessAllObjects(request, orgID, objectType)
 	if code != security.AuthService || common.Configuration.NodeType == common.CSS || objectID == "" {
-		return accessToALlObject, code, userID
+		return accessToAllObject, code, userID
 	}
 
 	if trace.IsLogging(logger.DEBUG) {
