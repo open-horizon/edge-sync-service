@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"strconv"
@@ -208,7 +209,7 @@ func handleDestinations(writer http.ResponseWriter, request *http.Request) {
 				} else {
 					writer.Header().Add(contentType, applicationJSON)
 					writer.WriteHeader(http.StatusOK)
-					if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+					if _, err := writer.Write([]byte(html.EscapeString(string(data)))); err != nil && log.IsLogging(logger.ERROR) {
 						log.Error("Failed to write response body, error: " + err.Error())
 					}
 				}
@@ -278,7 +279,7 @@ func handleDestinations(writer http.ResponseWriter, request *http.Request) {
 				} else {
 					writer.Header().Add(contentType, applicationJSON)
 					writer.WriteHeader(http.StatusOK)
-					if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+					if _, err := writer.Write([]byte(html.EscapeString(string(data)))); err != nil && log.IsLogging(logger.ERROR) {
 						log.Error("Failed to write response body, error: " + err.Error())
 					}
 				}
@@ -305,14 +306,15 @@ func handleDestinations(writer http.ResponseWriter, request *http.Request) {
 // - text/plain
 //
 // responses:
-//   '204':
-//     description: The request will be sent
-//     schema:
-//       type: string
-//   '400':
-//     description: The request is not allowed on Cloud Sync-Service
-//     schema:
-//       type: string
+//
+//	'204':
+//	  description: The request will be sent
+//	  schema:
+//	    type: string
+//	'400':
+//	  description: The request is not allowed on Cloud Sync-Service
+//	  schema:
+//	    type: string
 func handleResend(writer http.ResponseWriter, request *http.Request) {
 	setResponseHeaders(writer)
 
@@ -668,7 +670,7 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 					} else {
 						writer.Header().Add(contentType, applicationJSON)
 						writer.WriteHeader(http.StatusOK)
-						if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+						if _, err := writer.Write([]byte(html.EscapeString(string(data)))); err != nil && log.IsLogging(logger.ERROR) {
 							log.Error("Failed to write response body, error: " + err.Error())
 						}
 					}
@@ -811,7 +813,7 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 
 // swagger:operation GET /api/v1/objects/{orgID}?filters=true handleListObjectsWithFilters
 //
-// Get objects satisfy the given filters
+// # Get objects satisfy the given filters
 //
 // Get the list of objects that satisfy the given filters
 // This is a CSS only API.
@@ -826,89 +828,90 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 // - text/plain
 //
 // parameters:
-// - name: orgID
-//   in: path
-//   description: The orgID of the updated objects to return. Present only when working with a CSS, removed from the path when working with an ESS
-//   required: true
-//   type: string
-// - name: filters
-//   in: query
-//   description: Must be true to indicate that objects with filters are to be retrieved
-//   required: true
-//   type: boolean
-// - name: destinationPolicy
-//   in: query
-//   description: Must be true to indicate that objects with destinationPolicy are to be retrieved
-//   required: false
-//   type: boolean
-// - name: dpService
-//   in: query
-//   description: The ID of the service (orgID/serviceName) to which objects have affinity,
-//        whose Destination Policy should be fetched.
-//   required: false
-//   type: string
-// - name: dpPropertyName
-//   in: query
-//   description: The property name defined inside destination policy to which objects have affinity,
-//        whose Destination Policy should be fetched.
-//   required: false
-//   type: string
-// - name: since
-//   in: query
-//   description: Objects that have a Destination Policy which was updated since the specified timestamp in RFC3339 should be fetched.
-//   required: false
-//   type: string
-// - name: objectType
-//   in: query
-//   description: Fetch the objects with given object type
-//   required: false
-//   type: string
-// - name: objectID
-//   in: query
-//   description: Fetch the objects with given object id
-//   required: false
-//   type: string
-// - name: destinationType
-//   in: query
-//   description: Fetch the objects with given destination type
-//   required: false
-//   type: string
-// - name: destinationID
-//   in: query
-//   description: Fetch the objects with given destination id
-//   required: false
-//   type: string
-// - name: noData
-//   in: query
-//   description: Specify true or false. Fetch the objects with noData marked to true/false. If not specified, object will not be filtered by "noData" field
-//   required: false
-//   type: string
-// - name: expirationTimeBefore
-//   in: query
-//   description: Fetch the objects with expiration time before specified timestamp in RFC3339 format
-//   required: false
-//   type: string
-// - name: deleted
-//   in: query
-//   description: Specify true or false. Fetch the object with deleted marked to true/false. If not specified, object will not be filtered by "deleted" field
-//   required: false
-//   type: string
+//   - name: orgID
+//     in: path
+//     description: The orgID of the updated objects to return. Present only when working with a CSS, removed from the path when working with an ESS
+//     required: true
+//     type: string
+//   - name: filters
+//     in: query
+//     description: Must be true to indicate that objects with filters are to be retrieved
+//     required: true
+//     type: boolean
+//   - name: destinationPolicy
+//     in: query
+//     description: Must be true to indicate that objects with destinationPolicy are to be retrieved
+//     required: false
+//     type: boolean
+//   - name: dpService
+//     in: query
+//     description: The ID of the service (orgID/serviceName) to which objects have affinity,
+//     whose Destination Policy should be fetched.
+//     required: false
+//     type: string
+//   - name: dpPropertyName
+//     in: query
+//     description: The property name defined inside destination policy to which objects have affinity,
+//     whose Destination Policy should be fetched.
+//     required: false
+//     type: string
+//   - name: since
+//     in: query
+//     description: Objects that have a Destination Policy which was updated since the specified timestamp in RFC3339 should be fetched.
+//     required: false
+//     type: string
+//   - name: objectType
+//     in: query
+//     description: Fetch the objects with given object type
+//     required: false
+//     type: string
+//   - name: objectID
+//     in: query
+//     description: Fetch the objects with given object id
+//     required: false
+//     type: string
+//   - name: destinationType
+//     in: query
+//     description: Fetch the objects with given destination type
+//     required: false
+//     type: string
+//   - name: destinationID
+//     in: query
+//     description: Fetch the objects with given destination id
+//     required: false
+//     type: string
+//   - name: noData
+//     in: query
+//     description: Specify true or false. Fetch the objects with noData marked to true/false. If not specified, object will not be filtered by "noData" field
+//     required: false
+//     type: string
+//   - name: expirationTimeBefore
+//     in: query
+//     description: Fetch the objects with expiration time before specified timestamp in RFC3339 format
+//     required: false
+//     type: string
+//   - name: deleted
+//     in: query
+//     description: Specify true or false. Fetch the object with deleted marked to true/false. If not specified, object will not be filtered by "deleted" field
+//     required: false
+//     type: string
 //
 // responses:
-//   '200':
-//     description: Objects response
-//     schema:
-//       type: array
-//       items:
-//         "$ref": "#/definitions/MetaData"
-//   '404':
-//     description: No objects found
-//     schema:
-//       type: string
-//   '500':
-//     description: Failed to retrieve the objects
-//     schema:
-//       type: string
+//
+//	'200':
+//	  description: Objects response
+//	  schema:
+//	    type: array
+//	    items:
+//	      "$ref": "#/definitions/MetaData"
+//	'404':
+//	  description: No objects found
+//	  schema:
+//	    type: string
+//	'500':
+//	  description: Failed to retrieve the objects
+//	  schema:
+//	    type: string
 func handleListObjectsWithFilters(orgID string, writer http.ResponseWriter, request *http.Request) {
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In handleListObjectsWithFilters")
@@ -1053,7 +1056,7 @@ func handleListObjectsWithFilters(orgID string, writer http.ResponseWriter, requ
 				} else {
 					writer.Header().Add(contentType, applicationJSON)
 					writer.WriteHeader(http.StatusOK)
-					if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+					if _, err := writer.Write([]byte(html.EscapeString(string(data)))); err != nil && log.IsLogging(logger.ERROR) {
 						log.Error("Failed to write response body, error: " + err.Error())
 					}
 				}
@@ -1090,22 +1093,22 @@ func handleListObjectsWithFilters(orgID string, writer http.ResponseWriter, requ
 //   required: true
 //   type: boolean
 
-//
 // responses:
-//   '200':
-//     description: Objects response
-//     schema:
-//       type: array
-//       items:
-//         type: string
-//   '404':
-//     description: No objects found
-//     schema:
-//       type: string
-//   '500':
-//     description: Failed to retrieve the object types
-//     schema:
-//       type: string
+//
+//	'200':
+//	  description: Objects response
+//	  schema:
+//	    type: array
+//	    items:
+//	      type: string
+//	'404':
+//	  description: No objects found
+//	  schema:
+//	    type: string
+//	'500':
+//	  description: Failed to retrieve the object types
+//	  schema:
+//	    type: string
 func handleListObjectTypes(orgID string, writer http.ResponseWriter, request *http.Request) {
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In handleListObjectTypes")
@@ -1148,7 +1151,7 @@ func handleListObjectTypes(orgID string, writer http.ResponseWriter, request *ht
 				} else {
 					writer.Header().Add(contentType, applicationJSON)
 					writer.WriteHeader(http.StatusOK)
-					if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+					if _, err := writer.Write([]byte(html.EscapeString(string(data)))); err != nil && log.IsLogging(logger.ERROR) {
 						log.Error("Failed to write response body, error: " + err.Error())
 					}
 				}
@@ -1280,26 +1283,27 @@ func handleObjectOperation(operation string, orgID string, objectType string, ob
 // - text/plain
 //
 // parameters:
-// - name: objectType
-//   in: path
-//   description: The object type of the object to mark as consumed
-//   required: true
-//   type: string
-// - name: objectID
-//   in: path
-//   description: The object ID of the object to mark as consumed
-//   required: true
-//   type: string
+//   - name: objectType
+//     in: path
+//     description: The object type of the object to mark as consumed
+//     required: true
+//     type: string
+//   - name: objectID
+//     in: path
+//     description: The object ID of the object to mark as consumed
+//     required: true
+//     type: string
 //
 // responses:
-//   '204':
-//     description: Object marked as consumed
-//     schema:
-//       type: string
-//   '500':
-//     description: Failed to mark the object consumed
-//     schema:
-//       type: string
+//
+//	'204':
+//	  description: Object marked as consumed
+//	  schema:
+//	    type: string
+//	'500':
+//	  description: Failed to mark the object consumed
+//	  schema:
+//	    type: string
 func handleObjectConsumed(orgID string, objectType string, objectID string, writer http.ResponseWriter, request *http.Request) {
 	if request.Method == http.MethodPut {
 		if trace.IsLogging(logger.DEBUG) {
@@ -1375,26 +1379,27 @@ func handleObjectConsumed(orgID string, objectType string, objectID string, writ
 // - text/plain
 //
 // parameters:
-// - name: objectType
-//   in: path
-//   description: The object type of the object to confirm its deletion
-//   required: true
-//   type: string
-// - name: objectID
-//   in: path
-//   description: The object ID of the object to confirm its deletion
-//   required: true
-//   type: string
+//   - name: objectType
+//     in: path
+//     description: The object type of the object to confirm its deletion
+//     required: true
+//     type: string
+//   - name: objectID
+//     in: path
+//     description: The object ID of the object to confirm its deletion
+//     required: true
+//     type: string
 //
 // responses:
-//   '204':
-//     description: Object's deletion confirmed
-//     schema:
-//       type: string
-//   '500':
-//     description: Failed to confirm the object's deletion
-//     schema:
-//       type: string
+//
+//	'204':
+//	  description: Object's deletion confirmed
+//	  schema:
+//	    type: string
+//	'500':
+//	  description: Failed to confirm the object's deletion
+//	  schema:
+//	    type: string
 func handleObjectDeleted(orgID string, objectType string, objectID string, writer http.ResponseWriter, request *http.Request) {
 	canAccessAllObjects, code, serviceID := canUserAccessObject(request, orgID, objectType, objectID, true)
 	if code == security.AuthFailed {
@@ -1441,31 +1446,32 @@ func handleObjectDeleted(orgID string, objectType string, objectID string, write
 // - text/plain
 //
 // parameters:
-// - name: orgID
-//   in: path
-//   description: The orgID of the object to mark as having its destination policy received.
-//   required: true
-//   type: string
-// - name: objectType
-//   in: path
-//   description: The object type of the object to mark as having its destination policy received
-//   required: true
-//   type: string
-// - name: objectID
-//   in: path
-//   description: The object ID of the object to mark as having its destination policy received
-//   required: true
-//   type: string
+//   - name: orgID
+//     in: path
+//     description: The orgID of the object to mark as having its destination policy received.
+//     required: true
+//     type: string
+//   - name: objectType
+//     in: path
+//     description: The object type of the object to mark as having its destination policy received
+//     required: true
+//     type: string
+//   - name: objectID
+//     in: path
+//     description: The object ID of the object to mark as having its destination policy received
+//     required: true
+//     type: string
 //
 // responses:
-//   '204':
-//     description: Object marked as having its destination policy received
-//     schema:
-//       type: string
-//   '500':
-//     description: Failed to mark the object as having its destination policy received
-//     schema:
-//       type: string
+//
+//	'204':
+//	  description: Object marked as having its destination policy received
+//	  schema:
+//	    type: string
+//	'500':
+//	  description: Failed to mark the object as having its destination policy received
+//	  schema:
+//	    type: string
 func handlePolicyReceived(orgID string, objectType string, objectID string, writer http.ResponseWriter, request *http.Request) {
 	if request.Method == http.MethodPut {
 		if common.Configuration.NodeType == common.ESS {
@@ -1545,26 +1551,27 @@ func handlePolicyReceived(orgID string, objectType string, objectID string, writ
 // - text/plain
 //
 // parameters:
-// - name: objectType
-//   in: path
-//   description: The object type of the object to mark as received
-//   required: true
-//   type: string
-// - name: objectID
-//   in: path
-//   description: The object ID of the object to mark as received
-//   required: true
-//   type: string
+//   - name: objectType
+//     in: path
+//     description: The object type of the object to mark as received
+//     required: true
+//     type: string
+//   - name: objectID
+//     in: path
+//     description: The object ID of the object to mark as received
+//     required: true
+//     type: string
 //
 // responses:
-//   '204':
-//     description: Object marked as received
-//     schema:
-//       type: string
-//   '500':
-//     description: Failed to mark the object received
-//     schema:
-//       type: string
+//
+//	'204':
+//	  description: Object marked as received
+//	  schema:
+//	    type: string
+//	'500':
+//	  description: Failed to mark the object received
+//	  schema:
+//	    type: string
 func handleObjectReceived(orgID string, objectType string, objectID string, writer http.ResponseWriter, request *http.Request) {
 	if request.Method == http.MethodPut {
 		if trace.IsLogging(logger.DEBUG) {
@@ -1642,26 +1649,27 @@ func handleObjectReceived(orgID string, objectType string, objectID string, writ
 // - text/plain
 //
 // parameters:
-// - name: objectType
-//   in: path
-//   description: The object type of the object to mark as active
-//   required: true
-//   type: string
-// - name: objectID
-//   in: path
-//   description: The object ID of the object to mark as active
-//   required: true
-//   type: string
+//   - name: objectType
+//     in: path
+//     description: The object type of the object to mark as active
+//     required: true
+//     type: string
+//   - name: objectID
+//     in: path
+//     description: The object ID of the object to mark as active
+//     required: true
+//     type: string
 //
 // responses:
-//   '204':
-//     description: Object marked as active
-//     schema:
-//       type: string
-//   '500':
-//     description: Failed to mark the object active
-//     schema:
-//       type: string
+//
+//	'204':
+//	  description: Object marked as active
+//	  schema:
+//	    type: string
+//	'500':
+//	  description: Failed to mark the object active
+//	  schema:
+//	    type: string
 func handleActivateObject(orgID string, objectType string, objectID string, writer http.ResponseWriter, request *http.Request) {
 	if request.Method == http.MethodPut {
 		if trace.IsLogging(logger.DEBUG) {
@@ -1735,13 +1743,13 @@ func handleActivateObject(orgID string, objectType string, objectID string, writ
 //
 // Get the status of the object of the specified object type and object ID.
 // The status can be one of the following:
-//   notReady - The object is not ready to be sent to destinations.
-//   ready - The object is ready to be sent to destinations.
-//   received - The object's metadata has been received but not all its data.
-//   completelyReceived - The full object (metadata and data) has been received.
-//   consumed - The object has been consumed by the application.
-//   deleted - The object was deleted.
 //
+//	notReady - The object is not ready to be sent to destinations.
+//	ready - The object is ready to be sent to destinations.
+//	received - The object's metadata has been received but not all its data.
+//	completelyReceived - The full object (metadata and data) has been received.
+//	consumed - The object has been consumed by the application.
+//	deleted - The object was deleted.
 //
 // ---
 //
@@ -1752,27 +1760,28 @@ func handleActivateObject(orgID string, objectType string, objectID string, writ
 // - text/plain
 //
 // parameters:
-// - name: objectType
-//   in: path
-//   description: The object type of the object whose status will be retrieved
-//   required: true
-//   type: string
-// - name: objectID
-//   in: path
-//   description: The object ID of the object whose status will be retrieved
-//   required: true
-//   type: string
+//   - name: objectType
+//     in: path
+//     description: The object type of the object whose status will be retrieved
+//     required: true
+//     type: string
+//   - name: objectID
+//     in: path
+//     description: The object ID of the object whose status will be retrieved
+//     required: true
+//     type: string
 //
 // responses:
-//   '200':
-//     description: Object status
-//     schema:
-//       type: string
-//       enum: [notReady, ready, received, completelyReceived, consumed, deleted]
-//   '500':
-//     description: Failed to retrieve the object's status
-//     schema:
-//       type: string
+//
+//	'200':
+//	  description: Object status
+//	  schema:
+//	    type: string
+//	    enum: [notReady, ready, received, completelyReceived, consumed, deleted]
+//	'500':
+//	  description: Failed to retrieve the object's status
+//	  schema:
+//	    type: string
 func handleObjectStatus(orgID string, objectType string, objectID string, canAccessAllObjects bool, writer http.ResponseWriter, request *http.Request) {
 	if request.Method == http.MethodGet {
 		if trace.IsLogging(logger.DEBUG) {
@@ -1798,7 +1807,7 @@ func handleObjectStatus(orgID string, objectType string, objectID string, canAcc
 			} else {
 				writer.Header().Add(contentType, "plain/text")
 				writer.WriteHeader(http.StatusOK)
-				if _, err := writer.Write([]byte(status)); err != nil && log.IsLogging(logger.ERROR) {
+				if _, err := writer.Write([]byte(html.EscapeString(string(status)))); err != nil && log.IsLogging(logger.ERROR) {
 					log.Error("Failed to write response body, error: " + err.Error())
 				}
 			}
@@ -1880,7 +1889,7 @@ func handleObjectDestinations(orgID string, objectType string, objectID string, 
 				} else {
 					writer.Header().Add(contentType, applicationJSON)
 					writer.WriteHeader(http.StatusOK)
-					if _, err := writer.Write([]byte(destinations)); err != nil && log.IsLogging(logger.ERROR) {
+					if _, err := writer.Write([]byte(html.EscapeString(string(destinations)))); err != nil && log.IsLogging(logger.ERROR) {
 						log.Error("Failed to write response body, error: " + err.Error())
 					}
 				}
@@ -2124,27 +2133,28 @@ func handleObjectDestinations(orgID string, objectType string, objectID string, 
 // - text/plain
 //
 // parameters:
-// - name: objectType
-//   in: path
-//   description: The object type of the object whose data will be retrieved
-//   required: true
-//   type: string
-// - name: objectID
-//   in: path
-//   description: The object ID of the object whose data will be retrieved
-//   required: true
-//   type: string
+//   - name: objectType
+//     in: path
+//     description: The object type of the object whose data will be retrieved
+//     required: true
+//     type: string
+//   - name: objectID
+//     in: path
+//     description: The object ID of the object whose data will be retrieved
+//     required: true
+//     type: string
 //
 // responses:
-//   '200':
-//     description: Object data
-//     schema:
-//       type: string
-//       format: binary
-//   '500':
-//     description: Failed to retrieve the object's data
-//     schema:
-//       type: string
+//
+//	'200':
+//	  description: Object data
+//	  schema:
+//	    type: string
+//	    format: binary
+//	'500':
+//	  description: Failed to retrieve the object's data
+//	  schema:
+//	    type: string
 func handleObjectGetData(orgID string, objectType string, objectID string, canAccessAllObjects bool, writer http.ResponseWriter, request *http.Request) {
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In handleObjects. Get data %s %s, canAccessAllObjects %t\n", objectType, objectID, canAccessAllObjects)
@@ -2290,37 +2300,38 @@ func handleObjectGetData(orgID string, objectType string, objectID string, canAc
 // - text/plain
 //
 // parameters:
-// - name: objectType
-//   in: path
-//   description: The object type of the object whose data will be updated
-//   required: true
-//   type: string
-// - name: objectID
-//   in: path
-//   description: The object ID of the object whose data will be updated
-//   required: true
-//   type: string
-// - name: payload
-//   in: body
-//   description: The object's new data. When read data bytes from a file, please set application/octet-stream as Content-Type in header.
-//   required: true
-//   schema:
+//   - name: objectType
+//     in: path
+//     description: The object type of the object whose data will be updated
+//     required: true
+//     type: string
+//   - name: objectID
+//     in: path
+//     description: The object ID of the object whose data will be updated
+//     required: true
+//     type: string
+//   - name: payload
+//     in: body
+//     description: The object's new data. When read data bytes from a file, please set application/octet-stream as Content-Type in header.
+//     required: true
+//     schema:
 //     type: string
 //     format: binary
 //
 // responses:
-//   '204':
-//     description: Object data updated
-//     schema:
-//       type: string
-//   '404':
-//     description: The specified object doesn't exist
-//     schema:
-//       type: string
-//   '500':
-//     description: Failed to update the object's data
-//     schema:
-//       type: string
+//
+//	'204':
+//	  description: Object data updated
+//	  schema:
+//	    type: string
+//	'404':
+//	  description: The specified object doesn't exist
+//	  schema:
+//	    type: string
+//	'500':
+//	  description: Failed to update the object's data
+//	  schema:
+//	    type: string
 func handleObjectPutData(orgID string, objectType string, objectID string, writer http.ResponseWriter, request *http.Request) {
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In handleObjects. Update data %s %s\n", objectType, objectID)
@@ -2623,32 +2634,33 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 // - text/plain
 //
 // parameters:
-// - name: objectType
-//   in: path
-//   description: The object type of the objects to return
-//   required: true
-//   type: string
-// - name: all_objects
-//   in: query
-//   description: Whether or not to include all objects. If false only updated objects will be returned.
-//   required: true
-//   type: boolean
+//   - name: objectType
+//     in: path
+//     description: The object type of the objects to return
+//     required: true
+//     type: string
+//   - name: all_objects
+//     in: query
+//     description: Whether or not to include all objects. If false only updated objects will be returned.
+//     required: true
+//     type: boolean
 //
 // responses:
-//   '200':
-//     description: Objects with a destination policy response
-//     schema:
-//       type: array
-//       items:
-//         "$ref": "#/definitions/ObjectDestinationPolicy"
-//   '404':
-//     description: No objects with a destination policy found
-//     schema:
-//       type: string
-//   '500':
-//     description: Failed to retrieve the updated objects
-//     schema:
-//       type: string
+//
+//	'200':
+//	  description: Objects with a destination policy response
+//	  schema:
+//	    type: array
+//	    items:
+//	      "$ref": "#/definitions/ObjectDestinationPolicy"
+//	'404':
+//	  description: No objects with a destination policy found
+//	  schema:
+//	    type: string
+//	'500':
+//	  description: Failed to retrieve the updated objects
+//	  schema:
+//	    type: string
 func handleListAllObjects(orgID string, objectType string, writer http.ResponseWriter, request *http.Request) {
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In handleListAllObjects. List %s, Method %s, orgID %s, objectType %s\n",
@@ -2800,44 +2812,45 @@ func handleListAllObjects(orgID string, objectType string, writer http.ResponseW
 // - text/plain
 //
 // parameters:
-// - name: destination_policy
-//   in: query
-//   description: Must be true to indicate that objects with destinationPolicy are to be retrieved
-//   required: true
-//   type: boolean
-// - name: received
-//   in: query
-//   description: Whether or not to include the objects that have been marked as received by the application
-//   required: false
-//   type: boolean
-// - name: service
-//   in: query
-//   description: The ID of the service (orgID/serviceName) to which objects have affinity,
-//        whose Destination Policy should be fetched.
-//   required: false
-//   type: string
-// - name: since
-//   in: query
-//   description: Objects that have a Destination Policy which was updated since the specified UTC time in nanoseconds should be fetched.
-//   required: false
-//   type: integer
-//   format: int64
+//   - name: destination_policy
+//     in: query
+//     description: Must be true to indicate that objects with destinationPolicy are to be retrieved
+//     required: true
+//     type: boolean
+//   - name: received
+//     in: query
+//     description: Whether or not to include the objects that have been marked as received by the application
+//     required: false
+//     type: boolean
+//   - name: service
+//     in: query
+//     description: The ID of the service (orgID/serviceName) to which objects have affinity,
+//     whose Destination Policy should be fetched.
+//     required: false
+//     type: string
+//   - name: since
+//     in: query
+//     description: Objects that have a Destination Policy which was updated since the specified UTC time in nanoseconds should be fetched.
+//     required: false
+//     type: integer
+//     format: int64
 //
 // responses:
-//   '200':
-//     description: Object destination policy response
-//     schema:
-//       type: array
-//       items:
-//         "$ref": "#/definitions/ObjectDestinationPolicy"
-//   '404':
-//     description: No updated objects found
-//     schema:
-//       type: string
-//   '500':
-//     description: Failed to retrieve the updated objects
-//     schema:
-//       type: string
+//
+//	'200':
+//	  description: Object destination policy response
+//	  schema:
+//	    type: array
+//	    items:
+//	      "$ref": "#/definitions/ObjectDestinationPolicy"
+//	'404':
+//	  description: No updated objects found
+//	  schema:
+//	    type: string
+//	'500':
+//	  description: Failed to retrieve the updated objects
+//	  schema:
+//	    type: string
 func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWriter,
 	request *http.Request) {
 	code, userOrgID, userID := security.Authenticate(request)
@@ -2929,7 +2942,7 @@ func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWr
 				} else {
 					writer.Header().Add(contentType, applicationJSON)
 					writer.WriteHeader(http.StatusOK)
-					if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+					if _, err := writer.Write([]byte(html.EscapeString(string(data)))); err != nil && log.IsLogging(logger.ERROR) {
 						log.Error("Failed to write response body, error: " + err.Error())
 					}
 				}
@@ -3005,27 +3018,28 @@ func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWr
 // - text/plain
 //
 // parameters:
-// - name: objectType
-//   in: path
-//   description: The object type of the objects for the webhook
-//   required: true
-//   type: string
-// - name: payload
-//   in: body
-//   description: The webhook's data
-//   required: true
-//   schema:
+//   - name: objectType
+//     in: path
+//     description: The object type of the objects for the webhook
+//     required: true
+//     type: string
+//   - name: payload
+//     in: body
+//     description: The webhook's data
+//     required: true
+//     schema:
 //     "$ref": "#/definitions/webhookUpdate"
 //
 // responses:
-//   '204':
-//     description: Webhook registered/deleted
-//     schema:
-//       type: string
-//   '500':
-//     description: Failed to update the webhook's data
-//     schema:
-//       type: string
+//
+//	'204':
+//	  description: Webhook registered/deleted
+//	  schema:
+//	    type: string
+//	'500':
+//	  description: Failed to update the webhook's data
+//	  schema:
+//	    type: string
 func handleWebhook(orgID string, objectType string, writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPut {
 		writer.WriteHeader(http.StatusBadRequest)
@@ -3141,31 +3155,32 @@ func handleWebhook(orgID string, objectType string, writer http.ResponseWriter, 
 // - text/plain
 //
 // parameters:
-// - name: objectType
-//   in: path
-//   description: The object type of the object to update/create
-//   required: true
-//   type: string
-// - name: objectID
-//   in: path
-//   description: The object ID of the object to update/create
-//   required: true
-//   type: string
-// - name: payload
-//   in: body
-//   required: true
-//   schema:
+//   - name: objectType
+//     in: path
+//     description: The object type of the object to update/create
+//     required: true
+//     type: string
+//   - name: objectID
+//     in: path
+//     description: The object ID of the object to update/create
+//     required: true
+//     type: string
+//   - name: payload
+//     in: body
+//     required: true
+//     schema:
 //     "$ref": "#/definitions/objectUpdate"
 //
 // responses:
-//   '204':
-//     description: Object updated
-//     schema:
-//       type: string
-//   '500':
-//     description: Failed to update/create the object
-//     schema:
-//       type: string
+//
+//	'204':
+//	  description: Object updated
+//	  schema:
+//	    type: string
+//	'500':
+//	  description: Failed to update/create the object
+//	  schema:
+//	    type: string
 func handleUpdateObject(orgID string, objectType string, objectID string, writer http.ResponseWriter, request *http.Request) {
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In handleObjects. Update %s %s %s\n", orgID, objectType, objectID)
@@ -3217,20 +3232,21 @@ func handleUpdateObject(orgID string, objectType string, objectID string, writer
 // parameters:
 //
 // responses:
-//   '200':
-//     description: Organizations response
-//     schema:
-//       type: array
-//       items:
-//         "$ref": "#/definitions/organization"
-//   '404':
-//     description: No organizations found
-//     schema:
-//       type: string
-//   '500':
-//     description: Failed to retrieve the organizations
-//     schema:
-//       type: string
+//
+//	'200':
+//	  description: Organizations response
+//	  schema:
+//	    type: array
+//	    items:
+//	      "$ref": "#/definitions/organization"
+//	'404':
+//	  description: No organizations found
+//	  schema:
+//	    type: string
+//	'500':
+//	  description: Failed to retrieve the organizations
+//	  schema:
+//	    type: string
 func handleGetOrganizations(writer http.ResponseWriter, request *http.Request) {
 	setResponseHeaders(writer)
 
@@ -3508,43 +3524,44 @@ func handleSecurity(writer http.ResponseWriter, request *http.Request) {
 // - text/plain
 //
 // parameters:
-// - name: type
-//   in: path
-//   description: The type of the ACL to remove the specified username from.
-//   required: true
-//   type: string
-//   enum: [destinations, objects]
-// - name: orgID
-//   in: path
-//   description: The orgID in which the ACL for the destination type or object type exists.
-//   required: true
-//   type: string
-// - name: key
-//   in: path
-//   description: The destination type or object type that is being protected by the ACL.
-//   required: true
-//   type: string
-// - name: acl_usertype
-//   in: path
-//   description: The acl user type of given username to be deleted
-//   required: true
-//   type: string
-//   enum: [user, node]
-// - name: username
-//   in: path
-//   description: The username to remove from the specified ACL.
-//   required: true
-//   type: string
+//   - name: type
+//     in: path
+//     description: The type of the ACL to remove the specified username from.
+//     required: true
+//     type: string
+//     enum: [destinations, objects]
+//   - name: orgID
+//     in: path
+//     description: The orgID in which the ACL for the destination type or object type exists.
+//     required: true
+//     type: string
+//   - name: key
+//     in: path
+//     description: The destination type or object type that is being protected by the ACL.
+//     required: true
+//     type: string
+//   - name: acl_usertype
+//     in: path
+//     description: The acl user type of given username to be deleted
+//     required: true
+//     type: string
+//     enum: [user, node]
+//   - name: username
+//     in: path
+//     description: The username to remove from the specified ACL.
+//     required: true
+//     type: string
 //
 // responses:
-//   '204':
-//     description: The username was removed from the specified ACL.
-//     schema:
-//       type: string
-//   '500':
-//     description: Failed to remove the username from the specified ACL.
-//     schema:
-//       type: string
+//
+//	'204':
+//	  description: The username was removed from the specified ACL.
+//	  schema:
+//	    type: string
+//	'500':
+//	  description: Failed to remove the username from the specified ACL.
+//	  schema:
+//	    type: string
 func handleACLDelete(aclType string, orgID string, parts []string, writer http.ResponseWriter) {
 	if pathParamValid := validatePathParamForSecurity(writer, orgID, parts[0], parts[1], parts[2]); !pathParamValid {
 		return
@@ -3645,7 +3662,7 @@ func handleACLGet(aclType string, orgID string, key string, aclUserType string, 
 			} else {
 				writer.Header().Add(contentType, applicationJSON)
 				writer.WriteHeader(http.StatusOK)
-				if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+				if _, err := writer.Write([]byte(html.EscapeString(string(data)))); err != nil && log.IsLogging(logger.ERROR) {
 					log.Error("Failed to write response body, error: " + err.Error())
 				}
 			}
@@ -3667,7 +3684,7 @@ func handleACLGet(aclType string, orgID string, key string, aclUserType string, 
 			} else {
 				writer.Header().Add(contentType, applicationJSON)
 				writer.WriteHeader(http.StatusOK)
-				if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
+				if _, err := writer.Write([]byte(html.EscapeString(string(data)))); err != nil && log.IsLogging(logger.ERROR) {
 					log.Error("Failed to write response body, error: " + err.Error())
 				}
 			}
@@ -4147,23 +4164,24 @@ type healthReport struct {
 // - text/plain
 //
 // parameters:
-// - name: details
-//   in: query
-//   description: Whether or not to include the detailed health status
-//   required: false
-//   type: boolean
+//   - name: details
+//     in: query
+//     description: Whether or not to include the detailed health status
+//     required: false
+//     type: boolean
 //
 // responses:
-//   '200':
-//     description: Health status
-//     schema:
-//       type: array
-//       items:
-//         "$ref": "#/definitions/healthReport"
-//   '500':
-//     description: Failed to send health status.
-//     schema:
-//       type: string
+//
+//	'200':
+//	  description: Health status
+//	  schema:
+//	    type: array
+//	    items:
+//	      "$ref": "#/definitions/healthReport"
+//	'500':
+//	  description: Failed to send health status.
+//	  schema:
+//	    type: string
 func handleHealth(writer http.ResponseWriter, request *http.Request) {
 	setResponseHeaders(writer)
 
@@ -4269,7 +4287,8 @@ func validatePathParam(writer http.ResponseWriter, orgID string, objectType stri
 	writer.Header().Add("Content-Type", "Text/Plain")
 	buffer := bytes.NewBufferString(errorMessage)
 	buffer.WriteString("\n")
-	writer.Write(buffer.Bytes())
+	escapedData := html.EscapeString(string(buffer.Bytes()))
+	writer.Write([]byte(escapedData))
 	return false
 
 }
@@ -4299,7 +4318,8 @@ func validatePathParamForService(writer http.ResponseWriter, serviceOrgID string
 	writer.Header().Add("Content-Type", "Text/Plain")
 	buffer := bytes.NewBufferString(errorMessage)
 	buffer.WriteString("\n")
-	writer.Write(buffer.Bytes())
+	escapedData := html.EscapeString(string(buffer.Bytes()))
+	writer.Write([]byte(escapedData))
 	return false
 }
 
@@ -4331,6 +4351,7 @@ func validatePathParamForSecurity(writer http.ResponseWriter, orgID string, key 
 	writer.WriteHeader(http.StatusBadRequest)
 	writer.Header().Add("Content-Type", "Text/Plain")
 	buffer := bytes.NewBufferString(errorMessage)
-	writer.Write(buffer.Bytes())
+	escapedData := html.EscapeString(string(buffer.Bytes()))
+	writer.Write([]byte(escapedData))
 	return false
 }
