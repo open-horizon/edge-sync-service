@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/open-horizon/edge-sync-service/common"
@@ -235,11 +236,17 @@ func DeleteStoredData(uri string, isTempData bool) common.SyncServiceError {
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Deleting stored data at %s, isTempData: %t", uri, isTempData)
 	}
+
 	dataURI, err := url.Parse(uri)
 	if err != nil || !strings.EqualFold(dataURI.Scheme, "file") {
 		return &Error{"Invalid data URI"}
 	}
-	filePath := dataURI.Path
+
+	filePath, err := filepath.Abs(filepath.Clean(dataURI.Path))
+	if err != nil {
+		return &Error{"Failed to resolve file path"}
+	}
+
 	if isTempData {
 		filePath = dataURI.Path + ".tmp"
 	}
@@ -247,6 +254,7 @@ func DeleteStoredData(uri string, isTempData bool) common.SyncServiceError {
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Deleting %s", filePath)
 	}
+
 	if err = os.Remove(filePath); err != nil && !os.IsNotExist(err) {
 		return &common.IOError{Message: "Failed to delete data. Error: " + err.Error()}
 	}
