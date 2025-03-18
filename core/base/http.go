@@ -99,7 +99,7 @@ func startHTTPServer(ipAddress string, registerHandlers bool, swaggerFile string
 			if err != nil {
 				return &common.SetupError{Message: fmt.Sprintf("Failed to setup Unix Socket listening. Error: %s", err)}
 			}
-			if err := os.Chmod(socketFile, 0o644); err != nil {
+			if err := os.Chmod(socketFile, 0o666); err != nil {
 				return &common.SetupError{Message: fmt.Sprintf("Failed to setup permission for Unix Socket listening. Error: %s", err)}
 			}
 			go startHTTPServerHelper(common.Configuration.ListeningType == common.ListeningSecureUnix, listener)
