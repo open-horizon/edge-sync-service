@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"html"
 
 	"github.com/open-horizon/edge-sync-service/core/leader"
 	"github.com/open-horizon/edge-sync-service/core/security"
@@ -4269,7 +4270,8 @@ func validatePathParam(writer http.ResponseWriter, orgID string, objectType stri
 	writer.Header().Add("Content-Type", "Text/Plain")
 	buffer := bytes.NewBufferString(errorMessage)
 	buffer.WriteString("\n")
-	writer.Write(buffer.Bytes())
+	escapedData := html.EscapeString(string(buffer.Bytes()))
+	writer.Write([]byte(escapedData))
 	return false
 
 }
@@ -4299,7 +4301,8 @@ func validatePathParamForService(writer http.ResponseWriter, serviceOrgID string
 	writer.Header().Add("Content-Type", "Text/Plain")
 	buffer := bytes.NewBufferString(errorMessage)
 	buffer.WriteString("\n")
-	writer.Write(buffer.Bytes())
+	escapedData := html.EscapeString(string(buffer.Bytes()))
+	writer.Write([]byte(escapedData))
 	return false
 }
 
@@ -4331,6 +4334,7 @@ func validatePathParamForSecurity(writer http.ResponseWriter, orgID string, key 
 	writer.WriteHeader(http.StatusBadRequest)
 	writer.Header().Add("Content-Type", "Text/Plain")
 	buffer := bytes.NewBufferString(errorMessage)
-	writer.Write(buffer.Bytes())
+	escapedData := html.EscapeString(string(buffer.Bytes()))
+	writer.Write([]byte(escapedData))
 	return false
 }
