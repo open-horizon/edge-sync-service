@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/open-horizon/edge-sync-service/common"
@@ -175,7 +176,7 @@ func GetData(uri string, isTempData bool) (io.Reader, common.SyncServiceError) {
 		trace.Trace("Retrieving data from %s", filePath)
 	}
 
-	file, err := os.Open(filePath)
+	file, err := os.Open(filepath.Clean(filePath))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, &common.NotFound{}
@@ -197,7 +198,7 @@ func GetDataChunk(uri string, size int, offset int64) ([]byte, bool, int, common
 		trace.Trace("Retrieving data from %s", uri)
 	}
 
-	file, err := os.Open(dataURI.Path)
+	file, err := os.Open(filepath.Clean(dataURI.Path))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, true, 0, &common.NotFound{}
