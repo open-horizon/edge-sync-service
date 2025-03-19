@@ -33,14 +33,20 @@ func AppendData(uri string, dataReader io.Reader, dataLength uint32, offset int6
 		return isLastChunk, &Error{"Invalid data URI"}
 	}
 
-	filePath := dataURI.Path + ".tmp"
+	baseFilePath, err := filepath.Abs(filepath.Clean(dataURI.Path))
+	if err != nil {
+		return isLastChunk, &Error{fmt.Sprintf("Failed to resolve file path %v", baseFilePath)}
+
+	}
+
+	tmpFilePath := baseFilePath + ".tmp"
 
 	if trace.IsLogging(logger.TRACE) {
-		trace.Trace("Open file %s", filePath)
+		trace.Trace("Open file %s", tmpFilePath)
 	}
-	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0600)
+	file, err := os.OpenFile(tmpFilePath, os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
-		return isLastChunk, common.CreateError(err, fmt.Sprintf("Failed to open file %s to append data. Error: ", dataURI.Path))
+		return isLastChunk, common.CreateError(err, fmt.Sprintf("Failed to open file %s to append data. Error: ", tmpFilePath))
 	}
 	defer closeFileLogError(file)
 	if _, err = file.Seek(offset, io.SeekStart); err != nil {
@@ -55,7 +61,7 @@ func AppendData(uri string, dataReader io.Reader, dataLength uint32, offset int6
 		return isLastChunk, &common.IOError{Message: "Failed to write all the data to file."}
 	}
 
-	fileInfo, err := os.Stat(filePath)
+	fileInfo, err := os.Stat(tmpFilePath)
 	if err != nil {
 		return isLastChunk, &common.IOError{Message: "Failed to check file size. Error: " + err.Error()}
 	}
@@ -66,9 +72,9 @@ func AppendData(uri string, dataReader io.Reader, dataLength uint32, offset int6
 
 	if isLastChunk && !isTempData {
 		if trace.IsLogging(logger.TRACE) {
-			trace.Trace("Rename file from %s to %s", filePath, dataURI.Path)
+			trace.Trace("Rename file from %s to %s", tmpFilePath, baseFilePath)
 		}
-		if err := os.Rename(filePath, dataURI.Path); err != nil {
+		if err := os.Rename(tmpFilePath, baseFilePath); err != nil {
 			return isLastChunk, &common.IOError{Message: "Failed to rename data file. Error: " + err.Error()}
 		}
 	}
@@ -80,15 +86,22 @@ func StoreData(uri string, dataReader io.Reader, dataLength uint32) (int64, comm
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Storing data at %s", uri)
 	}
+
 	dataURI, err := url.Parse(uri)
 	if err != nil || !strings.EqualFold(dataURI.Scheme, "file") {
 		return 0, &Error{"Invalid data URI"}
 	}
 
-	filePath := dataURI.Path + ".tmp"
-	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0600)
+	baseFilePath, err := filepath.Abs(filepath.Clean(dataURI.Path))
 	if err != nil {
-		return 0, common.CreateError(err, fmt.Sprintf("Failed to open file %s to write data. Error: ", dataURI.Path))
+		return 0, &Error{fmt.Sprintf("Failed to resolve file path %v", baseFilePath)}
+	}
+
+	tmpFilePath := baseFilePath + ".tmp"
+
+	file, err := os.OpenFile(tmpFilePath, os.O_WRONLY|os.O_CREATE, 0600)
+	if err != nil {
+		return 0, common.CreateError(err, fmt.Sprintf("Failed to open file %s to write data. Error: ", tmpFilePath))
 	}
 	defer closeFileLogError(file)
 
@@ -103,7 +116,7 @@ func StoreData(uri string, dataReader io.Reader, dataLength uint32) (int64, comm
 	if written != int64(dataLength) && dataLength != 0 {
 		return 0, &common.IOError{Message: "Failed to write all the data to file."}
 	}
-	if err := os.Rename(filePath, dataURI.Path); err != nil {
+	if err := os.Rename(tmpFilePath, baseFilePath); err != nil {
 		return 0, &common.IOError{Message: "Failed to rename data file. Error: " + err.Error()}
 	}
 	return written, nil
@@ -114,15 +127,22 @@ func StoreTempData(uri string, dataReader io.Reader, dataLength uint32) (int64, 
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Storing data at %s", uri)
 	}
+
 	dataURI, err := url.Parse(uri)
 	if err != nil || !strings.EqualFold(dataURI.Scheme, "file") {
 		return 0, &Error{"Invalid data URI"}
 	}
 
-	filePath := dataURI.Path + ".tmp"
-	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0600)
+	baseFilePath, err := filepath.Abs(filepath.Clean(dataURI.Path))
 	if err != nil {
-		return 0, common.CreateError(err, fmt.Sprintf("Failed to open file %s to write data. Error: ", dataURI.Path))
+		return 0, &Error{fmt.Sprintf("Failed to resolve file path %v", baseFilePath)}
+	}
+
+	tmpFilePath := baseFilePath + ".tmp"
+
+	file, err := os.OpenFile(tmpFilePath, os.O_WRONLY|os.O_CREATE, 0600)
+	if err != nil {
+		return 0, common.CreateError(err, fmt.Sprintf("Failed to open file %s to write data. Error: ", tmpFilePath))
 	}
 	defer closeFileLogError(file)
 
@@ -145,14 +165,20 @@ func StoreDataFromTempData(uri string) common.SyncServiceError {
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Storing data from temp data at %s", uri)
 	}
+
 	dataURI, err := url.Parse(uri)
 	if err != nil || !strings.EqualFold(dataURI.Scheme, "file") {
 		return &Error{"Invalid data URI"}
 	}
 
-	tmpFilePath := dataURI.Path + ".tmp"
+	baseFilePath, err := filepath.Abs(filepath.Clean(dataURI.Path))
+	if err != nil {
+		return &Error{fmt.Sprintf("Failed to resolve file path %v", baseFilePath)}
+	}
 
-	if err := os.Rename(tmpFilePath, dataURI.Path); err != nil {
+	tmpFilePath := baseFilePath + ".tmp"
+
+	if err := os.Rename(tmpFilePath, baseFilePath); err != nil {
 		return &common.IOError{Message: "Failed to rename data file. Error: " + err.Error()}
 	}
 
@@ -167,9 +193,13 @@ func GetData(uri string, isTempData bool) (io.Reader, common.SyncServiceError) {
 		return nil, &Error{"Invalid data URI"}
 	}
 
-	filePath := dataURI.Path
+	filePath, err := filepath.Abs(filepath.Clean(dataURI.Path))
+	if err != nil {
+		return nil, &Error{fmt.Sprintf("Failed to resolve file path %v", filePath)}
+	}
+
 	if isTempData {
-		filePath = dataURI.Path + ".tmp"
+		filePath = filePath + ".tmp"
 	}
 
 	if trace.IsLogging(logger.TRACE) {
@@ -194,8 +224,13 @@ func GetDataChunk(uri string, size int, offset int64) ([]byte, bool, int, common
 		return nil, false, 0, &Error{"Invalid data URI"}
 	}
 
+	filePath, err := filepath.Abs(filepath.Clean(dataURI.Path))
+	if err != nil {
+		return nil, false, 0, &Error{fmt.Sprintf("Failed to resolve file path %v", filePath)}
+	}
+
 	if trace.IsLogging(logger.TRACE) {
-		trace.Trace("Retrieving data from %s", uri)
+		trace.Trace("Retrieving data from %s", filePath)
 	}
 
 	file, err := os.Open(filepath.Clean(dataURI.Path))
@@ -203,7 +238,7 @@ func GetDataChunk(uri string, size int, offset int64) ([]byte, bool, int, common
 		if os.IsNotExist(err) {
 			return nil, true, 0, &common.NotFound{}
 		}
-		return nil, true, 0, common.CreateError(err, fmt.Sprintf("Failed to open file %s to read data. Error: ", dataURI.Path))
+		return nil, true, 0, common.CreateError(err, fmt.Sprintf("Failed to open file %s to read data. Error: ", filePath))
 	}
 	defer closeFileLogError(file)
 
@@ -236,18 +271,25 @@ func DeleteStoredData(uri string, isTempData bool) common.SyncServiceError {
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Deleting stored data at %s, isTempData: %t", uri, isTempData)
 	}
+
 	dataURI, err := url.Parse(uri)
 	if err != nil || !strings.EqualFold(dataURI.Scheme, "file") {
 		return &Error{"Invalid data URI"}
 	}
-	filePath := dataURI.Path
+
+	filePath, err := filepath.Abs(filepath.Clean(dataURI.Path))
+	if err != nil {
+		return &Error{fmt.Sprintf("Failed to resolve file path %v", filePath)}
+	}
+
 	if isTempData {
-		filePath = dataURI.Path + ".tmp"
+		filePath = filePath + ".tmp"
 	}
 
 	if trace.IsLogging(logger.TRACE) {
 		trace.Trace("Deleting %s", filePath)
 	}
+
 	if err = os.Remove(filePath); err != nil && !os.IsNotExist(err) {
 		return &common.IOError{Message: "Failed to delete data. Error: " + err.Error()}
 	}
