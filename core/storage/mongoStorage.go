@@ -1087,6 +1087,8 @@ func (store *MongoStorage) ReadObjectData(orgID string, objectType string, objec
 			return nil, true, 0, &common.NotFound{}
 		}
 		return nil, true, 0, &Error{fmt.Sprintf("Failed to open file to read the data. Error: %s.", err)}
+	} else if fileHandle == nil || fileHandle.GetFile() == nil {
+		return nil, true, 0, &common.NotFound{}
 	}
 
 	offset64 := int64(offset)
