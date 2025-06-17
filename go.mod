@@ -1,6 +1,8 @@
 module github.com/open-horizon/edge-sync-service
 
-go 1.21
+go 1.23.0
+
+toolchain go1.23.7
 
 require (
 	github.com/eclipse/paho.mqtt.golang v1.4.3
@@ -8,7 +10,7 @@ require (
 	github.com/open-horizon/edge-utilities v0.0.0-20190711093331-0908b45a7152
 	go.etcd.io/bbolt v1.3.10
 	go.mongodb.org/mongo-driver v1.15.0
-	golang.org/x/sync v0.7.0
+	golang.org/x/sync v0.15.0
 )
 
 require (
@@ -21,8 +23,8 @@ require (
 	github.com/xdg-go/scram v1.1.2 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20181117223130-1be2e3e5546d // indirect
-	golang.org/x/crypto v0.21.0 // indirect
-	golang.org/x/net v0.23.0 // indirect
-	golang.org/x/sys v0.18.0 // indirect
-	golang.org/x/text v0.14.0 // indirect
+	golang.org/x/crypto v0.39.0 // indirect
+	golang.org/x/net v0.41.0 // indirect
+	golang.org/x/sys v0.33.0 // indirect
+	golang.org/x/text v0.26.0 // indirect
 )
