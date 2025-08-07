@@ -3,9 +3,10 @@ package common
 // config contains functions and structs for dealing with the configuration file.
 
 import (
+	"crypto/rand"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -610,7 +611,13 @@ func ValidateConfig() error {
 		} else {
 			// mqtt
 			if Configuration.MQTTClientID == "" {
-				Configuration.MQTTClientID = "ESS-" + strconv.FormatInt(rand.Int63n(math.MaxInt64), 10)
+				max := big.NewInt(math.MaxInt64)
+				n, err := rand.Int(rand.Reader, max)
+				if err != nil {
+					return fmt.Errorf("failed to generate secure MQTTClientID: %w", err)
+				} else {
+					Configuration.MQTTClientID = "ESS-" + strconv.FormatInt(n.Int64(), 10)
+				}
 			}
 			if Configuration.BrokerAddress == "" {
 				Configuration.BrokerAddress = "localhost"
@@ -645,7 +652,13 @@ func ValidateConfig() error {
 				Configuration.BrokerPort = 1883
 			}
 			if Configuration.MQTTClientID == "" {
-				Configuration.MQTTClientID = "CSS-" + strconv.FormatInt(rand.Int63n(math.MaxInt64), 10)
+				max := big.NewInt(math.MaxInt64)
+				n, err := rand.Int(rand.Reader, max)
+				if err != nil {
+					return fmt.Errorf("failed to generate secure MQTTClientID: %w", err)
+				} else {
+					Configuration.MQTTClientID = "CSS-" + strconv.FormatInt(n.Int64(), 10)
+				}
 			}
 		}
 	}
