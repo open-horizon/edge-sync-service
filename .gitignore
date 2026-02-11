@@ -1,9 +1,11 @@
+.bob/
+.DS_STORE
+.idea/
 build/*
 core/base/persist
 core/communications/persist
-core/storage/persist
 core/dataVerifier/dataURITmp
 core/dataVerifier/persist
+core/storage/persist
 swagger-ui/*
-.DS_STORE
 vendor/*/

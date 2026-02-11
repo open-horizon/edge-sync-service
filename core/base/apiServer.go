@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"strconv"
@@ -4240,13 +4241,13 @@ func validatePathParam(writer http.ResponseWriter, orgID string, objectType stri
 	destinationValid := true
 
 	if orgID != "" && !common.IsValidName(orgID) {
-		errorMessage = fmt.Sprintf("Organization ID (%s) contains invalid characters", orgID)
+		errorMessage = fmt.Sprintf("Organization ID (%s) contains invalid characters", html.EscapeString(orgID))
 		orgIDIsValid = false
 	} else if objectType != "" && !common.IsValidName(objectType) {
-		errorMessage = fmt.Sprintf("object Type (%s) contains invalid characters", objectType)
+		errorMessage = fmt.Sprintf("object Type (%s) contains invalid characters", html.EscapeString(objectType))
 		objectTypeIsValid = false
 	} else if objectID != "" && !common.IsValidName(objectID) {
-		errorMessage = fmt.Sprintf("object ID (%s) contains invalid characters", objectID)
+		errorMessage = fmt.Sprintf("object ID (%s) contains invalid characters", html.EscapeString(objectID))
 		objectIDIsValid = false
 	}
 
@@ -4255,7 +4256,7 @@ func validatePathParam(writer http.ResponseWriter, orgID string, objectType stri
 		destination := fmt.Sprintf("%s:%s", destinationType, destinationID)
 		destinations = append(destinations, destination)
 		if valid, _ := common.ValidateDestinationListInput(destinations); !valid {
-			errorMessage = fmt.Sprintf("Destination Type and/or destination ID (%s) contains invalid characters", destination)
+			errorMessage = fmt.Sprintf("Destination Type and/or destination ID (%s) contains invalid characters", html.EscapeString(destination))
 			destinationValid = false
 		}
 
@@ -4281,13 +4282,13 @@ func validatePathParamForService(writer http.ResponseWriter, serviceOrgID string
 	propertyNameValid := true
 
 	if serviceOrgID != "" && !common.IsValidName(serviceOrgID) {
-		errorMessage = fmt.Sprintf("Service ID (%s) contains invalid characters", serviceOrgID)
+		errorMessage = fmt.Sprintf("Service ID (%s) contains invalid characters", html.EscapeString(serviceOrgID))
 		serviceOrgIDvalid = false
 	} else if serviceName != "" && !common.IsValidName(serviceName) {
-		errorMessage = fmt.Sprintf("Service name (%s) contains invalid characters", serviceName)
+		errorMessage = fmt.Sprintf("Service name (%s) contains invalid characters", html.EscapeString(serviceName))
 		serviceNameValid = false
 	} else if propertyName != "" && !common.IsValidName(propertyName) {
-		errorMessage = fmt.Sprintf("Property name (%s) contains invalid characters", propertyName)
+		errorMessage = fmt.Sprintf("Property name (%s) contains invalid characters", html.EscapeString(propertyName))
 		propertyNameValid = false
 	}
 
@@ -4311,16 +4312,16 @@ func validatePathParamForSecurity(writer http.ResponseWriter, orgID string, key 
 	usernameIsValid := true
 
 	if orgID != "" && !common.IsValidName(orgID) {
-		errorMessage = fmt.Sprintf("Organization ID (%s) contains invalid characters", orgID)
+		errorMessage = fmt.Sprintf("Organization ID (%s) contains invalid characters", html.EscapeString(orgID))
 		orgIDIsValid = false
 	} else if key != "" && !common.IsValidName(key) {
-		errorMessage = fmt.Sprintf("Key (destination type/object type) %s contains invalid characters", key)
+		errorMessage = fmt.Sprintf("Key (destination type/object type) %s contains invalid characters", html.EscapeString(key))
 		keyIsValid = false
 	} else if aclUserType != "" && aclUserType != security.ACLUser && aclUserType != security.ACLNode {
-		errorMessage = fmt.Sprintf("Invalid acl user type %s in URL. The value should be \"user\" or \"node\"", aclUserType)
+		errorMessage = fmt.Sprintf("Invalid acl user type %s in URL. The value should be \"user\" or \"node\"", html.EscapeString(aclUserType))
 		aclUserTypeIsValid = false
 	} else if username != "" && !common.IsValidName(username) {
-		errorMessage = fmt.Sprintf("Username (%s) contains invalid characters", username)
+		errorMessage = fmt.Sprintf("Username (%s) contains invalid characters", html.EscapeString(username))
 		usernameIsValid = false
 	}
 

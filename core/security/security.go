@@ -24,12 +24,21 @@ var authenticator Authentication
 const saltLength = 24
 
 type authenticationCacheElement struct {
-	appSecret  []byte
+	appSecret  *common.SecureBytes
 	salt       []byte
 	code       int
 	orgID      string
 	userid     string
 	expiration time.Time
+}
+
+// Clear securely wipes sensitive data from the cache element
+func (ace *authenticationCacheElement) Clear() {
+	if ace.appSecret != nil {
+		ace.appSecret.Clear()
+		ace.appSecret = nil
+	}
+	common.ClearByteSlice(ace.salt)
 }
 
 type destinationACLCacheElement struct {
@@ -127,7 +136,7 @@ func Authenticate(request *http.Request) (int, string, string) {
 			return AuthFailed, "", ""
 		}
 
-		if hmac.Equal(secretMAC, entry.appSecret) {
+		if hmac.Equal(secretMAC, entry.appSecret.Bytes()) {
 			return entry.code, entry.orgID, entry.userid
 		}
 	}
@@ -142,7 +151,7 @@ func Authenticate(request *http.Request) (int, string, string) {
 			return AuthFailed, "", ""
 		}
 
-		entry = authenticationCacheElement{secretMAC, salt, code, orgID, userID, now.Add(cacheDuration)}
+		entry = authenticationCacheElement{common.NewSecureBytes(secretMAC), salt, code, orgID, userID, now.Add(cacheDuration)}
 		authenticationCacheLock.Lock()
 		authenticationCache[appKey] = entry
 		authenticationCacheLock.Unlock()
@@ -378,8 +387,13 @@ func saltSecret(appSecret string, salt []byte) ([]byte, []byte, error) {
 			return nil, nil, fmt.Errorf("Failed to generate salt. Error: %s", err)
 		}
 	}
+	
+	// Convert secret to bytes for processing
+	secretBytes := []byte(appSecret)
+	defer common.ClearByteSlice(secretBytes) // Clear after use
+	
 	secretHash := hmac.New(sha256.New, salt)
-	_, err := secretHash.Write([]byte(appSecret))
+	_, err := secretHash.Write(secretBytes)
 	if err != nil {
 		return nil, nil, fmt.Errorf("Failed to generate HMAC. Error: %s", err)
 	}
@@ -725,6 +739,7 @@ func flushAuthenticationCache() {
 
 	for cacheKey, entry := range authenticationCache {
 		if now.After(entry.expiration) {
+			entry.Clear() // Clear sensitive data before removing from cache
 			delete(authenticationCache, cacheKey)
 		}
 	}

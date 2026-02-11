@@ -23,6 +23,10 @@ import (
 	"github.com/open-horizon/edge-utilities/logger"
 	"github.com/open-horizon/edge-utilities/logger/log"
 	"github.com/open-horizon/edge-utilities/logger/trace"
+
+	"net"
+	"net/url"
+	"regexp"
 )
 
 const registerURL = "/spi/v1/register/"
@@ -56,6 +60,94 @@ type feedbackMessage struct {
 }
 
 // StartCommunication starts communications
+
+// validateURLParameter validates that a parameter doesn't contain malicious characters
+func validateURLParameter(param string) error {
+	// Disallow URL schemes, path traversal, and special characters
+	if strings.Contains(param, "://") {
+		return &common.InvalidRequest{Message: "URL schemes not allowed in parameters"}
+	}
+	if strings.Contains(param, "..") {
+		return &common.InvalidRequest{Message: "Path traversal not allowed in parameters"}
+	}
+	if strings.ContainsAny(param, "\r\n\t") {
+		return &common.InvalidRequest{Message: "Control characters not allowed in parameters"}
+	}
+	// Allow Unicode letters, numbers, marks (accents), and safe punctuation
+	// \p{L} = Unicode letters (all languages)
+	// \p{N} = Unicode numbers (all scripts)
+	// \p{M} = Unicode marks (combining characters, accents)
+	validPattern := regexp.MustCompile(`^[\p{L}\p{N}\p{M}._-]+$`)
+	if !validPattern.MatchString(param) {
+		return &common.InvalidRequest{Message: "Invalid characters in parameter"}
+	}
+	return nil
+}
+
+// validateAndBuildURL validates the base URL and ensures it's safe
+func validateAndBuildURL(baseURL string, pathComponents ...string) (string, error) {
+	// Parse and validate base URL
+	parsedBase, err := url.Parse(baseURL)
+	if err != nil {
+		return "", &common.InvalidRequest{Message: "Invalid base URL: " + err.Error()}
+	}
+
+	// Ensure base URL uses allowed schemes (http/https only)
+	if parsedBase.Scheme != "http" && parsedBase.Scheme != "https" {
+		return "", &common.InvalidRequest{Message: "Only http/https schemes allowed"}
+	}
+
+	// Validate each path component
+	for _, component := range pathComponents {
+		if err := validateURLParameter(component); err != nil {
+			return "", err
+		}
+	}
+
+	// Build URL safely
+	var strBuilder strings.Builder
+	strBuilder.WriteString(baseURL)
+	for _, component := range pathComponents {
+		if !strings.HasSuffix(strBuilder.String(), "/") {
+			strBuilder.WriteByte('/')
+		}
+		// URL encode each component to prevent injection
+		strBuilder.WriteString(url.PathEscape(component))
+	}
+
+	return strBuilder.String(), nil
+}
+
+// validateHTTPRequest validates the request URL before execution
+func validateHTTPRequest(req *http.Request) error {
+	// Ensure the request URL matches expected base URL
+	if !strings.HasPrefix(req.URL.String(), common.HTTPCSSURL) {
+		return &common.InvalidRequest{Message: "Request URL does not match expected base URL"}
+	}
+
+	// Validate scheme
+	if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+		return &common.InvalidRequest{Message: "Only http/https schemes allowed"}
+	}
+
+	// Prevent requests to private IP ranges (optional but recommended)
+	host := req.URL.Hostname()
+	if isPrivateIP(host) && !common.Configuration.AllowPrivateIPs {
+		return &common.InvalidRequest{Message: "Requests to private IPs not allowed"}
+	}
+
+	return nil
+}
+
+// isPrivateIP checks if the host is a private IP address
+func isPrivateIP(host string) bool {
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()
+}
+
 func (communication *HTTP) StartCommunication() common.SyncServiceError {
 	if common.Configuration.NodeType == common.CSS {
 		http.Handle(registerURL, http.StripPrefix(registerURL, http.HandlerFunc(communication.handleRegister)))
@@ -290,11 +382,13 @@ func (communication *HTTP) SendNotificationMessage(notificationTopic string, des
 	}
 
 	// ESS
-	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, instanceID, dataID, notificationTopic)
+	url, err := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, instanceID, dataID, notificationTopic)
+	if err != nil {
+		return err
+	}
 
 	var request *http.Request
 	var response *http.Response
-	var err error
 
 	for i := 0; i < common.Configuration.ESSSPIMaxRetry; i++ {
 		if notificationTopic == common.Update || notificationTopic == common.Delete || notificationTopic == common.Deleted {
@@ -541,7 +635,10 @@ func (communication *HTTP) registerOrPing(url string) common.SyncServiceError {
 		return nil
 	}
 
-	requestURL := buildRegisterOrPingURL(url, common.Configuration.OrgID, common.Configuration.DestinationType, common.Configuration.DestinationID)
+	requestURL, err := buildRegisterOrPingURL(url, common.Configuration.OrgID, common.Configuration.DestinationType, common.Configuration.DestinationID)
+	if err != nil {
+		return err
+	}
 	request, err := http.NewRequest("PUT", requestURL, nil)
 	if err != nil {
 		return &Error{"Failed to create HTTP request to register/ping. Error: " + err.Error()}
@@ -589,7 +686,10 @@ func (communication *HTTP) unregister(url string) common.SyncServiceError {
 	}
 
 	// 1. make call to /spi/v1/unregister, CSS will remove ESS from destination list
-	requestURL := buildUnregisterURL(url, common.Configuration.OrgID, common.Configuration.DestinationType, common.Configuration.DestinationID)
+	requestURL, err := buildUnregisterURL(url, common.Configuration.OrgID, common.Configuration.DestinationType, common.Configuration.DestinationID)
+	if err != nil {
+		return err
+	}
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("In unregister. request url: %s\n", requestURL)
 	}
@@ -753,7 +853,10 @@ func (communication *HTTP) GetAllData(metaData common.MetaData, offset int64) co
 	}
 	common.ObjectLocks.Unlock(lockIndex)
 
-	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, metaData.DataID, common.Data)
+	url, err := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, metaData.DataID, common.Data)
+	if err != nil {
+		return err
+	}
 	request, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return &Error{"Failed to create data request. Error: " + err.Error()}
@@ -964,7 +1067,10 @@ func (communication *HTTP) GetDataByChunk(metaData common.MetaData, offset int64
 		trace.Debug("In http.GetDataByChunk, for %s %s %s with offset %d, isFirstChunk: %t, isLastCHunk: %t\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, offset, isFirstChunk, isLastChunk)
 	}
 
-	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, metaData.DataID, common.Data)
+	url, err := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, metaData.DataID, common.Data)
+	if err != nil {
+		return err
+	}
 	request, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return &Error{"Failed to create data request. Error: " + err.Error()}
@@ -1845,10 +1951,12 @@ func (communication *HTTP) pushAllData(metaData *common.MetaData) common.SyncSer
 	common.ObjectLocks.RLock(lockIndex)
 	defer common.ObjectLocks.RUnlock(lockIndex)
 
-	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, metaData.DataID, common.Data)
+	url, err := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, metaData.DataID, common.Data)
+	if err != nil {
+		return err
+	}
 
 	var dataReader io.Reader
-	var err error
 	if metaData.SourceDataURI != "" {
 		dataReader, err = dataURI.GetData(metaData.SourceDataURI, false)
 	} else {
@@ -1956,7 +2064,10 @@ func (communication *HTTP) pushDataByChunk(metaData *common.MetaData, offset int
 		}
 	}
 
-	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, metaData.DataID, common.Data)
+	url, err := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, metaData.DataID, common.Data)
+	if err != nil {
+		return err
+	}
 
 	startOffset := offset
 	endOffset := offset + int64(metaData.ChunkSize) - 1
@@ -2058,7 +2169,10 @@ func (communication *HTTP) ResendObjects() common.SyncServiceError {
 		return nil
 	}
 
-	url := buildResendURL(common.Configuration.OrgID)
+	url, err := buildResendURL(common.Configuration.OrgID)
+	if err != nil {
+		return err
+	}
 	request, err := http.NewRequest("PUT", url, nil)
 	if err != nil {
 		return &Error{"Failed to create HTTP request to resend objects. Error: " + err.Error()}
@@ -2155,11 +2269,13 @@ func (communication *HTTP) SendFeedbackMessage(code int, retryInterval int32, re
 	if trace.IsLogging(logger.DEBUG) {
 		trace.Debug("SendFeedbackMessage: call feedback SPI %s %s %s instanceID: %d, dataID: %d\n", metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, metaData.DataID)
 	}
-	url := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, metaData.DataID, common.Feedback)
+	url, err := buildObjectURL(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID, metaData.InstanceID, metaData.DataID, common.Feedback)
+	if err != nil {
+		return err
+	}
 
 	var request *http.Request
 	var response *http.Response
-	var err error
 
 	body, err := json.MarshalIndent(feedbackMessage{code, retryInterval, reason}, "", "  ")
 	if err != nil {
@@ -2255,62 +2371,85 @@ func (communication *HTTP) SendErrorMessage(err common.SyncServiceError, metaDat
 	return communication.SendFeedbackMessage(code, retryInterval, reason, metaData, sendToOrigin)
 }
 
-func buildObjectURL(orgID string, objectType string, objectID string, instanceID int64, dataID int64, topic string) string {
-	// common.HTTPCSSURL + objectRequestURL + orgID + "/" + objectType + "/" + objectID + "/" + instanceID + "/" + dataID + "/" + topic
-	var strBuilder strings.Builder
-	strBuilder.Grow(len(common.HTTPCSSURL) + len(objectRequestURL) + len(orgID) + len(objectType) + len(objectID) + len(topic) + 45)
-	strBuilder.WriteString(common.HTTPCSSURL)
-	strBuilder.WriteString(objectRequestURL)
-	strBuilder.WriteString(orgID)
-	strBuilder.WriteByte('/')
-	strBuilder.WriteString(objectType)
-	strBuilder.WriteByte('/')
-	strBuilder.WriteString(objectID)
-	strBuilder.WriteByte('/')
-	strBuilder.WriteString(strconv.FormatInt(instanceID, 10))
-	strBuilder.WriteByte('/')
-	strBuilder.WriteString(strconv.FormatInt(dataID, 10))
-	strBuilder.WriteByte('/')
-	strBuilder.WriteString(topic)
-	return strBuilder.String()
+func buildObjectURL(orgID string, objectType string, objectID string, instanceID int64, dataID int64, topic string) (string, error) {
+	// Validate all string parameters
+	if err := validateURLParameter(orgID); err != nil {
+		return "", err
+	}
+	if err := validateURLParameter(objectType); err != nil {
+		return "", err
+	}
+	if err := validateURLParameter(objectID); err != nil {
+		return "", err
+	}
+	if err := validateURLParameter(topic); err != nil {
+		return "", err
+	}
+
+	// Build URL with validated components
+	return validateAndBuildURL(
+		common.HTTPCSSURL+objectRequestURL,
+		orgID,
+		objectType,
+		objectID,
+		strconv.FormatInt(instanceID, 10),
+		strconv.FormatInt(dataID, 10),
+		topic,
+	)
 }
 
-func buildResendURL(orgID string) string {
-	// common.HTTPCSSURL + objectRequestURL + orgID + "/" + common.Resend
-	var strBuilder strings.Builder
-	strBuilder.Grow(len(common.HTTPCSSURL) + len(objectRequestURL) + len(orgID) + len(common.Resend) + 1)
-	strBuilder.WriteString(common.HTTPCSSURL)
-	strBuilder.WriteString(objectRequestURL)
-	strBuilder.WriteString(orgID)
-	strBuilder.WriteByte('/')
-	strBuilder.WriteString(common.Resend)
-	return strBuilder.String()
+func buildResendURL(orgID string) (string, error) {
+	// Validate orgID parameter
+	if err := validateURLParameter(orgID); err != nil {
+		return "", err
+	}
+
+	// Build URL with validated components
+	return validateAndBuildURL(
+		common.HTTPCSSURL+objectRequestURL,
+		orgID,
+		common.Resend,
+	)
 }
 
-func buildRegisterOrPingURL(url string, orgID string, destType string, destID string) string {
-	// common.HTTPCSSURL + url + orgID + "/" + destType + "/" + destID
-	var strBuilder strings.Builder
-	strBuilder.Grow(len(common.HTTPCSSURL) + len(url) + len(orgID) + len(destType) + len(destID) + 2)
-	strBuilder.WriteString(common.HTTPCSSURL)
-	strBuilder.WriteString(url)
-	strBuilder.WriteString(orgID)
-	strBuilder.WriteByte('/')
-	strBuilder.WriteString(destType)
-	strBuilder.WriteByte('/')
-	strBuilder.WriteString(destID)
-	return strBuilder.String()
+func buildRegisterOrPingURL(url string, orgID string, destType string, destID string) (string, error) {
+	// Validate all string parameters
+	if err := validateURLParameter(orgID); err != nil {
+		return "", err
+	}
+	if err := validateURLParameter(destType); err != nil {
+		return "", err
+	}
+	if err := validateURLParameter(destID); err != nil {
+		return "", err
+	}
+
+	// Build URL with validated components
+	return validateAndBuildURL(
+		common.HTTPCSSURL+url,
+		orgID,
+		destType,
+		destID,
+	)
 }
 
-func buildUnregisterURL(url string, orgID string, destType string, destID string) string {
-	// common.HTTPCSSURL + unregister_url + orgID + "/" + destType + "/" + destID
-	var strBuilder strings.Builder
-	strBuilder.Grow(len(common.HTTPCSSURL) + len(url) + len(orgID) + len(destType) + len(destID) + 2)
-	strBuilder.WriteString(common.HTTPCSSURL)
-	strBuilder.WriteString(url)
-	strBuilder.WriteString(orgID)
-	strBuilder.WriteByte('/')
-	strBuilder.WriteString(destType)
-	strBuilder.WriteByte('/')
-	strBuilder.WriteString(destID)
-	return strBuilder.String()
+func buildUnregisterURL(url string, orgID string, destType string, destID string) (string, error) {
+	// Validate all string parameters
+	if err := validateURLParameter(orgID); err != nil {
+		return "", err
+	}
+	if err := validateURLParameter(destType); err != nil {
+		return "", err
+	}
+	if err := validateURLParameter(destID); err != nil {
+		return "", err
+	}
+
+	// Build URL with validated components
+	return validateAndBuildURL(
+		common.HTTPCSSURL+url,
+		orgID,
+		destType,
+		destID,
+	)
 }

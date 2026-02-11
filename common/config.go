@@ -85,6 +85,12 @@ type Config struct {
 	// to the PersistenceRootPath configuration property if it doesn't start with a slash (/).
 	ListeningAddress string `env:"LISTENING_ADDRESS"`
 
+	// UnixSocketFilePermissions specifies the file permissions for Unix socket files (octal format)
+	// Only applies when ListeningType is "unix" or "secure-unix"
+	// Default: 0660 (owner and group read/write)
+	// Example values: 0600 (owner only), 0666 (all users), 0660 (owner and group)
+	UnixSocketFilePermissions uint32 `env:"UNIX_SOCKET_FILE_PERMISSIONS"`
+
 	// SecureListeningPort specifies the port to listen on for HTTPS
 	SecureListeningPort uint16 `env:"SECURE_LISTENING_PORT"`
 
@@ -168,10 +174,16 @@ type Config struct {
 	// PersistenceRootPath configuration property if it doesn't start with a slash (/).
 	MQTTSSLKey string `env:"MQTT_SSL_KEY"`
 
-	// MQTTAllowInvalidCertificates specifies that the MQTT client will not attempt to validate the server certificates
-	// Please only set this for development purposes! It makes using TLS pointless and is never the right answer.
-	// Defaults to false
+	// MQTTAllowInvalidCertificates allows connections to MQTT broker with invalid certificates
+	// WARNING: This disables certificate validation and should NEVER be used in production!
+	// Only use for development/testing with self-signed certificates.
+	// Default: false
 	MQTTAllowInvalidCertificates bool `env:"MQTT_ALLOW_INVALID_CERTIFICATES"`
+
+	// MQTTPinnedCertFingerprints contains SHA256 fingerprints of pinned certificates (optional)
+	// Format: comma-separated hex strings (e.g., "abc123...,def456...")
+	// When set, only certificates matching these fingerprints will be accepted
+	MQTTPinnedCertFingerprints []string `env:"MQTT_PINNED_CERT_FINGERPRINTS"`
 
 	// MQTTBrokerConnectTimeout specifies the timeout (in seconds) of attempts to connect to the MQTT broker on startup
 	// Default value 300
@@ -185,6 +197,12 @@ type Config struct {
 	// Root path for storing persisted data.
 	//  Default value: /var/wiotp-edge/persist
 	PersistenceRootPath string `env:"PERSISTENCE_ROOT_PATH"`
+
+	// AllowedDataFileExtensions restricts which file types can be accessed via data URIs.
+	// Empty list means all extensions are allowed (default behavior).
+	// Example: [".txt", ".json", ".dat"]
+	// This provides additional protection against CWE-73 (External Control of File Name or Path)
+	AllowedDataFileExtensions []string `env:"ALLOWED_DATA_FILE_EXTENSIONS"`
 
 	// BrokerAddress specifies the address to connect to for the MQTT broker or
 	// a list of server URIs for environments with multiple MQTT brokers
@@ -281,6 +299,10 @@ type Config struct {
 	// A value of zero means ESSs are never removed
 	RemoveESSRegistrationTime int16 `env:"REMOVE_ESS_REGISTRATION_TIME"`
 
+	// AllowPrivateIPs specifies whether requests to private IP addresses are allowed
+	// Default is true for backward compatibility with existing deployments
+	AllowPrivateIPs bool `env:"ALLOW_PRIVATE_IPS"`
+
 	// EnableDataChunk specifies whether or not to transfer data in chunks between CSS and ESS
 	// It is always true for MQTT
 	EnableDataChunk bool `env:"ENABLE_DATA_CHUNK"`
@@ -321,9 +343,16 @@ type Config struct {
 	// PersistenceRootPath configuration property if it doesn't start with a slash (/).
 	MongoCACertificate string `env:"MONGO_CA_CERTIFICATE"`
 
-	// MongoAllowInvalidCertificates specifies that the mongo driver will not attempt to validate the server certificates.
-	// Please only set this for development purposes! It makes using TLS pointless and is never the right answer.
+	// MongoAllowInvalidCertificates allows connections to MongoDB with invalid certificates
+	// WARNING: This disables certificate validation and should NEVER be used in production!
+	// Only use for development/testing with self-signed certificates.
+	// Default: false
 	MongoAllowInvalidCertificates bool `env:"MONGO_ALLOW_INVALID_CERTIFICATES"`
+
+	// MongoPinnedCertFingerprints contains SHA256 fingerprints of pinned certificates (optional)
+	// Format: comma-separated hex strings
+	// When set, only certificates matching these fingerprints will be accepted
+	MongoPinnedCertFingerprints []string `env:"MONGO_PINNED_CERT_FINGERPRINTS"`
 
 	// MongoSessionCacheSize specifies the number of MongoDB session copies to use
 	MongoSessionCacheSize int `env:"MONGO_SESSION_CACHE_SIZE"`
@@ -368,6 +397,18 @@ type Config struct {
 	// The default is empty (not set) meaning that the object's data is persisted internally in a
 	// path selected by the Sync Service.
 	ObjectsDataPath string `env:"OBJECTS_DATA_PATH"`
+
+	// AllowedCertificateExtensions specifies the allowed file extensions for certificate files.
+	// This is used for path validation to prevent path traversal attacks (CWE-22).
+	// Extensions should include the leading dot (e.g., ".pem", ".crt", ".cert").
+	// Default value: [".pem", ".crt", ".cert"]
+	AllowedCertificateExtensions []string `env:"ALLOWED_CERTIFICATE_EXTENSIONS"`
+
+	// AllowedKeyExtensions specifies the allowed file extensions for private key files.
+	// This is used for path validation to prevent path traversal attacks (CWE-22).
+	// Extensions should include the leading dot (e.g., ".pem", ".key").
+	// Default value: [".pem", ".key"]
+	AllowedKeyExtensions []string `env:"ALLOWED_KEY_EXTENSIONS"`
 }
 
 // Configuration contains the read in configuration
@@ -728,6 +769,71 @@ func ValidateConfig() error {
 		Configuration.VerifyQueueBufferSize = 500
 	}
 
+	// Validate file paths to prevent path traversal attacks (CWE-22)
+	// Use configured allowed extensions or defaults if not set
+	certExtensions := Configuration.AllowedCertificateExtensions
+	if len(certExtensions) == 0 {
+		certExtensions = []string{".pem", ".crt", ".cert"}
+	}
+	keyExtensions := Configuration.AllowedKeyExtensions
+	if len(keyExtensions) == 0 {
+		keyExtensions = []string{".pem", ".key"}
+	}
+
+	// Validate server certificate and key paths (when serving APIs securely)
+	if (Configuration.ListeningType == ListeningSecurely || Configuration.ListeningType == ListeningBoth || Configuration.ListeningType == ListeningSecureUnix) &&
+		Configuration.NodeType == CSS {
+		if len(Configuration.ServerCertificate) > 0 && strings.HasPrefix(Configuration.ServerCertificate, "/") {
+			if _, err := ValidateFilePathWithExtension(Configuration.ServerCertificate, Configuration.PersistenceRootPath, certExtensions); err != nil {
+				return &configError{fmt.Sprintf("Invalid ServerCertificate path: %s", err)}
+			}
+		}
+		if len(Configuration.ServerKey) > 0 && strings.HasPrefix(Configuration.ServerKey, "/") {
+			if _, err := ValidateFilePathWithExtension(Configuration.ServerKey, Configuration.PersistenceRootPath, keyExtensions); err != nil {
+				return &configError{fmt.Sprintf("Invalid ServerKey path: %s", err)}
+			}
+		}
+	}
+
+	// Validate MQTT certificate paths (when using MQTT with SSL)
+	if mqtt && Configuration.MQTTUseSSL {
+		if len(Configuration.MQTTCACertificate) > 0 && strings.HasPrefix(Configuration.MQTTCACertificate, "/") {
+			if _, err := ValidateFilePathWithExtension(Configuration.MQTTCACertificate, Configuration.PersistenceRootPath, certExtensions); err != nil {
+				return &configError{fmt.Sprintf("Invalid MQTTCACertificate path: %s", err)}
+			}
+		}
+		if len(Configuration.MQTTSSLCert) > 0 && strings.HasPrefix(Configuration.MQTTSSLCert, "/") {
+			if _, err := ValidateFilePathWithExtension(Configuration.MQTTSSLCert, Configuration.PersistenceRootPath, certExtensions); err != nil {
+				return &configError{fmt.Sprintf("Invalid MQTTSSLCert path: %s", err)}
+			}
+		}
+		if len(Configuration.MQTTSSLKey) > 0 && strings.HasPrefix(Configuration.MQTTSSLKey, "/") {
+			if _, err := ValidateFilePathWithExtension(Configuration.MQTTSSLKey, Configuration.PersistenceRootPath, keyExtensions); err != nil {
+				return &configError{fmt.Sprintf("Invalid MQTTSSLKey path: %s", err)}
+			}
+		}
+	}
+
+	// Validate MongoDB certificate path (when using MongoDB with SSL)
+	if Configuration.StorageProvider == Mongo && Configuration.MongoUseSSL {
+		if len(Configuration.MongoCACertificate) > 0 && strings.HasPrefix(Configuration.MongoCACertificate, "/") {
+			if _, err := ValidateFilePathWithExtension(Configuration.MongoCACertificate, Configuration.PersistenceRootPath, certExtensions); err != nil {
+				return &configError{fmt.Sprintf("Invalid MongoCACertificate path: %s", err)}
+			}
+		}
+	}
+
+	// Validate Unix socket path (when using Unix sockets)
+	if Configuration.ListeningType == ListeningUnix || Configuration.ListeningType == ListeningSecureUnix {
+		if len(Configuration.ListeningAddress) > 0 && !strings.HasPrefix(Configuration.ListeningAddress, "/") {
+			// Relative path - validate against PersistenceRootPath
+			socketPath := Configuration.PersistenceRootPath + "/" + Configuration.ListeningAddress
+			if _, err := ValidateFilePath(socketPath, Configuration.PersistenceRootPath); err != nil {
+				return &configError{fmt.Sprintf("Invalid ListeningAddress (Unix socket) path: %s", err)}
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -795,4 +901,8 @@ func SetDefaultConfig(config *Config) {
 	config.MessagingGroupCacheExpiration = 60
 	config.ShutdownQuiesceTime = 60
 	config.ESSConsumedObjectsKept = 1000
+	config.AllowPrivateIPs = true
+	config.AllowedCertificateExtensions = []string{".pem", ".crt", ".cert"}
+	config.AllowedKeyExtensions = []string{".pem", ".key"}
+	config.UnixSocketFilePermissions = 0o660
 }
