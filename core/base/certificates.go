@@ -44,13 +44,28 @@ func setupCertificates() error {
 		if log.IsLogging(logger.INFO) {
 			log.Info("error from load key pair: %v\n", err)
 		}
-		_, err = tls.LoadX509KeyPair(common.Configuration.ServerCertificate, common.Configuration.ServerKey)
-		if err == nil {
-			// common.Configuration.ServerCertificate) and common.Configuration.ServerKey are path to pem file
-			if log.IsLogging(logger.INFO) {
-				log.Info("No error from load key pair from file, return nil error\n")
+		
+		// Validate certificate and key file paths to prevent path traversal attacks (CWE-22)
+		certExtensions := common.Configuration.AllowedCertificateExtensions
+		if len(certExtensions) == 0 {
+			certExtensions = []string{".pem", ".crt", ".cert"}
+		}
+		keyExtensions := common.Configuration.AllowedKeyExtensions
+		if len(keyExtensions) == 0 {
+			keyExtensions = []string{".pem", ".key"}
+		}
+		validatedCert, certPathErr := common.ValidateFilePathWithExtension(common.Configuration.ServerCertificate, common.Configuration.PersistenceRootPath, certExtensions)
+		validatedKey, keyPathErr := common.ValidateFilePathWithExtension(common.Configuration.ServerKey, common.Configuration.PersistenceRootPath, keyExtensions)
+		
+		if certPathErr == nil && keyPathErr == nil {
+			_, err = tls.LoadX509KeyPair(validatedCert, validatedKey)
+			if err == nil {
+				// common.Configuration.ServerCertificate) and common.Configuration.ServerKey are path to pem file
+				if log.IsLogging(logger.INFO) {
+					log.Info("No error from load key pair from file, return nil error\n")
+				}
+				return nil
 			}
-			return nil
 		}
 		if log.IsLogging(logger.INFO) {
 			log.Info("error from load cert and key file: %v\n", err)
@@ -89,6 +104,29 @@ func setupCertificates() error {
 		if err != nil {
 			return err
 		}
+
+
+	// Ensure private key is cleared from memory after use
+	defer func() {
+		if priv != nil && priv.D != nil {
+			// Zero out the private exponent
+			priv.D.SetInt64(0)
+			// Zero out primes
+			for _, prime := range priv.Primes {
+				prime.SetInt64(0)
+			}
+			// Zero out precomputed values
+			if priv.Precomputed.Dp != nil {
+				priv.Precomputed.Dp.SetInt64(0)
+			}
+			if priv.Precomputed.Dq != nil {
+				priv.Precomputed.Dq.SetInt64(0)
+			}
+			if priv.Precomputed.Qinv != nil {
+				priv.Precomputed.Qinv.SetInt64(0)
+			}
+		}
+	}()
 
 		template := x509.Certificate{
 			SerialNumber: serialNumber,

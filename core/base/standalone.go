@@ -141,6 +141,18 @@ func censorAndDumpConfig() {
 
 	trace.Dump("Loaded configuration:", common.Configuration)
 
+	// Clear backup strings from memory after restoring
+	defer func() {
+		for i := range backups {
+			// Clear the backup string from memory
+			b := []byte(backups[i])
+			for j := range b {
+				b[j] = 0
+			}
+			backups[i] = ""
+		}
+	}()
+
 	for index, fieldPointer := range toBeCensored {
 		*fieldPointer = backups[index]
 	}

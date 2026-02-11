@@ -1,6 +1,6 @@
 module github.com/open-horizon/edge-sync-service
 
-go 1.21
+go 1.23
 
 require (
 	github.com/eclipse/paho.mqtt.golang v1.4.3

@@ -377,18 +377,31 @@ func newTLSConfig() *tls.Config {
 		} else {
 			caCert = common.Configuration.PersistenceRootPath + common.Configuration.MQTTCACertificate
 		}
-		pemCerts, err := ioutil.ReadFile(caCert)
-		if err != nil {
-			if _, ok := err.(*os.PathError); ok {
-				pemCerts = []byte(common.Configuration.MQTTCACertificate)
-				err = nil
-			} else {
-				if log.IsLogging(logger.ERROR) {
-					log.Error(err.Error())
+		
+		// Validate certificate file path to prevent path traversal attacks (CWE-22)
+		var pemCerts []byte
+		certExtensions := common.Configuration.AllowedCertificateExtensions
+		if len(certExtensions) == 0 {
+			certExtensions = []string{".pem", ".crt", ".cert"}
+		}
+		validatedPath, pathErr := common.ValidateFilePathWithExtension(caCert, common.Configuration.PersistenceRootPath, certExtensions)
+		if pathErr != nil {
+			// If path validation fails, treat as certificate content rather than file path
+			pemCerts = []byte(common.Configuration.MQTTCACertificate)
+		} else {
+			var readErr error
+			pemCerts, readErr = ioutil.ReadFile(validatedPath)
+			if readErr != nil {
+				if _, ok := readErr.(*os.PathError); ok {
+					pemCerts = []byte(common.Configuration.MQTTCACertificate)
+				} else {
+					if log.IsLogging(logger.ERROR) {
+						log.Error(readErr.Error())
+					}
 				}
 			}
 		}
-		if err == nil {
+		if len(pemCerts) > 0 {
 			certpool.AppendCertsFromPEM(pemCerts)
 		}
 		tlsConfig.RootCAs = certpool
@@ -407,16 +420,35 @@ func newTLSConfig() *tls.Config {
 			key = common.Configuration.PersistenceRootPath + common.Configuration.MQTTSSLKey
 		}
 
-		clientCert, err := tls.LoadX509KeyPair(cert, key)
-		if err != nil {
-			if _, ok := err.(*os.PathError); ok {
-				// The ServerCertificate and ServerKey are likely pem file contents
-				clientCert, err = tls.X509KeyPair([]byte(common.Configuration.MQTTSSLCert), []byte(common.Configuration.MQTTSSLKey))
-			}
+		// Validate certificate and key file paths to prevent path traversal attacks (CWE-22)
+		certExtensions := common.Configuration.AllowedCertificateExtensions
+		if len(certExtensions) == 0 {
+			certExtensions = []string{".pem", ".crt", ".cert"}
+		}
+		keyExtensions := common.Configuration.AllowedKeyExtensions
+		if len(keyExtensions) == 0 {
+			keyExtensions = []string{".pem", ".key"}
+		}
+		validatedCert, certPathErr := common.ValidateFilePathWithExtension(cert, common.Configuration.PersistenceRootPath, certExtensions)
+		validatedKey, keyPathErr := common.ValidateFilePathWithExtension(key, common.Configuration.PersistenceRootPath, keyExtensions)
+		
+		var clientCert tls.Certificate
+		var err error
+		if certPathErr != nil || keyPathErr != nil {
+			// If path validation fails, treat as certificate content
+			clientCert, err = tls.X509KeyPair([]byte(common.Configuration.MQTTSSLCert), []byte(common.Configuration.MQTTSSLKey))
+		} else {
+			clientCert, err = tls.LoadX509KeyPair(validatedCert, validatedKey)
 			if err != nil {
-				if log.IsLogging(logger.ERROR) {
-					log.Error(err.Error())
+				if _, ok := err.(*os.PathError); ok {
+					// The ServerCertificate and ServerKey are likely pem file contents
+					clientCert, err = tls.X509KeyPair([]byte(common.Configuration.MQTTSSLCert), []byte(common.Configuration.MQTTSSLKey))
 				}
+			}
+		}
+		if err != nil {
+			if log.IsLogging(logger.ERROR) {
+				log.Error(err.Error())
 			}
 		}
 
@@ -427,7 +459,39 @@ func newTLSConfig() *tls.Config {
 
 	// Please avoid using this if possible! Makes using TLS pointless
 	if common.Configuration.MQTTAllowInvalidCertificates {
-		tlsConfig.InsecureSkipVerify = true
+		// SECURITY WARNING: Certificate validation is DISABLED!
+		// This should NEVER be used in production environments.
+		// This configuration makes the connection vulnerable to MITM attacks.
+		
+		if log.IsLogging(logger.ERROR) {
+			log.Error("SECURITY CRITICAL: MQTT certificate validation is DISABLED! Connection is vulnerable to MITM attacks. Set MQTTAllowInvalidCertificates=false for production.")
+		}
+		
+		// Prevent use on CSS (Cloud Sync Service) nodes
+		if common.Configuration.NodeType == common.CSS {
+			if log.IsLogging(logger.ERROR) {
+				log.Error("MQTTAllowInvalidCertificates cannot be enabled on CSS nodes for security reasons")
+			}
+			// Return a secure config instead of allowing insecure mode
+			tlsConfig.InsecureSkipVerify = false
+		} else {
+			// Log every connection attempt with disabled validation
+			if trace.IsLogging(logger.WARNING) {
+				trace.Warning("Connecting to MQTT broker with certificate validation DISABLED")
+			}
+			
+			tlsConfig.InsecureSkipVerify = true
+		}
+	}
+
+	// Optional: Certificate pinning for enhanced security
+	if len(common.Configuration.MQTTPinnedCertFingerprints) > 0 {
+		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+			return common.VerifyPinnedCertificate(rawCerts, common.Configuration.MQTTPinnedCertFingerprints)
+		}
+		if trace.IsLogging(logger.INFO) {
+			trace.Info("MQTT certificate pinning enabled with %d fingerprint(s)", len(common.Configuration.MQTTPinnedCertFingerprints))
+		}
 	}
 
 	return &tlsConfig
@@ -481,7 +545,15 @@ func (communication *MQTT) createClients() ([]clientInfo, common.SyncServiceErro
 
 	clients := make([]clientInfo, 0)
 	usernames := make([]string, 0)
-	passwords := make([]string, 0)
+	passwords := make([]*common.SecureString, 0)
+	// Ensure passwords are cleared when function exits
+	defer func() {
+		for _, pwd := range passwords {
+			if pwd != nil {
+				pwd.Clear()
+			}
+		}
+	}()
 	var orgs []common.StoredOrganization
 	// If BrokerAddress is a JSON array, it contains multiple broker addresses and
 	// the messaging group name. Otherwise it contains a single broker address.
@@ -499,7 +571,7 @@ func (communication *MQTT) createClients() ([]clientInfo, common.SyncServiceErro
 			mg := clientInfo{name: group.MessagingGroup, clientID: common.Configuration.MQTTClientID}
 			clients = append(clients, mg)
 			usernames = append(usernames, common.Configuration.MQTTUserName)
-			passwords = append(passwords, common.Configuration.MQTTPassword)
+			passwords = append(passwords, common.NewSecureString(common.Configuration.MQTTPassword))
 			communication.serverURIs = append(communication.serverURIs, make([]string, 0))
 			for _, brokerURI := range group.ServerURIs {
 				communication.serverURIs[i] = append(communication.serverURIs[i], brokerURI)
@@ -539,7 +611,7 @@ func (communication *MQTT) createClients() ([]clientInfo, common.SyncServiceErro
 				clientInfo := clientInfo{name: org.Org.OrgID, clientID: "A:" + org.Org.OrgID + ":CSS", timestamp: org.Timestamp}
 				clients = append(clients, clientInfo)
 				usernames = append(usernames, org.Org.User)
-				passwords = append(passwords, org.Org.Password)
+				passwords = append(passwords, common.NewSecureString(org.Org.Password))
 				communication.orgToClient[org.Org.OrgID] = &clientInfo
 			}
 		} else if common.SingleOrgCSS || common.Configuration.NodeType == common.ESS {
@@ -552,7 +624,7 @@ func (communication *MQTT) createClients() ([]clientInfo, common.SyncServiceErro
 			}
 			clientInfo := clientInfo{name: name, clientID: common.Configuration.MQTTClientID}
 			usernames = append(usernames, common.Configuration.MQTTUserName)
-			passwords = append(passwords, common.Configuration.MQTTPassword)
+			passwords = append(passwords, common.NewSecureString(common.Configuration.MQTTPassword))
 
 			clients = append(clients, clientInfo)
 			if common.SingleOrgCSS {
@@ -580,7 +652,7 @@ func (communication *MQTT) createClients() ([]clientInfo, common.SyncServiceErro
 	return clients, nil
 }
 
-func (context *mqttClientContext) createAndConnectClient(clientInfo clientInfo, username string, password string, servers []string) (mqtt.Client, common.SyncServiceError) {
+func (context *mqttClientContext) createAndConnectClient(clientInfo clientInfo, username string, password *common.SecureString, servers []string) (mqtt.Client, common.SyncServiceError) {
 	opts := mqtt.NewClientOptions()
 	opts.SetClientID(clientInfo.clientID)
 	opts.SetKeepAlive(120 * time.Second)
@@ -595,7 +667,7 @@ func (context *mqttClientContext) createAndConnectClient(clientInfo clientInfo, 
 	opts.SetConnectionLostHandler(context.onConnectionLost)
 	opts.SetMaxReconnectInterval(30 * time.Second)
 	opts.Username = username
-	opts.Password = password
+	opts.Password = password.String() // Only convert when needed
 
 	if common.Configuration.MQTTUseSSL {
 		opts.SetTLSConfig(newTLSConfig())
@@ -641,9 +713,9 @@ func (context *mqttClientContext) onConnectionLost(client mqtt.Client, err error
 // Check if the organization exists (i.e. that it wasn't deleted by another CSS).
 // Return true if the organization exists, and return its username and password.
 // Return false otherwise.
-func (communication *MQTT) checkIfOrgExists(client mqtt.Client) (exists bool, username string, password string) {
+func (communication *MQTT) checkIfOrgExists(client mqtt.Client) (exists bool, username string, password *common.SecureString) {
 	if common.Configuration.NodeType == common.ESS || common.Configuration.CSSOnWIoTP || common.SingleOrgCSS {
-		return true, common.Configuration.MQTTUserName, common.Configuration.MQTTPassword
+		return true, common.Configuration.MQTTUserName, common.NewSecureString(common.Configuration.MQTTPassword)
 	}
 	communication.lock.RLock()
 	defer communication.lock.RUnlock()
@@ -653,13 +725,13 @@ func (communication *MQTT) checkIfOrgExists(client mqtt.Client) (exists bool, us
 			org := c.name
 			orgInfo, err := Store.RetrieveOrganizationInfo(org)
 			if orgInfo != nil && err == nil {
-				return true, orgInfo.Org.User, orgInfo.Org.Password
+				return true, orgInfo.Org.User, common.NewSecureString(orgInfo.Org.Password)
 			}
 			communication.DeleteOrganization(org)
-			return false, "", ""
+			return false, "", nil
 		}
 	}
-	return false, "", ""
+	return false, "", nil
 }
 
 func (context *mqttClientContext) subscribe() {
@@ -670,6 +742,11 @@ func (context *mqttClientContext) subscribe() {
 		if !exists {
 			return
 		}
+		defer func() {
+			if password != nil {
+				password.Clear()
+			}
+		}()
 
 		common.HealthStatus.SubscribeFailed()
 
@@ -1354,7 +1431,10 @@ func (communication *MQTT) UpdateOrganization(org common.Organization, timestamp
 		communication.serverURIs[index] = append(communication.serverURIs[index], brokerURI)
 		currentContext = mqttClientContext{name: org.OrgID, communicator: communication}
 	}
-	c, err := currentContext.createAndConnectClient(clientInfo, org.User, org.Password, communication.serverURIs[index])
+	password := common.NewSecureString(org.Password)
+	defer password.Clear()
+	
+	c, err := currentContext.createAndConnectClient(clientInfo, org.User, password, communication.serverURIs[index])
 	if err != nil {
 		return err
 	}

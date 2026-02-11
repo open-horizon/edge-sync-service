@@ -12,6 +12,8 @@ Users of the sync service can create/update an object in the cloud and the objec
 Similarly, an object can be updated on the edge and delivered to the cloud. 
 Example use cases include synchronization of configuration, rules and actions, user preferences, AI models, monitoring statistics, deployment files, and more.
 
+**Requirements**: Go 1.23 or higher
+
 ### Sync service components
 The sync service has two components:
 1. Cloud Sync Service (CSS) running in the cloud. The CSS supports multi-tenants, high availability, and load balancing.

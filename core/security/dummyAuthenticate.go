@@ -53,7 +53,20 @@ type authInfo struct {
 
 // Start initializes the DummyAuthenticate struct
 func (auth *DummyAuthenticate) Start() {
-	authFile, err := os.Open(common.Configuration.PersistenceRootPath + dummyAuthFilename)
+	// Validate auth file path to prevent path traversal attacks (CWE-22)
+	authFilePath := common.Configuration.PersistenceRootPath + dummyAuthFilename
+	validatedPath, err := common.ValidateFilePath(authFilePath, common.Configuration.PersistenceRootPath)
+	if err != nil {
+		if log.IsLogging(logger.WARNING) {
+			log.Warning("Invalid auth file path. Error: %s\n", err)
+		}
+		auth.regularUsers = make([]string, 0)
+		auth.syncAdmins = make([]string, 0)
+		auth.exchangeAdmins = make([]string, 0)
+		return
+	}
+
+	authFile, err := os.Open(validatedPath)
 	if err != nil {
 		if log.IsLogging(logger.WARNING) {
 			if os.IsNotExist(err) {

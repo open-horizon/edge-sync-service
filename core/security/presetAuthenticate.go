@@ -46,23 +46,102 @@ const presetAuthFilename = "/sync/preset-auth.json"
 
 // CredentialInfo is the information related to an app key
 type CredentialInfo struct {
-	Username string `json:"username"`
-	Secret   string `json:"secret"`
-	OrgID    string `json:"orgID"`
-	Type     string `json:"type"`
+	Username string               `json:"username"`
+	secret   *common.SecureString // Use SecureString instead of string
+	OrgID    string               `json:"orgID"`
+	Type     string               `json:"type"`
 	code     int
+}
+
+// UnmarshalJSON custom unmarshaler to handle secret as SecureString
+func (ci *CredentialInfo) UnmarshalJSON(data []byte) error {
+	type Alias CredentialInfo
+	aux := &struct {
+		Secret string `json:"secret"`
+		*Alias
+	}{
+		Alias: (*Alias)(ci),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	ci.secret = common.NewSecureString(aux.Secret)
+	// Clear the temporary string
+	common.ClearString(&aux.Secret)
+	return nil
+}
+
+// GetSecret returns the secret value (use sparingly)
+func (ci *CredentialInfo) GetSecret() string {
+	if ci.secret == nil {
+		return ""
+	}
+	return ci.secret.String()
+}
+
+// Clear securely wipes sensitive data
+func (ci *CredentialInfo) Clear() {
+	if ci.secret != nil {
+		ci.secret.Clear()
+		ci.secret = nil
+	}
 }
 
 // CSSCredentials defines the appkey and appsecret used to communicate with the CSS
 type CSSCredentials struct {
-	AppKey    string `json:"key"`
-	AppSecret string `json:"secret"`
+	AppKey    string               `json:"key"`
+	appSecret *common.SecureString // Use SecureString instead of string
+}
+
+// UnmarshalJSON custom unmarshaler for CSSCredentials
+func (cc *CSSCredentials) UnmarshalJSON(data []byte) error {
+	type Alias CSSCredentials
+	aux := &struct {
+		AppSecret string `json:"secret"`
+		*Alias
+	}{
+		Alias: (*Alias)(cc),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	cc.appSecret = common.NewSecureString(aux.AppSecret)
+	// Clear the temporary string
+	common.ClearString(&aux.AppSecret)
+	return nil
+}
+
+// GetAppSecret returns the app secret value (use sparingly)
+func (cc *CSSCredentials) GetAppSecret() string {
+	if cc.appSecret == nil {
+		return ""
+	}
+	return cc.appSecret.String()
+}
+
+// Clear securely wipes sensitive data
+func (cc *CSSCredentials) Clear() {
+	if cc.appSecret != nil {
+		cc.appSecret.Clear()
+		cc.appSecret = nil
+	}
 }
 
 // Start initializes the PresetAuthenticate struct
 func (auth *PresetAuthenticate) Start() {
 	if auth.Credentials == nil && 0 == len(auth.CSSCredentials.AppKey) {
-		authFile, err := os.Open(common.Configuration.PersistenceRootPath + presetAuthFilename)
+		// Validate auth file path to prevent path traversal attacks (CWE-22)
+		authFilePath := common.Configuration.PersistenceRootPath + presetAuthFilename
+		validatedPath, err := common.ValidateFilePath(authFilePath, common.Configuration.PersistenceRootPath)
+		if err != nil {
+			if log.IsLogging(logger.WARNING) {
+				log.Warning("Invalid auth file path. Error: %s\n", err)
+			}
+			auth.Credentials = make(map[string]CredentialInfo)
+			return
+		}
+
+		authFile, err := os.Open(validatedPath)
 		if err != nil {
 			if log.IsLogging(logger.WARNING) {
 				log.Warning("Failed to open user file. Error: %s\n", err)
@@ -111,8 +190,12 @@ func (auth *PresetAuthenticate) Authenticate(request *http.Request) (int, string
 		return AuthFailed, "", ""
 	}
 
+	// Use SecureString for appSecret
+	secureSecret := common.NewSecureString(appSecret)
+	defer secureSecret.Clear()
+
 	if info, ok := auth.Credentials[appKey]; ok {
-		if appSecret != info.Secret {
+		if secureSecret.String() != info.GetSecret() {
 			return AuthFailed, "", ""
 		}
 		return info.code, info.OrgID, info.Username
@@ -126,7 +209,7 @@ func (auth *PresetAuthenticate) Authenticate(request *http.Request) (int, string
 func (auth *PresetAuthenticate) KeyandSecretForURL(url string) (string, string) {
 	if strings.HasPrefix(url, common.HTTPCSSURL) {
 		// Return credentials for communicating with the CSS
-		return auth.CSSCredentials.AppKey, auth.CSSCredentials.AppSecret
+		return auth.CSSCredentials.AppKey, auth.CSSCredentials.GetAppSecret()
 	}
 	return "", ""
 }

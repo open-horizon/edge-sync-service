@@ -130,11 +130,30 @@ func (dataVerifier *DataVerifier) RemoveUnverifiedData(metaData common.MetaData)
 }
 
 func (dataVerifier *DataVerifier) verifyHelper(publicKeyBytes []byte, signatureBytes []byte) (bool, common.SyncServiceError) {
+	// Clear sensitive data after use
+	defer func() {
+		// Zero out public key bytes
+		for i := range publicKeyBytes {
+			publicKeyBytes[i] = 0
+		}
+		// Zero out signature bytes
+		for i := range signatureBytes {
+			signatureBytes[i] = 0
+		}
+	}()
+	
 	dataHashSum := dataVerifier.dataHash.Sum(nil)
 	if pubKey, err := x509.ParsePKIXPublicKey(publicKeyBytes); err != nil {
 		return false, &common.InternalError{Message: "Failed to parse public key, Error: " + err.Error()}
 	} else {
 		pubKeyToUse := pubKey.(*rsa.PublicKey)
+		defer func() {
+			// Clear public key components
+			if pubKeyToUse.N != nil {
+				pubKeyToUse.N.SetInt64(0)
+			}
+		}()
+		
 		if err = rsa.VerifyPSS(pubKeyToUse, dataVerifier.cryptoHashType, dataHashSum, signatureBytes, nil); err != nil {
 			return false, &common.InternalError{Message: "Failed to verify data with public key and data signature, Error: " + err.Error()}
 		}

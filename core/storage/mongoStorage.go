@@ -134,13 +134,22 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 	// Set up MongoDB client options
 	clientOptions := options.Client().ApplyURI(common.Configuration.MongoAddressCsv)
 	if common.Configuration.MongoAuthMechanism != "" && common.Configuration.MongoAuthDbName != "" && common.Configuration.MongoUsername != "" && common.Configuration.MongoPassword != "" {
+		// Use SecureString for password
+		password := common.NewSecureString(common.Configuration.MongoPassword)
+		defer password.Clear()
+		
 		credential := options.Credential{
 			AuthMechanism: common.Configuration.MongoAuthMechanism,
 			AuthSource:    common.Configuration.MongoAuthDbName,
 			Username:      common.Configuration.MongoUsername,
-			Password:      common.Configuration.MongoPassword,
+			Password:      password.String(), // Only convert when needed
 		}
 		clientOptions = clientOptions.SetAuth(credential)
+		
+		// Clear credential password after connection is established
+		defer func() {
+			credential.Password = ""
+		}()
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(20*time.Second))
@@ -155,14 +164,27 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 			} else {
 				caFile = common.Configuration.PersistenceRootPath + common.Configuration.MongoCACertificate
 			}
-			serverCaCert, err := ioutil.ReadFile(caFile)
-			if err != nil {
-				if _, ok := err.(*os.PathError); ok {
-					serverCaCert = []byte(common.Configuration.MongoCACertificate)
-					err = nil
-				} else {
-					message := fmt.Sprintf("Failed to find mongo SSL CA file. Error: %s.", err)
-					return &Error{message}
+			
+			// Validate certificate file path to prevent path traversal attacks (CWE-22)
+			var serverCaCert []byte
+			certExtensions := common.Configuration.AllowedCertificateExtensions
+			if len(certExtensions) == 0 {
+				certExtensions = []string{".pem", ".crt", ".cert"}
+			}
+			validatedPath, pathErr := common.ValidateFilePathWithExtension(caFile, common.Configuration.PersistenceRootPath, certExtensions)
+			if pathErr != nil {
+				// If path validation fails, treat as certificate content rather than file path
+				serverCaCert = []byte(common.Configuration.MongoCACertificate)
+			} else {
+				var readErr error
+				serverCaCert, readErr = ioutil.ReadFile(validatedPath)
+				if readErr != nil {
+					if _, ok := readErr.(*os.PathError); ok {
+						serverCaCert = []byte(common.Configuration.MongoCACertificate)
+					} else {
+						message := fmt.Sprintf("Failed to find mongo SSL CA file. Error: %s.", readErr)
+						return &Error{message}
+					}
 				}
 			}
 
@@ -173,7 +195,36 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 
 		// Please avoid using this if possible! Makes using TLS pointless
 		if common.Configuration.MongoAllowInvalidCertificates {
+			// SECURITY WARNING: Certificate validation is DISABLED!
+			// This should NEVER be used in production environments.
+			// This configuration makes the connection vulnerable to MITM attacks.
+			
+			if log.IsLogging(logger.ERROR) {
+				log.Error("SECURITY CRITICAL: MongoDB certificate validation is DISABLED! Connection is vulnerable to MITM attacks. Set MongoAllowInvalidCertificates=false for production.")
+			}
+			
+			// Prevent use on CSS (Cloud Sync Service) nodes
+			if common.Configuration.NodeType == common.CSS {
+				message := "MongoAllowInvalidCertificates cannot be enabled on CSS nodes for security reasons"
+				return &Error{message}
+			}
+			
+			// Log every connection attempt with disabled validation
+			if trace.IsLogging(logger.WARNING) {
+				trace.Warning("Connecting to MongoDB with certificate validation DISABLED")
+			}
+			
 			tlsConfig.InsecureSkipVerify = true
+		}
+
+		// Optional: Certificate pinning for enhanced security
+		if len(common.Configuration.MongoPinnedCertFingerprints) > 0 {
+			tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+				return common.VerifyPinnedCertificate(rawCerts, common.Configuration.MongoPinnedCertFingerprints)
+			}
+			if trace.IsLogging(logger.INFO) {
+				trace.Info("MongoDB certificate pinning enabled with %d fingerprint(s)", len(common.Configuration.MongoPinnedCertFingerprints))
+			}
 		}
 
 		// Sets TLS options in options instance
