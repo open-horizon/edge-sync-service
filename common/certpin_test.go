@@ -40,6 +40,14 @@ func generateTestCertificate() ([]byte, string, error) {
 	return certDER, fingerprintHex, nil
 }
 
+// TestVerifyPinnedCertificate_CaseInsensitive tests certificate fingerprint matching with case variations:
+// - Uppercase fingerprint matching
+// - Mixed case fingerprint handling
+// - Case-insensitive comparison
+//
+// This ensures that certificate pinning works regardless of fingerprint case,
+// improving usability while maintaining security. Fingerprints are often
+// displayed in different cases by various tools.
 func TestVerifyPinnedCertificate_CaseInsensitive(t *testing.T) {
 	certDER, fingerprint, err := generateTestCertificate()
 	if err != nil {
@@ -62,6 +70,14 @@ func TestVerifyPinnedCertificate_CaseInsensitive(t *testing.T) {
 	}
 }
 
+// TestVerifyPinnedCertificate_InvalidCertificate tests handling of invalid certificate data:
+// - Malformed certificate bytes
+// - Non-certificate data
+// - Corrupted certificate structures
+//
+// This ensures that certificate pinning fails gracefully when presented with
+// invalid certificate data, preventing potential security bypasses through
+// malformed input.
 func TestVerifyPinnedCertificate_InvalidCertificate(t *testing.T) {
 	// Invalid certificate data
 	invalidCert := []byte("not-a-certificate")
@@ -72,6 +88,14 @@ func TestVerifyPinnedCertificate_InvalidCertificate(t *testing.T) {
 	}
 }
 
+// TestVerifyPinnedCertificate_MatchingFingerprint tests successful certificate pinning:
+// - Exact fingerprint match
+// - Valid certificate with matching SHA256 fingerprint
+// - Successful verification flow
+//
+// This is the primary happy path test ensuring that certificate pinning works
+// correctly when a valid certificate matches the configured fingerprint.
+// Critical for TLS security and preventing man-in-the-middle attacks.
 func TestVerifyPinnedCertificate_MatchingFingerprint(t *testing.T) {
 	certDER, fingerprint, err := generateTestCertificate()
 	if err != nil {
@@ -85,6 +109,14 @@ func TestVerifyPinnedCertificate_MatchingFingerprint(t *testing.T) {
 	}
 }
 
+// TestVerifyPinnedCertificate_MultipleCertificates tests certificate chain validation:
+// - Multiple certificates in chain
+// - Only first certificate needs to match pinned fingerprint
+// - Certificate chain traversal
+//
+// This ensures that certificate pinning works correctly with certificate chains,
+// where only the leaf certificate (first in chain) needs to match the pinned
+// fingerprint. Important for TLS connections with intermediate certificates.
 func TestVerifyPinnedCertificate_MultipleCertificates(t *testing.T) {
 	// Generate two certificates
 	cert1DER, fingerprint1, err := generateTestCertificate()
@@ -104,6 +136,14 @@ func TestVerifyPinnedCertificate_MultipleCertificates(t *testing.T) {
 	}
 }
 
+// TestVerifyPinnedCertificate_MultipleFingerprints tests certificate pinning with multiple allowed fingerprints:
+// - Multiple pinned fingerprints configured
+// - Certificate matches one of several fingerprints
+// - Fingerprint list traversal
+//
+// This supports certificate rotation scenarios where multiple valid certificates
+// may be in use simultaneously. Allows gradual certificate updates without
+// service disruption. Critical for zero-downtime certificate rotation.
 func TestVerifyPinnedCertificate_MultipleFingerprints(t *testing.T) {
 	certDER, fingerprint, err := generateTestCertificate()
 	if err != nil {
@@ -123,6 +163,14 @@ func TestVerifyPinnedCertificate_MultipleFingerprints(t *testing.T) {
 	}
 }
 
+// TestVerifyPinnedCertificate_NoFingerprints tests behavior when no fingerprints are configured:
+// - Empty fingerprint list
+// - Certificate pinning disabled
+// - Permissive mode (allows any certificate)
+//
+// This tests the default behavior when certificate pinning is not configured.
+// When no fingerprints are specified, any valid certificate is accepted.
+// Important for backward compatibility and optional security features.
 func TestVerifyPinnedCertificate_NoFingerprints(t *testing.T) {
 	certDER, _, err := generateTestCertificate()
 	if err != nil {
@@ -136,6 +184,14 @@ func TestVerifyPinnedCertificate_NoFingerprints(t *testing.T) {
 	}
 }
 
+// TestVerifyPinnedCertificate_NonMatchingFingerprint tests certificate rejection with non-matching fingerprint:
+// - Certificate with different fingerprint than configured
+// - Fingerprint mismatch detection
+// - Security enforcement (reject invalid certificates)
+//
+// This is a critical security test ensuring that certificates with non-matching
+// fingerprints are rejected, preventing man-in-the-middle attacks and unauthorized
+// certificate substitution. Validates the core security function of certificate pinning.
 func TestVerifyPinnedCertificate_NonMatchingFingerprint(t *testing.T) {
 	certDER, _, err := generateTestCertificate()
 	if err != nil {
@@ -149,6 +205,14 @@ func TestVerifyPinnedCertificate_NonMatchingFingerprint(t *testing.T) {
 	}
 }
 
+// TestVerifyPinnedCertificate_WithWhitespace tests fingerprint matching with whitespace handling:
+// - Leading whitespace in fingerprint
+// - Trailing whitespace in fingerprint
+// - Whitespace trimming before comparison
+//
+// This ensures that certificate pinning is resilient to common configuration errors
+// where fingerprints may have accidental whitespace. Improves usability by automatically
+// trimming whitespace while maintaining security.
 func TestVerifyPinnedCertificate_WithWhitespace(t *testing.T) {
 	certDER, fingerprint, err := generateTestCertificate()
 	if err != nil {

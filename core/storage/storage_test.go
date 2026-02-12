@@ -10,6 +10,19 @@ import (
 	"github.com/open-horizon/edge-sync-service/common"
 )
 
+// testStorageObjects tests basic object storage operations:
+// - Storing new objects with various metadata configurations
+// - Retrieving objects and verifying metadata integrity
+// - Updating objects and verifying instance ID incrementation
+// - Managing object consumers (expected, remaining, decrement, reset)
+// - Marking objects as deleted and verifying status changes
+// - Activating inactive objects
+// - Updating and retrieving object status
+//
+// This is a comprehensive test covering the core object lifecycle in the storage layer,
+// ensuring that metadata is preserved correctly, instance IDs are managed properly for
+// versioning, and consumer tracking works as expected for multi-consumer scenarios.
+// Critical for ensuring data integrity across all storage backends (InMemory, Bolt, Mongo).
 func testStorageObjects(storageType string, t *testing.T) {
 	store, err := setUpStorage(storageType)
 	if err != nil {
@@ -238,6 +251,18 @@ func testStorageObjects(storageType string, t *testing.T) {
 	}
 }
 
+// testStorageObjectsWithPolicy tests object storage with destination policies:
+// - Storing objects with destination policies containing properties, constraints, and services
+// - Retrieving objects and verifying policy integrity
+// - Policy timestamp incrementation on updates
+// - Retrieving objects with destination policies (received vs not received)
+// - Marking destination policies as received
+// - Filtering objects by service organization and service name
+//
+// This ensures that destination policies are correctly stored, retrieved, and managed,
+// which is critical for policy-based object routing in edge computing scenarios.
+// Destination policies determine which edge nodes should receive specific objects
+// based on their properties and constraints.
 func testStorageObjectsWithPolicy(storageType string, t *testing.T) {
 	store, err := setUpStorage(storageType)
 	if err != nil {
@@ -425,6 +450,20 @@ func testStorageObjectsWithPolicy(storageType string, t *testing.T) {
 	}
 }
 
+// testGetObjectWithFilters tests object retrieval with various filter combinations:
+// - Filtering by destination policy presence/absence
+// - Filtering by service organization and service name
+// - Filtering by property names in destination policies
+// - Filtering by object type and object ID
+// - Filtering by destination type and destination ID
+// - Filtering by NoData flag
+// - Filtering by expiration time
+// - Filtering by deleted flag
+//
+// This comprehensive test ensures that the RetrieveObjectsWithFilters function
+// correctly applies all filter combinations, which is critical for efficient
+// object queries in large-scale deployments. Proper filtering reduces network
+// traffic and improves performance by returning only relevant objects.
 func testGetObjectWithFilters(storageType string, t *testing.T) {
 	store, err := setUpStorage(storageType)
 	if err != nil {
@@ -721,6 +760,18 @@ func testGetObjectWithFilters(storageType string, t *testing.T) {
 
 }
 
+// testStorageObjectActivation tests time-based object activation:
+// - Objects with activation times in the future remain inactive
+// - GetObjectsToActivate returns objects whose activation time has passed
+// - Objects are activated at the correct time
+// - Multiple objects with different activation times are handled correctly
+//
+// This ensures that the time-based activation mechanism works correctly,
+// allowing objects to be scheduled for future activation. Critical for
+// scenarios where objects should only become available at specific times,
+// such as scheduled updates or time-sensitive data distribution.
+//
+// Run with: go test -v
 func testStorageObjectActivation(storageType string, t *testing.T) {
 	store, err := setUpStorage(storageType)
 	if err != nil {
@@ -796,6 +847,20 @@ func testStorageObjectActivation(storageType string, t *testing.T) {
 	}
 }
 
+// testStorageObjectData tests object data storage and retrieval:
+// - Storing objects with data
+// - Retrieving object data and verifying content
+// - Reading data with offsets and size limits
+// - Storing new data (replacing existing data)
+// - Appending data chunks
+// - Handling MetaOnly objects (metadata without data)
+// - Retrieving updated objects
+// - Retrieving objects for specific destinations
+//
+// This comprehensive test ensures that object data is correctly stored,
+// retrieved, and managed across different storage backends. Covers both
+// full data replacement and incremental data appending, which is critical
+// for efficient large file transfers in edge computing scenarios.
 func testStorageObjectData(storageType string, t *testing.T) {
 	store, err := setUpStorage(storageType)
 	if err != nil {
@@ -1021,6 +1086,19 @@ func testStorageObjectData(storageType string, t *testing.T) {
 	}
 }
 
+// testStorageNotifications tests notification record management:
+// - Creating notification records with various statuses
+// - Retrieving notification records by destination
+// - Updating notification records
+// - Verifying notification metadata (status, instance ID, resend time)
+// - Retrieving notifications for specific destinations
+// - Retrieving pending notifications
+// - Deleting notification records (single and bulk)
+//
+// This ensures that notification records are correctly managed, which is
+// critical for reliable object synchronization between CSS and ESS nodes.
+// Notifications track the delivery status of objects to destinations and
+// enable retry mechanisms for failed deliveries.
 func testStorageNotifications(storageType string, t *testing.T) {
 	store, err := setUpStorage(storageType)
 	if err != nil {
@@ -1150,6 +1228,16 @@ func testStorageNotifications(storageType string, t *testing.T) {
 	}
 }
 
+// testStorageWebhooks tests webhook management:
+// - Adding webhooks for object types
+// - Retrieving webhooks by organization and object type
+// - Deleting individual webhooks
+// - Verifying webhook list after deletions
+//
+// This ensures that webhooks are correctly stored and retrieved, enabling
+// external systems to be notified of object updates. Webhooks provide a
+// mechanism for integrating the sync service with other systems that need
+// to react to object changes.
 func testStorageWebhooks(storageType string, t *testing.T) {
 	store, err := setUpStorage(storageType)
 	if err != nil {
@@ -1222,6 +1310,20 @@ func testStorageWebhooks(storageType string, t *testing.T) {
 	}
 }
 
+// testStorageObjectExpiration tests time-based object expiration:
+// - Objects with expiration times in the future remain active
+// - PerformMaintenance removes expired objects
+// - Objects without expiration times are not removed
+// - Notifications for expired objects are removed
+// - Objects in CompletelyReceived status are not removed even if expired
+//
+// This ensures that the expiration mechanism works correctly, automatically
+// cleaning up old objects to prevent storage bloat. Critical for managing
+// storage resources in long-running deployments where objects have limited
+// lifetimes. Expired objects and their associated notifications are removed
+// during maintenance cycles.
+//
+// Run with: go test -v
 func testStorageObjectExpiration(storageType string, t *testing.T) {
 	common.Configuration.NodeType = common.CSS
 	store, err := setUpStorage(storageType)
@@ -1330,6 +1432,17 @@ func testStorageObjectExpiration(storageType string, t *testing.T) {
 	}
 }
 
+// testStorageOrgDeleteObjects tests organization-level object deletion:
+// - Storing objects for multiple organizations
+// - Retrieving objects by organization
+// - DeleteOrganization removes all objects for that organization
+// - Objects from other organizations remain intact
+// - Verifying object counts after organization deletion
+//
+// This ensures that organization deletion correctly removes all associated
+// objects while preserving objects from other organizations. Critical for
+// multi-tenant deployments where organizations can be removed, requiring
+// complete cleanup of their data.
 func testStorageOrgDeleteObjects(storageType string, t *testing.T) {
 	common.Configuration.NodeType = common.CSS
 	store, err := setUpStorage(storageType)
@@ -1425,6 +1538,15 @@ func testStorageOrgDeleteObjects(storageType string, t *testing.T) {
 	}
 }
 
+// testStorageOrgDeleteNotifications tests organization-level notification deletion:
+// - Creating notifications for multiple organizations
+// - DeleteOrganization removes all notifications for that organization
+// - Notifications from other organizations remain intact
+// - Verifying notification counts after organization deletion
+//
+// This ensures that organization deletion correctly removes all associated
+// notifications while preserving notifications from other organizations.
+// Critical for complete data cleanup in multi-tenant deployments.
 func testStorageOrgDeleteNotifications(storageType string, t *testing.T) {
 	common.Configuration.NodeType = common.CSS
 	store, err := setUpStorage(storageType)
@@ -1479,6 +1601,16 @@ func testStorageOrgDeleteNotifications(storageType string, t *testing.T) {
 	}
 }
 
+// testStorageOrgDeleteACLs tests organization-level ACL deletion:
+// - Creating ACLs for multiple organizations
+// - DeleteOrganization removes all ACLs for that organization
+// - ACLs from other organizations remain intact
+// - Verifying ACL counts after organization deletion
+//
+// This ensures that organization deletion correctly removes all associated
+// ACLs while preserving ACLs from other organizations. Critical for security
+// and access control in multi-tenant deployments where organizations can be
+// removed, requiring complete cleanup of their access control data.
 func testStorageOrgDeleteACLs(storageType string, t *testing.T) {
 	common.Configuration.NodeType = common.CSS
 	store, err := setUpStorage(storageType)
@@ -1591,6 +1723,17 @@ func testStorageOrgDeleteACLs(storageType string, t *testing.T) {
 	}
 }
 
+// testStorageMessagingGroups tests messaging group management:
+// - Storing organization to messaging group mappings
+// - Retrieving messaging group for an organization
+// - Updating messaging group mappings
+// - Deleting messaging group mappings
+// - Organization deletion removes messaging group mappings
+//
+// This ensures that messaging group mappings are correctly managed, enabling
+// organizations to be grouped for efficient message routing. Messaging groups
+// allow multiple organizations to share communication channels, reducing
+// connection overhead in large-scale deployments.
 func testStorageMessagingGroups(storageType string, t *testing.T) {
 	common.Configuration.NodeType = common.CSS
 	store, err := setUpStorage(storageType)
@@ -1667,6 +1810,18 @@ func testStorageMessagingGroups(storageType string, t *testing.T) {
 	}
 }
 
+// testStorageObjectDestinations tests object destination management:
+// - Storing objects with single destinations
+// - Storing objects with multiple destinations (DestinationsList)
+// - Getting object destinations
+// - Getting object destinations list with status
+// - Updating object delivery status (Pending, Delivering, Delivered, Error)
+// - Tracking deleted and added destinations when updating objects
+//
+// This comprehensive test ensures that object-to-destination mappings are
+// correctly managed, which is critical for tracking object delivery status
+// to multiple edge nodes. Proper destination tracking enables reliable
+// multi-destination object distribution and delivery confirmation.
 func testStorageObjectDestinations(storageType string, t *testing.T) {
 	common.Configuration.NodeType = common.CSS
 	store, err := setUpStorage(storageType)
@@ -1857,6 +2012,17 @@ func testStorageObjectDestinations(storageType string, t *testing.T) {
 	}
 }
 
+// testStorageOrganizations tests organization information management:
+// - Storing organization information (credentials, MQTT address)
+// - Retrieving organization information
+// - Updating organization information
+// - Retrieving list of all organizations
+// - Deleting organization information
+//
+// This ensures that organization metadata is correctly stored and retrieved,
+// which is critical for multi-tenant deployments. Organization information
+// includes MQTT credentials and broker addresses needed for communication
+// with edge nodes belonging to that organization.
 func testStorageOrganizations(storageType string, t *testing.T) {
 	common.Configuration.NodeType = common.CSS
 	store, err := setUpStorage(storageType)
@@ -1925,6 +2091,19 @@ func testStorageOrganizations(storageType string, t *testing.T) {
 	}
 }
 
+// testStorageInactiveDestinations tests inactive destination cleanup:
+// - Storing destinations
+// - Creating notifications for destinations
+// - RemoveInactiveDestinations removes destinations inactive beyond threshold
+// - Notifications for removed destinations are also removed
+// - Notifications for non-existent destinations are removed
+//
+// This ensures that inactive destinations are automatically cleaned up,
+// preventing accumulation of stale destination records and associated
+// notifications. Critical for maintaining storage efficiency in deployments
+// where edge nodes may come and go frequently.
+//
+// Run with: go test -v
 func testStorageInactiveDestinations(storageType string, t *testing.T) {
 	common.Configuration.NodeType = common.CSS
 	store, err := setUpStorage(storageType)
@@ -1999,6 +2178,14 @@ func testStorageInactiveDestinations(storageType string, t *testing.T) {
 
 }
 
+// setUpStorage initializes a storage backend for testing:
+// - InMemory: Creates in-memory storage with cache
+// - Bolt: Creates BoltDB storage with cache in temporary directory
+// - Mongo: Creates MongoDB storage with cache using test database
+//
+// This helper function provides a consistent way to initialize different
+// storage backends for testing, ensuring tests can run against all supported
+// storage types. Returns initialized storage or error if initialization fails.
 func setUpStorage(storageType string) (Storage, error) {
 	var store Storage
 	switch storageType {

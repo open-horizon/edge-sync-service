@@ -27,6 +27,9 @@ type httpTestObjectInfo struct {
 }
 
 func TestHTTPCommUpdatedObjects(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping MongoDB test in short mode")
+	}
 	if status := testHTTPCommSetup("CSS"); status != "" {
 		t.Errorf(status)
 	}
@@ -126,6 +129,9 @@ func TestHTTPCommUpdatedObjects(t *testing.T) {
 }
 
 func TestHttpCommCssMisc(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping MongoDB test in short mode")
+	}
 	if status := testHTTPCommSetup("CSS"); status != "" {
 		t.Errorf(status)
 	}
@@ -198,6 +204,9 @@ type httpTestEssSendObjectInfo struct {
 
 func TestHTTPCommEssSendObjects(t *testing.T) {
 	if status := testHTTPCommSetup("CSS"); status != "" {
+		if strings.Contains(status, "Failed to ping mgo") || strings.Contains(status, "Failed to initialize storage") {
+			t.Skipf("Skipping test due to MongoDB unavailability: %s", status)
+		}
 		t.Errorf(status)
 	}
 	defer Store.Stop()

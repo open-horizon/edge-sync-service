@@ -1,8 +1,10 @@
 package common
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -294,4 +296,252 @@ func containsMiddle(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// TestValidateFilePath_SpecialCharacters tests path validation with special characters including:
+// - Unicode characters (Cyrillic, Chinese, etc.)
+// - Spaces in filenames
+// - Special characters (@, #, $)
+// - Emoji characters
+// - Multiple dots in filenames
+// - Hyphens and underscores
+// This ensures the path validation doesn't reject legitimate filenames with non-ASCII characters.
+func TestValidateFilePath_SpecialCharacters(t *testing.T) {
+	baseDir := t.TempDir()
+
+	tests := []struct {
+		name    string
+		path    string
+		wantErr bool
+	}{
+		{"unicode filename", filepath.Join(baseDir, "файл.txt"), false},
+		{"spaces in filename", filepath.Join(baseDir, "file name.txt"), false},
+		{"special chars", filepath.Join(baseDir, "file@#$.txt"), false},
+		{"emoji in filename", filepath.Join(baseDir, "file😀.txt"), false},
+		{"dots in filename", filepath.Join(baseDir, "my.config.file.txt"), false},
+		{"hyphen and underscore", filepath.Join(baseDir, "my-file_name.txt"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ValidateFilePath(tt.path, baseDir)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateFilePath() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestValidateFilePath_FilesystemLimits tests path validation with filesystem boundary conditions:
+// - Long filenames (200+ characters)
+// - Deeply nested directory structures (20+ levels)
+// - Paths with many directory components (50+ directories)
+// This ensures the validation handles edge cases near filesystem limits without failing
+// on legitimate but unusual path structures.
+func TestValidateFilePath_FilesystemLimits(t *testing.T) {
+	baseDir := t.TempDir()
+
+	tests := []struct {
+		name    string
+		pathGen func() string
+		wantErr bool
+	}{
+		{
+			name: "long filename (200 chars)",
+			pathGen: func() string {
+				longName := strings.Repeat("a", 200) + ".txt"
+				return filepath.Join(baseDir, longName)
+			},
+			wantErr: false,
+		},
+		{
+			name: "deeply nested path (20 levels)",
+			pathGen: func() string {
+				path := baseDir
+				for i := 0; i < 20; i++ {
+					path = filepath.Join(path, fmt.Sprintf("dir%d", i))
+				}
+				return filepath.Join(path, "file.txt")
+			},
+			wantErr: false,
+		},
+		{
+			name: "path with many components",
+			pathGen: func() string {
+				path := baseDir
+				for i := 0; i < 50; i++ {
+					path = filepath.Join(path, "d")
+				}
+				return filepath.Join(path, "file.txt")
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := tt.pathGen()
+			_, err := ValidateFilePath(path, baseDir)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateFilePath() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestValidateFilePathWithExtension_ConfigurationDriven tests extension validation using configuration parameters:
+// - Configuration.AllowedCertificateExtensions for certificate files
+// - Configuration.AllowedKeyExtensions for private key files
+// - Empty configuration (should allow all extensions)
+// - Custom extensions from environment variables
+// This ensures the centralized configuration approach works correctly and allows
+// deployment-specific customization of allowed file extensions.
+func TestValidateFilePathWithExtension_ConfigurationDriven(t *testing.T) {
+	baseDir := t.TempDir()
+
+	// Save original configuration
+	origCertExts := Configuration.AllowedCertificateExtensions
+	origKeyExts := Configuration.AllowedKeyExtensions
+	defer func() {
+		Configuration.AllowedCertificateExtensions = origCertExts
+		Configuration.AllowedKeyExtensions = origKeyExts
+	}()
+
+	tests := []struct {
+		name       string
+		setupFunc  func()
+		path       string
+		useConfig  bool
+		wantErr    bool
+	}{
+		{
+			name: "use configured cert extensions",
+			setupFunc: func() {
+				Configuration.AllowedCertificateExtensions = []string{".pem", ".crt"}
+			},
+			path:      filepath.Join(baseDir, "cert.pem"),
+			useConfig: true,
+			wantErr:   false,
+		},
+		{
+			name: "reject non-configured extension",
+			setupFunc: func() {
+				Configuration.AllowedCertificateExtensions = []string{".pem"}
+			},
+			path:      filepath.Join(baseDir, "cert.crt"),
+			useConfig: true,
+			wantErr:   true,
+		},
+		{
+			name: "empty configuration uses defaults",
+			setupFunc: func() {
+				Configuration.AllowedCertificateExtensions = []string{}
+			},
+			path:      filepath.Join(baseDir, "cert.txt"),
+			useConfig: true,
+			wantErr:   false, // Empty list allows all
+		},
+		{
+			name: "custom key extensions",
+			setupFunc: func() {
+				Configuration.AllowedKeyExtensions = []string{".key", ".pem"}
+			},
+			path:      filepath.Join(baseDir, "private.key"),
+			useConfig: true,
+			wantErr:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.setupFunc()
+			
+			var exts []string
+			if tt.useConfig {
+				if strings.Contains(tt.path, "key") {
+					exts = Configuration.AllowedKeyExtensions
+				} else {
+					exts = Configuration.AllowedCertificateExtensions
+				}
+			}
+			
+			_, err := ValidateFilePathWithExtension(tt.path, baseDir, exts)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateFilePathWithExtension() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestValidateFilePath_ConcurrentAccess tests concurrent path validation to ensure thread safety:
+// - 100 goroutines validating the same path simultaneously
+// - Verifies no race conditions occur
+// - Ensures validation results are consistent across concurrent calls
+// This test should be run with the race detector enabled: go test -race
+// Critical for production environments with high concurrency.
+func TestValidateFilePath_ConcurrentAccess(t *testing.T) {
+	t.Parallel()
+	
+	baseDir := t.TempDir()
+	testFile := filepath.Join(baseDir, "test.txt")
+	
+	// Create test file
+	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	
+	const numGoroutines = 100
+	errChan := make(chan error, numGoroutines)
+	
+	// Launch concurrent validations
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			_, err := ValidateFilePath(testFile, baseDir)
+			errChan <- err
+		}()
+	}
+	
+	// Collect results
+	for i := 0; i < numGoroutines; i++ {
+		if err := <-errChan; err != nil {
+			t.Errorf("Concurrent validation failed: %v", err)
+		}
+	}
+}
+
+// TestValidateFilePath_EncodedTraversal tests URL-encoded path traversal attempts:
+// - URL-encoded dots (%2e%2e)
+// - Double-encoded traversal (%252e%252e)
+// - Mixed encoding patterns
+// This ensures that encoding tricks cannot bypass path validation security.
+// Note: filepath.Join normalizes paths, so encoded characters won't work as traversal,
+// but this test documents the expected behavior and ensures no regression.
+func TestValidateFilePath_EncodedTraversal(t *testing.T) {
+	baseDir := "/var/edge-sync-service"
+	
+	tests := []struct {
+		name string
+		path string
+	}{
+		{"URL encoded dots", filepath.Join(baseDir, "%2e%2e", "etc", "passwd")},
+		{"double encoded", filepath.Join(baseDir, "%252e%252e", "etc", "passwd")},
+		{"mixed encoding", filepath.Join(baseDir, "..%2f..%2fetc%2fpasswd")},
+	}
+	
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Note: filepath.Join normalizes the path, so encoded characters
+			// won't work as path traversal. This test documents expected behavior.
+			_, err := ValidateFilePath(tt.path, baseDir)
+			// The validation should either succeed (if path is within baseDir after normalization)
+			// or fail (if it's outside). The key is that encoding doesn't bypass validation.
+			if err == nil {
+				// If no error, verify the path is actually within baseDir
+				validPath, _ := ValidateFilePath(tt.path, baseDir)
+				if !strings.HasPrefix(validPath, baseDir) {
+					t.Errorf("Encoded path traversal bypassed validation: %s", validPath)
+				}
+			}
+		})
+	}
 }

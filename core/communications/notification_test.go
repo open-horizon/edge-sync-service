@@ -9,6 +9,23 @@ import (
 	"github.com/open-horizon/edge-sync-service/core/storage"
 )
 
+// TestNotifications tests notification preparation and sending:
+// - PrepareUpdateNotification creates update notifications for destinations
+// - SendNotifications sends prepared notifications
+// - Notification records are stored with correct status
+// - PrepareObjectStatusNotification creates consumed/deleted notifications
+// - Status notifications are sent to origin destinations
+// - PrepareObjectNotifications retrieves destinations from stored objects
+// - PrepareDeleteNotifications creates delete notifications for all destinations
+//
+// This comprehensive test ensures that the notification system works correctly
+// for all notification types (update, consumed, deleted, delete). Notifications
+// are the primary mechanism for communicating object state changes between CSS
+// and ESS nodes. Proper notification handling is critical for reliable object
+// synchronization.
+//
+// Note: Some tests require persistent storage (Bolt/Mongo) and will not work
+// with InMemory storage due to destination retrieval requirements.
 func TestNotifications(t *testing.T) {
 
 	dest1 := common.Destination{DestOrgID: "myorg", DestType: "device", DestID: "dev1", Communication: common.MQTTProtocol}
@@ -206,6 +223,20 @@ func TestNotifications(t *testing.T) {
 	}
 }
 
+// TestActivateObjects tests time-based object activation in the communications layer:
+// - Objects with activation times in the future are not sent to destinations
+// - ActivateObjects function activates objects whose activation time has passed
+// - Activated objects become available for retrieval by destinations
+// - Multiple objects with different activation times are handled correctly
+//
+// This ensures that the communications layer correctly handles time-based
+// object activation, coordinating with the storage layer to make objects
+// available at the scheduled time. Critical for scenarios where objects
+// should only be distributed at specific times, such as scheduled updates
+// or time-sensitive data distribution.
+//
+// Run with: go test -v
+// Note: This test uses time.Sleep and may take several seconds to complete.
 func TestActivateObjects(t *testing.T) {
 
 	activationTime1 := time.Now().Add(time.Second * 2).UTC().Format(time.RFC3339)

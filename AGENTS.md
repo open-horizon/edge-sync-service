@@ -608,6 +608,148 @@ All source code changes MUST be accompanied by corresponding test updates:
    - Changed behavior or interfaces
    - Performance characteristics if relevant
 
+**Test Isolation Principle:**
+
+All tests MUST be designed with proper isolation to ensure reliability and maintainability:
+
+1. **Independent Test Execution**: Each test must be able to run independently without relying on:
+   - Execution order of other tests
+   - State left behind by previous tests
+   - Shared global state that persists between tests
+
+2. **Clean Test Environment**: 
+   - Use `t.TempDir()` for temporary file operations (automatically cleaned up)
+   - Create isolated storage instances (in-memory or temporary BoltDB)
+   - Reset or mock global state in `setUp` functions
+   - Clean up resources in `defer` statements or `t.Cleanup()`
+
+3. **Avoid Test Interdependencies**:
+   - Never assume test execution order
+   - Each test should set up its own required state
+   - Don't share test data structures between test cases
+   - Use table-driven tests with independent test cases
+
+4. **Parallel Test Safety**:
+   - Mark tests as parallel-safe with `t.Parallel()` when appropriate
+   - Ensure parallel tests don't share mutable state
+   - Use separate storage instances for concurrent tests
+   - Test with race detector: `go test -race`
+
+5. **External Service Isolation**:
+   - Use mock implementations for external dependencies (MongoDB, MQTT)
+   - Provide test-specific configuration to avoid conflicts
+   - Use unique database names or collections for integration tests
+   - Clean up test data after integration tests complete
+
+6. **Test Data Isolation**:
+   - Generate unique test data for each test case (e.g., unique IDs, timestamps)
+   - Avoid hardcoded test data that could conflict across tests
+   - Use test-specific prefixes or namespaces for identifiers
+   - Clean up test data immediately after test completion
+
+7. **Configuration Isolation**:
+   - Create test-specific configuration instances
+   - Never modify global configuration in tests
+   - Use configuration mocks or test doubles when needed
+   - Reset configuration state in test cleanup
+
+8. **Time and Randomness Isolation**:
+   - Mock time-dependent functions for deterministic tests
+   - Use fixed seeds for random number generators in tests
+   - Avoid tests that depend on wall-clock time
+   - Make time-sensitive tests configurable with timeouts
+
+9. **Network and I/O Isolation**:
+   - Mock network calls and external API interactions
+   - Use in-memory implementations instead of real I/O when possible
+   - Avoid tests that depend on external network availability
+   - Use local test servers or mock servers for integration tests
+
+10. **Example of Good Test Isolation**:
+    ```go
+    func TestStorageOperation(t *testing.T) {
+        t.Parallel() // Safe to run in parallel
+        
+        // Create isolated test environment
+        tempDir := t.TempDir() // Auto-cleanup
+        store := storage.NewInMemoryStorage() // Isolated instance
+        
+        // Generate unique test data
+        testID := fmt.Sprintf("test-%d", time.Now().UnixNano())
+        
+        // Clean up any resources
+        t.Cleanup(func() {
+            store.Stop()
+        })
+        
+        // Test logic with isolated state
+        // ...
+    }
+    ```
+
+**Test Cleanup and Environmental Responsibility:**
+
+All tests MUST clean up after themselves and avoid leaving destructive changes to the environment:
+
+1. **Complete Cleanup**: Every test must restore the environment to its original state
+   - Delete temporary files and directories created during testing
+   - Close all open file handles, network connections, and database connections
+   - Remove test data from databases and storage systems
+   - Restore modified configuration or global state
+   - Use `defer` statements or `t.Cleanup()` to ensure cleanup happens even on test failure
+
+2. **No Destructive Side Effects**: Tests must not:
+   - Modify files outside the test's temporary directory
+   - Delete or overwrite production data or configuration
+   - Leave processes running after test completion
+   - Consume system resources indefinitely (memory leaks, goroutine leaks)
+   - Modify shared system state that affects other tests or processes
+
+3. **Idempotent Tests**: Tests should be repeatable without manual cleanup
+   - Running the same test multiple times should produce the same results
+   - Tests should not depend on previous test runs being cleaned up
+   - Use unique identifiers to avoid conflicts with concurrent test runs
+
+4. **Resource Management**:
+   - Always close resources in `defer` or `t.Cleanup()` blocks
+   - Use context with timeout for operations that might hang
+   - Monitor and clean up goroutines to prevent leaks
+   - Release locks and semaphores properly
+
+5. **Example of Proper Cleanup**:
+   ```go
+   func TestWithProperCleanup(t *testing.T) {
+       // Create temporary directory (auto-cleanup)
+       tempDir := t.TempDir()
+       
+       // Create test database connection
+       db, err := openTestDB()
+       require.NoError(t, err)
+       defer db.Close() // Ensure connection is closed
+       
+       // Register cleanup for test data
+       t.Cleanup(func() {
+           // Remove test data from database
+           db.DeleteTestData(testID)
+           // Stop any background processes
+           stopTestProcesses()
+       })
+       
+       // Test logic here
+       // ...
+   }
+   ```
+
+**When Creating or Updating Tests:**
+
+- **Always verify test isolation**: Run the test multiple times in different orders
+- **Test in parallel**: Use `go test -parallel=10` to expose isolation issues
+- **Check for race conditions**: Always run `go test -race` on concurrent code
+- **Verify cleanup**: Ensure no test artifacts remain after test completion
+- **Check for resource leaks**: Monitor goroutines, file handles, and memory usage
+- **Document dependencies**: Clearly document any external service requirements
+- **Use subtests for variations**: Group related test cases with `t.Run()` for better organization
+
 **Test File Conventions:**
 - Unit tests in `*_test.go` files alongside source
 - Integration tests require external services (MongoDB, MQTT broker)
@@ -619,6 +761,81 @@ All source code changes MUST be accompanied by corresponding test updates:
 - Use descriptive test names: `TestFunctionName_Scenario_ExpectedBehavior`
 - Security tests: Prefix with vulnerability type (e.g., `TestRetrieveData_PathTraversal_Blocked`)
 - Bug fix tests: Reference issue number if available (e.g., `TestIssue123_NullPointerFix`)
+
+**Test Documentation Requirements:**
+
+All test functions MUST include comprehensive documentation above the function declaration:
+
+1. **Documentation Structure**:
+   - Start with a clear one-line summary of what the test validates
+   - List specific test cases and scenarios covered
+   - Explain security implications and CWE references where applicable
+   - Include usage notes (e.g., "run with -race detector")
+   - Explain why the test is critical for the system
+
+2. **Documentation Format**:
+   ```go
+   // TestFunctionName_Scenario tests [brief description]:
+   // - Specific test case 1
+   // - Specific test case 2
+   // - Edge case or boundary condition
+   //
+   // Additional context about security implications, CWE references,
+   // or why this test is critical for production systems.
+   //
+   // Usage notes: Run with go test -race for concurrency tests.
+   func TestFunctionName_Scenario(t *testing.T) {
+       // Test implementation
+   }
+   ```
+
+3. **Required Documentation Elements**:
+   - **What**: Clear description of functionality being tested
+   - **How**: List of specific test cases and scenarios
+   - **Why**: Security implications, CWE references, or business criticality
+   - **Usage**: Special requirements (race detector, external services, etc.)
+
+4. **Security Test Documentation**:
+   - MUST include CWE reference numbers (e.g., CWE-22, CWE-158, CWE-918)
+   - MUST explain the attack vector being tested
+   - MUST explain the mitigation being validated
+   - MUST note if test demonstrates vulnerability safely
+
+5. **Examples of Good Test Documentation**:
+   ```go
+   // TestValidateFilePath_PathTraversal tests path validation against traversal attacks:
+   // - Parent directory traversal (../, ../../)
+   // - Absolute paths outside base directory
+   // - Null byte injection (CWE-158)
+   // - Symlink attacks (CWE-61)
+   //
+   // This test ensures protection against CWE-22: Path Traversal attacks,
+   // preventing unauthorized access to files outside allowed directories.
+   // Critical for maintaining filesystem security boundaries.
+   func TestValidateFilePath_PathTraversal(t *testing.T) { ... }
+   
+   // TestAuthentication_ConcurrentAccess tests concurrent authentication:
+   // - 50 goroutines attempting authentication simultaneously
+   // - Verifies no race conditions in authentication logic
+   // - Ensures consistent results across concurrent calls
+   //
+   // Run with: go test -race
+   // Critical for production environments with high concurrent user load.
+   func TestAuthentication_ConcurrentAccess(t *testing.T) { ... }
+   ```
+
+6. **Documentation Benefits**:
+   - Makes test purpose immediately clear to reviewers
+   - Helps maintainers understand security implications
+   - Provides context for why tests exist
+   - Documents attack vectors and mitigations
+   - Serves as inline security documentation
+
+7. **When to Update Documentation**:
+   - When adding new test cases to existing tests
+   - When fixing bugs that tests should have caught
+   - When security vulnerabilities are discovered
+   - When test behavior or scope changes
 
 ### Common Pitfalls
 
@@ -658,6 +875,129 @@ Key configuration parameters for high-load scenarios:
 - `ObjectQueueBufferSize`: Adjust queue sizes based on workload
 
 ## Important Notes for AI Agents
+## Efficient Tool Usage and Batching Strategies
+
+### Principles of Efficient Tool Usage
+
+When working with code changes, especially large-scale modifications, agents should optimize tool usage to minimize context usage, reduce costs, and improve performance:
+
+1. **Batch Similar Operations**: Group similar changes together in a single tool call when possible
+2. **Use the Right Tool**: Choose tools that can handle multiple operations efficiently
+3. **Minimize Round Trips**: Reduce the number of tool calls by combining operations
+4. **Plan Before Executing**: Analyze the scope of work before starting to identify batching opportunities
+
+### Batching Strategies for Large Changes
+
+**When to Use Batching:**
+
+Batching is most effective for:
+- Adding documentation to multiple functions in the same file
+- Applying the same pattern across multiple files
+- Making consistent formatting or style changes
+- Adding similar test cases across multiple test files
+- Updating configuration in multiple locations
+
+**Tools That Support Batching:**
+
+1. **apply_diff**: Can apply multiple search/replace blocks in a single call
+   - Each block operates independently within the same file
+   - Ideal for making multiple small, precise changes to one file
+   - Example: Adding documentation to 5-10 functions in the same file
+   - Each search/replace block should be separated by a blank line
+
+2. **replace_regex**: Can apply multiple regex patterns in a single call
+   - Supports multiple pattern/replacement pairs in one diff
+   - Ideal for consistent pattern-based changes
+   - Example: Updating import statements or renaming patterns across a file
+
+**Batching Best Practices:**
+
+1. **Group by File**: Batch all changes for a single file into one tool call
+   - Good: One apply_diff call with 10 search/replace blocks for 10 functions
+   - Bad: 10 separate apply_diff calls for the same file
+
+2. **Limit Batch Size**: Keep batches manageable (5-15 operations per call)
+   - Too small: Wastes tool calls and increases context usage
+   - Too large: Harder to debug if one operation fails
+   - Sweet spot: 8-12 related operations per batch
+
+3. **Verify Before Batching**: Read the file first to ensure all targets exist
+   - Use read_file to examine the file structure
+   - Confirm all search strings will match exactly
+   - Plan the batch based on actual file content
+
+4. **Handle Failures Gracefully**: If a batch fails, break it into smaller batches
+   - Identify which operation failed
+   - Complete successful operations first
+   - Retry failed operations individually or in smaller groups
+
+**Example: Efficient Documentation Addition**
+
+Instead of 10 separate tool calls:
+```
+# Inefficient: 10 separate apply_diff calls
+<apply_diff> func1 </apply_diff>
+<apply_diff> func2 </apply_diff>
+...
+<apply_diff> func10 </apply_diff>
+```
+
+Use one batched call:
+```
+# Efficient: 1 apply_diff call with 10 blocks
+<apply_diff>
+<file_path>/path/to/file.go</file_path>
+<diff>
+# Search: |||
+func Function1() {
+|||
+# Replace with: |||
+// Function1 does something important
+func Function1() {
+|||
+
+# Search: |||
+func Function2() {
+|||
+# Replace with: |||
+// Function2 does something else
+func Function2() {
+|||
+
+... (8 more blocks)
+</diff>
+</apply_diff>
+```
+
+**When NOT to Batch:**
+
+Avoid batching when:
+- Operations depend on each other (one must complete before the next)
+- Changes span multiple files (use separate tool calls per file)
+- Operations are unrelated or serve different purposes
+- Debugging is needed (smaller operations are easier to troubleshoot)
+- The batch would exceed 15-20 operations (too complex)
+
+**Real-World Example from This Project:**
+
+When documenting test functions across the edge-sync-service project:
+- **Efficient approach**: Used apply_diff with 10-15 function documentation blocks per file
+- **Result**: Documented 25 test files with ~60 tool calls instead of ~200+
+- **Savings**: ~70% reduction in tool calls, significant context and cost savings
+- **Maintainability**: Each file's changes were atomic and easy to review
+
+### Performance Optimization Tips
+
+1. **Read Once, Write Once**: Read a file once, plan all changes, apply in one batch
+2. **Use Appropriate Tools**: 
+   - `apply_diff` for precise, literal replacements
+   - `replace_regex` for pattern-based changes
+   - `write_to_file` only for complete file rewrites
+3. **Minimize File Reads**: Cache file content mentally during planning phase
+4. **Parallel Planning**: While waiting for tool responses, plan the next batch
+5. **Progressive Refinement**: Start with a small batch to verify approach, then scale up
+
+
 
 1. **Always check MongoDB availability** before running tests that require it
 2. **Use appropriate storage provider** based on node type (CSS vs ESS)

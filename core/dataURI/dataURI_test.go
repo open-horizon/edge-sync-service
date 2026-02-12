@@ -2,23 +2,51 @@ package dataURI
 
 import (
 	"bytes"
+	"io/ioutil"
 	"os"
 	"testing"
+
+	"github.com/open-horizon/edge-sync-service/common"
 )
 
+// TestDataURI tests data URI operations for file-based storage:
+// - AppendData stores data at specified URI with offset
+// - GetData retrieves data from URI
+// - StoreData replaces entire data at URI
+// - DeleteStoredData removes data from URI
+// - Multi-chunk data appending (first, middle, last chunks)
+// - GetDataChunk retrieves data with offset and size limits
+//
+// This comprehensive test ensures that the data URI abstraction works correctly
+// for file-based storage operations. Data URIs provide a uniform interface for
+// storing and retrieving object data regardless of the underlying storage mechanism.
+// Critical for handling large file transfers in chunks, which is essential for
+// efficient bandwidth usage in edge computing scenarios.
+//
+// The test uses temporary directories to ensure isolation and automatic cleanup.
 func TestDataURI(t *testing.T) {
-
-	dir, err := os.Getwd()
+	// Create temporary directory for test data
+	tmpDir, err := ioutil.TempDir("", "datauri-test-")
 	if err != nil {
-		t.Errorf("Failed to get current directory. Error: %s", err.Error())
+		t.Fatalf("Failed to create temp dir: %v", err)
 	}
+	defer os.RemoveAll(tmpDir)
+
+	// Set PersistenceRootPath to temp directory
+	originalPath := common.Configuration.PersistenceRootPath
+	common.Configuration.PersistenceRootPath = tmpDir
+	defer func() {
+		common.Configuration.PersistenceRootPath = originalPath
+	}()
+
+	dir := tmpDir
 	tests := []struct {
 		uri        string
 		data       []byte
 		dataLength uint32
 		offset     int64
 	}{
-		{"file:///" + dir + "test1.txt", []byte("hello"), 5, 0},
+		{"file:///" + dir + "/test1.txt", []byte("hello"), 5, 0},
 	}
 
 	for _, row := range tests {
@@ -105,8 +133,8 @@ func TestDataURI(t *testing.T) {
 		dataLength uint32
 		offsets    []int64
 	}{
-		{"file:///" + dir + "test2.txt", [][]byte{chunk1}, []byte("Hello"), []uint32{5}, 5, []int64{0}},
-		{"file:///" + dir + "test3.txt", [][]byte{chunk1, chunk2, chunk3}, []byte("Hello world!"), []uint32{5, 6, 1}, 12, []int64{0, 5, 11}},
+		{"file:///" + dir + "/test2.txt", [][]byte{chunk1}, []byte("Hello"), []uint32{5}, 5, []int64{0}},
+		{"file:///" + dir + "/test3.txt", [][]byte{chunk1, chunk2, chunk3}, []byte("Hello world!"), []uint32{5, 6, 1}, 12, []int64{0, 5, 11}},
 	}
 
 	for _, row := range testsMulti {
