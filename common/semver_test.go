@@ -2,6 +2,15 @@ package common
 
 import "testing"
 
+// TestSemVer tests semantic version parsing:
+// - Valid version formats (1.0.0, 1.0, 0)
+// - INFINITY special version
+// - Invalid formats (empty string, leading zeros, non-numeric)
+// - Version component extraction (major, minor, patch)
+//
+// This ensures that semantic version strings are correctly parsed according to
+// the SemVer specification, supporting version comparison and range checking.
+// Critical for managing object versions and compatibility in the sync service.
 func TestSemVer(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -41,6 +50,15 @@ func TestSemVer(t *testing.T) {
 	}
 }
 
+// TestCompareSemVer tests semantic version comparison:
+// - Equal versions (1.0.0 == 1.0.0, 1.0 == 1.0.0)
+// - Less than comparisons (1.0.0 < 2.0.0, 1.0.0 < 1.1.0, 1.0.0 < 1.0.1)
+// - Greater than comparisons (2.0.0 > 1.0.0, 1.1.0 > 1.0.0, 1.0.1 > 1.0.0)
+// - INFINITY version handling (always greater than any finite version)
+//
+// This ensures that semantic version comparison works correctly for determining
+// version compatibility and ordering. Critical for version-based object routing
+// and compatibility checking in the sync service.
 func TestCompareSemVer(t *testing.T) {
 	tests := []struct {
 		a        string
@@ -67,6 +85,17 @@ func TestCompareSemVer(t *testing.T) {
 	}
 }
 
+// TestSemVerRange tests semantic version range parsing:
+// - Single version (1.0.0 means [1.0.0, 1.0.0])
+// - Inclusive ranges [1.0.0, 1.2.0]
+// - Exclusive ranges (1.0.0, 1.2.0)
+// - Mixed ranges [1.0.0, 1.2.0) and (1.0.0, 1.2.0]
+// - INFINITY in ranges (1.0.0, INFINITY)
+// - Invalid range formats
+//
+// This ensures that version range specifications are correctly parsed for
+// determining version compatibility. Critical for specifying which object
+// versions are compatible with specific edge nodes or services.
 func TestSemVerRange(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -102,6 +131,16 @@ func TestSemVerRange(t *testing.T) {
 	}
 }
 
+// TestSemVerInRange tests semantic version range membership checking:
+// - Version within inclusive range [1.0.0, 1.2.0]
+// - Version at range boundaries (inclusive vs exclusive)
+// - Version outside range
+// - INFINITY range handling
+// - Edge cases with boundary conditions
+//
+// This ensures that version range checking works correctly for determining
+// if a specific version falls within a specified range. Critical for routing
+// objects to compatible edge nodes based on their supported version ranges.
 func TestSemVerInRange(t *testing.T) {
 	tests := []struct {
 		rangeInput  string

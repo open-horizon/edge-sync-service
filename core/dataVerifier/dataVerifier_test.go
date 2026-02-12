@@ -28,20 +28,46 @@ var destinationURIDirFileWrong string
 var dataToSign, wrongDataToSign []byte
 var orgID, objectType, objectID string
 
+// TestNewDataVerifier tests DataVerifier initialization with different hash algorithms:
+// - SHA1 hash algorithm
+// - SHA256 hash algorithm
+// - Validates writeThrough flag behavior with invalid/missing parameters
+//
+// This ensures that the DataVerifier is correctly initialized with supported
+// hash algorithms and properly handles edge cases like missing public keys or
+// signatures. The writeThrough flag determines whether data is written directly
+// to storage or buffered for verification first.
 func TestNewDataVerifier(t *testing.T) {
 	testNewDataVerifier(common.Sha1, t)
 	testNewDataVerifier(common.Sha256, t)
 }
 
+// TestVerifyDataSignature tests data signature verification:
+// - Verifying data with correct signature (should pass)
+// - Verifying data with incorrect signature (should fail)
+// - Storing verified data to storage
+// - Testing with both SHA1 and SHA256 hash algorithms
+// - Testing with both MongoDB and BoltDB storage backends
+//
+// This ensures that RSA-PSS signature verification works correctly, which is
+// critical for ensuring data integrity and authenticity in edge computing scenarios.
+// Only data with valid signatures from trusted sources should be accepted and stored.
+//
+// Run with: go test -v (includes MongoDB tests)
+// Run with: go test -v -short (skips MongoDB tests)
 func TestVerifyDataSignature(t *testing.T) {
 	setupTestVars()
 
-	if status := setupDB(common.Mongo); status != "" {
-		t.Errorf("Failed to setup %s storage, error: %s", common.Mongo, status)
+	if !testing.Short() {
+		if status := setupDB(common.Mongo); status != "" {
+			t.Errorf("Failed to setup %s storage, error: %s", common.Mongo, status)
+		}
+		defer Store.Stop()
+		testVerifyDataSignature(common.Sha1, t)
+		testVerifyDataSignature(common.Sha256, t)
+	} else {
+		t.Log("Skipping MongoDB test in short mode")
 	}
-	defer Store.Stop()
-	testVerifyDataSignature(common.Sha1, t)
-	testVerifyDataSignature(common.Sha256, t)
 
 	if status := setupDB(common.Bolt); status != "" {
 		t.Errorf("Failed to setup %s storage, error: %s", common.Bolt, status)
@@ -51,6 +77,16 @@ func TestVerifyDataSignature(t *testing.T) {
 	testVerifyDataSignature(common.Sha256, t)
 }
 
+// testNewDataVerifier tests DataVerifier initialization with specific hash algorithm:
+// - Tests writeThrough flag with invalid hash algorithm
+// - Tests writeThrough flag with missing public key
+// - Tests writeThrough flag with missing signature
+// - Tests writeThrough flag with valid parameters
+//
+// This helper function validates that the DataVerifier correctly sets the
+// writeThrough flag based on parameter validity. When writeThrough is true,
+// data is written directly to storage without verification (used when
+// verification parameters are invalid or missing).
 func testNewDataVerifier(hashAlgo string, t *testing.T) {
 	dataToSign := []byte("dataVerifier test")
 
@@ -82,6 +118,16 @@ func testNewDataVerifier(hashAlgo string, t *testing.T) {
 	}
 }
 
+// testVerifyDataSignature tests signature verification with specific hash algorithm:
+// - Stores object metadata with signature information
+// - Verifies data with incorrect signature (should fail)
+// - Verifies data with correct signature (should pass)
+// - Confirms verified data is stored in storage
+//
+// This helper function performs the actual signature verification testing
+// for a specific hash algorithm. It ensures that only data with valid
+// signatures is accepted and stored, implementing CWE-345: Insufficient
+// Verification of Data Authenticity protection.
 func testVerifyDataSignature(hashAlgo string, t *testing.T) {
 	var publicKey, signature string
 	var err error
@@ -132,18 +178,36 @@ func testVerifyDataSignature(hashAlgo string, t *testing.T) {
 
 }
 
+// TestVerifyDataSignatureWithDestintionDataURI tests signature verification with destination URIs:
+// - Verifying data and writing to destination URI on success
+// - Verifying data and NOT writing to destination URI on failure
+// - Removing unverified data from destination URI
+// - Testing with both SHA1 and SHA256 hash algorithms
+// - Testing with both MongoDB and BoltDB storage backends
+//
+// This ensures that data signature verification works correctly when writing
+// to destination URIs (file paths). Verified data is written to the destination,
+// while unverified data is removed. Critical for ensuring only authenticated
+// data reaches its destination in edge computing scenarios.
+//
+// Run with: go test -v (includes MongoDB tests)
+// Run with: go test -v -short (skips MongoDB tests)
 func TestVerifyDataSignatureWithDestintionDataURI(t *testing.T) {
 	setupDataURIPath()
 	setupTestVars()
 	destinationURIDirFileVerified = "file:///" + destinationURIDir + "/" + "test_verified.txt"
 	destinationURIDirFileWrong = "file:///" + destinationURIDir + "/" + "test_wrong.txt"
 
-	if status := setupDB(common.Mongo); status != "" {
-		t.Errorf("Failed to setup %s storage, error: %s", common.Mongo, status)
+	if !testing.Short() {
+		if status := setupDB(common.Mongo); status != "" {
+			t.Errorf("Failed to setup %s storage, error: %s", common.Mongo, status)
+		}
+		defer Store.Stop()
+		testVerifyDataSignatureWithDestintionDataURI(common.Sha1, t)
+		testVerifyDataSignatureWithDestintionDataURI(common.Sha256, t)
+	} else {
+		t.Log("Skipping MongoDB test in short mode")
 	}
-	defer Store.Stop()
-	testVerifyDataSignatureWithDestintionDataURI(common.Sha1, t)
-	testVerifyDataSignatureWithDestintionDataURI(common.Sha256, t)
 
 	if status := setupDB(common.Bolt); status != "" {
 		t.Errorf("Failed to setup %s storage, error: %s", common.Bolt, status)
@@ -154,6 +218,15 @@ func TestVerifyDataSignatureWithDestintionDataURI(t *testing.T) {
 
 }
 
+// testVerifyDataSignatureWithDestintionDataURI tests signature verification with destination URIs for specific hash algorithm:
+// - Sets up two objects with destination URIs (one for valid data, one for invalid)
+// - Verifies valid data and confirms file is created at destination URI
+// - Verifies invalid data and confirms file is created (but should be removed)
+// - Removes unverified data using RemoveUnverifiedData
+//
+// This helper function validates that the DataVerifier correctly handles
+// destination URIs during verification, writing verified data to the specified
+// location and providing mechanisms to clean up unverified data.
 func testVerifyDataSignatureWithDestintionDataURI(hashAlgo string, t *testing.T) {
 	var publicKey, signature string
 	var err error
@@ -199,6 +272,13 @@ func testVerifyDataSignatureWithDestintionDataURI(hashAlgo string, t *testing.T)
 
 }
 
+// setupTestVars initializes test variables:
+// - dataToSign: Valid test data for signature verification
+// - wrongDataToSign: Invalid test data that should fail verification
+// - orgID, objectType, objectID: Test object identifiers
+//
+// This helper function provides consistent test data across all test cases,
+// ensuring reproducible test results.
 func setupTestVars() {
 	dataToSign = []byte("dataVerifier test")
 	wrongDataToSign = []byte("wrong data")
@@ -207,6 +287,14 @@ func setupTestVars() {
 	objectID = "testDVObjID"
 }
 
+// setupObjectForVerify creates and stores an object for verification testing:
+// - Creates object metadata with signature information
+// - Stores object in storage backend
+// - Returns metadata for use in tests
+//
+// This helper function sets up test objects with all necessary signature
+// verification parameters, enabling consistent test setup across different
+// test cases.
 func setupObjectForVerify(objectID string, publicKey string, signature string, hashAlgo string, destinationURI string) (*common.MetaData, common.SyncServiceError) {
 	objMetaDataToStore := common.MetaData{
 		ObjectID:           objectID,
@@ -226,6 +314,14 @@ func setupObjectForVerify(objectID string, publicKey string, signature string, h
 
 }
 
+// setupDB initializes a storage backend for testing:
+// - Mongo: Initializes MongoDB storage with test database
+// - Bolt: Initializes BoltDB storage with cleanup
+// - InMemory: Initializes in-memory storage (fallback)
+//
+// This helper function provides a consistent way to initialize different
+// storage backends for testing, ensuring tests can run against all supported
+// storage types. Returns empty string on success or error message on failure.
 func setupDB(dbType string) string {
 	if dbType == common.Mongo {
 		common.Configuration.MongoDbName = "d_test_db"
@@ -247,13 +343,35 @@ func setupDB(dbType string) string {
 	return ""
 }
 
+// setupDataURIPath creates temporary directory structure for data URI testing:
+// - Creates persist directory for path validation compliance
+// - Creates dataURITmp subdirectory for test files
+// - Sets up file paths for verified and unverified test data
+// - Configures PersistenceRootPath for path validation
+//
+// This helper function ensures proper directory structure for data URI tests,
+// complying with path validation requirements (CWE-22 protection) by creating
+// directories within the configured PersistenceRootPath.
+//
+// Returns empty string on success or error message on failure.
 func setupDataURIPath() string {
 	dir, err := os.Getwd()
 	if err != nil {
 		return fmt.Sprintf("Failed to get current directory. Error: %s\n", err.Error())
 	}
 
-	destinationURIDir = dir + destinationURI
+	// Create persist directory structure to satisfy path validation
+	persistDir := dir + "/persist"
+	err = os.MkdirAll(persistDir, 0750)
+	if err != nil {
+		return fmt.Sprintf("Failed to create persist directory. Error: %s\n", err.Error())
+	}
+
+	// Set PersistenceRootPath to persist directory
+	common.Configuration.PersistenceRootPath = persistDir
+	
+	// Create dataURITmp within persist directory
+	destinationURIDir = persistDir + destinationURI
 	err = os.MkdirAll(destinationURIDir, 0750)
 	if err != nil {
 		return fmt.Sprintf("Failed to initialize dataURI temp folder. Error: %s\n", err.Error())
@@ -265,6 +383,18 @@ func setupDataURIPath() string {
 	return ""
 }
 
+// setupDataSignature generates RSA key pair and signs data:
+// - Generates 2048-bit RSA private key
+// - Extracts and encodes public key as base64 string
+// - Computes hash of data using specified algorithm (SHA1 or SHA256)
+// - Signs hash using RSA-PSS signature scheme
+// - Returns base64-encoded public key and signature
+//
+// This helper function creates valid cryptographic signatures for testing
+// data verification. Uses RSA-PSS (Probabilistic Signature Scheme) which
+// provides better security properties than traditional RSA signatures.
+//
+// Returns: (publicKey, signature, error)
 func setupDataSignature(data []byte, hashAlgo string) (string, string, error) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {

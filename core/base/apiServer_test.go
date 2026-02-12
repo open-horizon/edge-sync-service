@@ -17,11 +17,29 @@ import (
 	"github.com/open-horizon/edge-sync-service/core/storage"
 )
 
+// TestHandleDestinations tests destination retrieval API endpoint:
+// - Retrieving destinations for an organization
+// - Access control validation (admin, user roles)
+// - Forbidden access for unauthorized users
+// - Testing with both MongoDB and BoltDB storage backends
+//
+// This ensures that the destinations API endpoint correctly enforces access
+// control and returns the appropriate destinations for each organization.
+// Critical for multi-tenant deployments where destination access must be
+// properly isolated by organization.
 func TestHandleDestinations(t *testing.T) {
 	testHandleDestinations(common.Bolt, t)
 	testHandleDestinations(common.Mongo, t)
 }
 
+// testHandleDestinations tests destination retrieval with specific storage backend:
+// - Stores multiple destinations across different organizations
+// - Tests retrieval with different user roles (admin, user)
+// - Validates access control enforcement
+// - Verifies correct destination count for each organization
+//
+// This helper function validates that destination retrieval works correctly
+// with proper access control enforcement across different storage backends.
 func testHandleDestinations(storageType string, t *testing.T) {
 	if status := testAPIServerSetup(common.CSS, storageType); status != "" {
 		t.Errorf(status)
@@ -76,11 +94,26 @@ func testHandleDestinations(storageType string, t *testing.T) {
 	}
 }
 
+// TestHandleDestinationsInvalidCalls tests error handling for destination API:
+// - Invalid HTTP methods (POST when only GET is allowed)
+// - Missing organization ID
+// - Non-existent organization
+// - Testing with both MongoDB and BoltDB storage backends
+//
+// This ensures that the destinations API endpoint properly handles invalid
+// requests and returns appropriate HTTP status codes for error conditions.
 func TestHandleDestinationsInvalidCalls(t *testing.T) {
 	testHandleDestinationsInvalidCalls(common.Mongo, t)
 	testHandleDestinationsInvalidCalls(common.Bolt, t)
 }
 
+// testHandleDestinationsInvalidCalls tests error handling with specific storage backend:
+// - Tests various invalid request scenarios
+// - Validates appropriate HTTP status codes (400, 404, 405)
+// - Ensures consistent error handling across storage backends
+//
+// This helper function validates that error handling works correctly
+// for invalid destination API requests.
 func testHandleDestinationsInvalidCalls(storageType string, t *testing.T) {
 	if status := testAPIServerSetup(common.CSS, storageType); status != "" {
 		t.Errorf(status)
@@ -110,11 +143,26 @@ func testHandleDestinationsInvalidCalls(storageType string, t *testing.T) {
 	}
 }
 
+// TestMisceleneousHandlers tests miscellaneous API endpoints:
+// - Resend endpoint (POST to trigger object resend)
+// - Shutdown endpoint (POST to shutdown service)
+// - Access control for administrative operations
+// - Testing with both MongoDB and BoltDB storage backends
+//
+// This ensures that administrative API endpoints work correctly and enforce
+// proper access control. Critical for operational management of the sync service.
 func TestMisceleneousHandlers(t *testing.T) {
 	testMisceleneousHandlers(common.Mongo, t)
 	testMisceleneousHandlers(common.Bolt, t)
 }
 
+// testMisceleneousHandlers tests miscellaneous endpoints with specific storage backend:
+// - Tests resend endpoint with GET (should fail) and POST (should succeed)
+// - Tests shutdown endpoint access control (requires SyncAdmin role)
+// - Validates HTTP method restrictions
+//
+// This helper function validates that administrative endpoints work correctly
+// with proper access control enforcement.
 func testMisceleneousHandlers(storageType string, t *testing.T) {
 	if status := testAPIServerSetup(common.ESS, storageType); status != "" {
 		t.Errorf(status)
@@ -158,6 +206,25 @@ func testMisceleneousHandlers(storageType string, t *testing.T) {
 	}
 }
 
+// TestHandleObject tests comprehensive object API operations:
+// - Creating, retrieving, updating, and deleting objects
+// - Object activation and status management
+// - Object data upload and download
+// - Destination management for objects
+// - Webhook registration
+// - Access control enforcement (admin, user, node roles)
+// - ACL-based permissions for object types
+// - Public object access across organizations
+// - XSS prevention in metadata fields
+// - Testing with CSS and ESS node types
+// - Testing with MongoDB, BoltDB, and InMemory storage backends
+//
+// This is the most comprehensive test in the API server test suite, covering
+// all major object operations and access control scenarios. Critical for ensuring
+// the object API works correctly across all supported configurations and properly
+// enforces security policies.
+//
+// Run with: go test -v
 func TestHandleObject(t *testing.T) {
 	testHandleObjectHelper(common.CSS, common.Mongo, t)
 	testHandleObjectHelper(common.CSS, common.Bolt, t)
@@ -165,6 +232,18 @@ func TestHandleObject(t *testing.T) {
 	testHandleObjectHelper(common.ESS, common.Bolt, t)
 }
 
+// testHandleObjectHelper tests object operations with specific node type and storage backend:
+// - Executes extensive test matrix covering all object operations
+// - Tests access control with various user roles and ACL configurations
+// - Validates object lifecycle operations (create, read, update, delete)
+// - Tests object data operations (upload, download, partial content)
+// - Tests destination management and webhook operations
+// - Validates XSS prevention in metadata fields
+// - Tests public object access across organizations
+//
+// This helper function is the core of the object API testing, executing hundreds
+// of test cases to ensure comprehensive coverage of all object operations and
+// access control scenarios.
 func testHandleObjectHelper(nodeType string, storageType string, t *testing.T) {
 	if status := testAPIServerSetup(nodeType, storageType); status != "" {
 		t.Errorf(status)
@@ -907,11 +986,28 @@ func testHandleObjectHelper(nodeType string, storageType string, t *testing.T) {
 	}
 }
 
+// TestHandleManifest tests manifest object operations:
+// - Creating and retrieving manifest objects
+// - Access control for manifest operations (requires Admin role)
+// - Preventing unauthorized manifest modifications
+// - Testing with MongoDB and BoltDB storage backends
+//
+// This ensures that manifest objects (special configuration objects) are properly
+// protected and can only be modified by administrators. Manifests contain critical
+// configuration data that should not be modifiable by regular users or nodes.
 func TestHandleManifest(t *testing.T) {
 	testHandleManifestHelper(common.CSS, common.Mongo, t)
 	testHandleManifestHelper(common.CSS, common.Bolt, t)
 }
 
+// testHandleManifestHelper tests manifest operations with specific storage backend:
+// - Tests manifest creation by admin users
+// - Tests manifest retrieval by various user roles
+// - Validates that non-admin users cannot modify manifests
+// - Ensures proper access control enforcement
+//
+// This helper function validates that manifest objects are properly protected
+// from unauthorized modifications while allowing appropriate read access.
 func testHandleManifestHelper(nodeType string, storageType string, t *testing.T) {
 	if status := testAPIServerSetup(nodeType, storageType); status != "" {
 		t.Errorf(status)
@@ -981,11 +1077,28 @@ func testHandleManifestHelper(nodeType string, storageType string, t *testing.T)
 
 }
 
+// TestInvalidURLs tests error handling for malformed API requests:
+// - Empty URLs
+// - Invalid URL formats
+// - Wrong HTTP methods
+// - Non-existent resources
+// - Testing with both MongoDB and BoltDB storage backends
+//
+// This ensures that the API server properly handles malformed requests and
+// returns appropriate HTTP status codes (400, 404, 405) for various error
+// conditions. Critical for API robustness and security.
 func TestInvalidURLs(t *testing.T) {
 	testInvalidURLs(common.Bolt, t)
 	testInvalidURLs(common.Mongo, t)
 }
 
+// testInvalidURLs tests error handling with specific storage backend:
+// - Tests various malformed URL scenarios
+// - Validates appropriate HTTP status codes for each error type
+// - Ensures consistent error handling across storage backends
+//
+// This helper function validates that the API server handles invalid
+// requests consistently regardless of the storage backend.
 func testInvalidURLs(storageType string, t *testing.T) {
 	if status := testAPIServerSetup(common.CSS, storageType); status != "" {
 		t.Errorf(status)
@@ -1034,6 +1147,18 @@ func testInvalidURLs(storageType string, t *testing.T) {
 	}
 }
 
+// TestPolicies tests policy-based object access control:
+// - Service-based authentication and authorization
+// - Policy-based object filtering
+// - Service version matching for object access
+// - Access control based on destination policies
+//
+// This ensures that policy-based access control works correctly, allowing
+// services to access only the objects that match their policy constraints.
+// Critical for service-based deployments where objects are targeted to
+// specific services based on policies.
+//
+// Run with: go test -v
 func TestPolicies(t *testing.T) {
 	if status := testAPIServerSetup(common.ESS, common.InMemory); status != "" {
 		t.Errorf(status)
@@ -1112,11 +1237,28 @@ func TestPolicies(t *testing.T) {
 	}
 }
 
+// TestObjectsWithPolicyUpdatedSince tests incremental policy synchronization:
+// - Retrieving objects with policies updated since a specific timestamp
+// - Timestamp-based filtering for efficient synchronization
+// - Testing with both MongoDB and BoltDB storage backends
+//
+// This ensures that the "updated since" query works correctly for policy-based
+// objects, enabling efficient incremental synchronization where only objects
+// updated after a specific time are retrieved. Critical for reducing bandwidth
+// and processing overhead in large-scale deployments.
 func TestObjectsWithPolicyUpdatedSince(t *testing.T) {
 	testObjectsWithPolicyUpdatedSinceHelper(common.Mongo, t)
 	testObjectsWithPolicyUpdatedSinceHelper(common.Bolt, t)
 }
 
+// testObjectsWithPolicyUpdatedSinceHelper tests incremental sync with specific storage backend:
+// - Loads test data with known timestamps
+// - Tests retrieval with various "since" timestamps
+// - Validates correct object counts for each query
+// - Tests error handling for invalid timestamps
+//
+// This helper function validates that timestamp-based filtering works correctly
+// for efficient incremental synchronization of policy-based objects.
 func testObjectsWithPolicyUpdatedSinceHelper(storageProvider string, t *testing.T) {
 	if status := testAPIServerSetup(common.CSS, storageProvider); status != "" {
 		t.Errorf(status)
@@ -1175,6 +1317,15 @@ func testObjectsWithPolicyUpdatedSinceHelper(storageProvider string, t *testing.
 	}
 }
 
+// loadTestPolicyData creates test objects with destination policies:
+// - Creates objects with various policy configurations
+// - Records timestamps for testing "updated since" queries
+// - Returns timestamp and object count for test validation
+//
+// This helper function sets up test data for policy-based access control
+// and incremental synchronization tests.
+//
+// Returns: (timestamp, objectCount, error)
 func loadTestPolicyData(nodeType string, orgID string) (int64, int, error) {
 	testData := []common.MetaData{
 		common.MetaData{ObjectID: "1", ObjectType: "type1", DestOrgID: "myorgPolicy1", NoData: true,
@@ -1262,11 +1413,35 @@ func loadTestPolicyData(nodeType string, orgID string) (int64, int, error) {
 	return since, len(testData), nil
 }
 
+// TestGetObjectsWithFilters tests object retrieval with complex filter combinations:
+// - Filtering by destination policy presence/absence
+// - Filtering by service organization and service name
+// - Filtering by property names in policies
+// - Filtering by object type and object ID
+// - Filtering by destination type and destination ID
+// - Filtering by NoData flag
+// - Filtering by expiration time
+// - Access control enforcement with filters
+// - Testing with both MongoDB and BoltDB storage backends
+//
+// This comprehensive test ensures that the object filtering API works correctly
+// with all supported filter combinations and properly enforces access control.
+// Critical for efficient object queries in large-scale deployments where filtering
+// reduces network traffic and improves performance.
 func TestGetObjectsWithFilters(t *testing.T) {
 	testGetObjectsWithFiltersHelper(common.Mongo, t)
 	testGetObjectsWithFiltersHelper(common.Bolt, t)
 }
 
+// testGetObjectsWithFiltersHelper tests filtering with specific storage backend:
+// - Loads comprehensive test data with various metadata configurations
+// - Tests all filter combinations
+// - Validates correct object counts for each filter query
+// - Tests access control enforcement with ACLs
+// - Tests public object access across organizations
+//
+// This helper function validates that object filtering works correctly with
+// proper access control enforcement across different storage backends.
 func testGetObjectsWithFiltersHelper(storageProvider string, t *testing.T) {
 	if status := testAPIServerSetup(common.CSS, storageProvider); status != "" {
 		t.Errorf(status)
@@ -1399,6 +1574,17 @@ func testGetObjectsWithFiltersHelper(storageProvider string, t *testing.T) {
 	}
 }
 
+// loadTestMetaData creates test objects with various metadata configurations:
+// - Creates objects with destination policies
+// - Creates objects with specific destinations
+// - Creates objects with various expiration times
+// - Creates objects with NoData flag variations
+// - Records timestamps for testing queries
+//
+// This helper function sets up comprehensive test data for object filtering
+// and query tests, covering all major metadata variations.
+//
+// Returns: (timestamp, objectCount, error)
 func loadTestMetaData(nodeType string, orgID string) (int64, int, error) {
 	destArray := []string{"myDestType5:myDestID5a", "myDestType5:myDestID5c"}
 	testData := []common.MetaData{
@@ -1527,6 +1713,17 @@ func loadTestMetaData(nodeType string, orgID string) (int64, int, error) {
 	return since, len(testData), nil
 }
 
+// testAPIServerSetup initializes the API server test environment:
+// - Initializes storage backend (MongoDB, BoltDB, or InMemory)
+// - Sets up authentication and security
+// - Starts communication layer
+// - Initializes object queues and locks
+// - Configures node type (CSS or ESS)
+//
+// This helper function provides a consistent test environment setup across
+// all API server tests, ensuring proper initialization of all components.
+//
+// Returns: Empty string on success, error message on failure
 func testAPIServerSetup(nodeType string, storageType string) string {
 	common.Running = true
 	time.Sleep(100 * time.Millisecond) // Wait a bit
@@ -1574,12 +1771,26 @@ func testAPIServerSetup(nodeType string, storageType string) string {
 	return ""
 }
 
+// apiServerTestResponseWriter is a mock HTTP response writer for testing:
+// - Captures HTTP status code
+// - Captures response headers
+// - Captures response body
+//
+// This mock implementation allows tests to inspect HTTP responses without
+// requiring actual HTTP connections, enabling fast and reliable unit testing
+// of API endpoints.
 type apiServerTestResponseWriter struct {
 	statusCode int
 	header     http.Header
 	body       bytes.Buffer
 }
 
+// newAPIServerTestResponseWriter creates a new mock response writer for testing:
+// - Initializes empty header map
+// - Initializes empty body buffer
+// - Returns ready-to-use mock writer
+//
+// This factory function creates mock response writers for API endpoint testing.
 func newAPIServerTestResponseWriter() *apiServerTestResponseWriter {
 	writer := new(apiServerTestResponseWriter)
 	writer.header = make(map[string][]string)

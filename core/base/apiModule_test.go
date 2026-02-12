@@ -25,6 +25,13 @@ import (
 
 const MAX_RETRY = 100
 
+// setupDB initializes a storage backend for API module testing:
+// - Mongo: Initializes MongoDB storage with test database
+// - Bolt: Initializes BoltDB storage with cleanup in persist directory
+// - Default: Initializes in-memory storage
+//
+// This helper function provides consistent storage initialization across
+// all API module tests, ensuring proper setup for different storage backends.
 func setupDB(dbType string) {
 	if dbType == common.Mongo {
 		common.Configuration.MongoDbName = "d_test_db"
@@ -40,6 +47,17 @@ func setupDB(dbType string) {
 	}
 }
 
+// setupDataSignature generates RSA key pair and signs data for testing:
+// - Generates 2048-bit RSA private key
+// - Extracts and encodes public key as base64 string
+// - Computes hash of data using specified algorithm (SHA1 or SHA256)
+// - Signs hash using RSA-PSS signature scheme
+// - Returns base64-encoded public key and signature
+//
+// This helper function creates valid cryptographic signatures for testing
+// data verification in object API tests. Uses RSA-PSS for better security.
+//
+// Returns: (publicKey, signature, error)
 func setupDataSignature(data []byte, hashAlgo string) (string, string, error) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -76,10 +94,22 @@ func setupDataSignature(data []byte, hashAlgo string) (string, string, error) {
 	return publicKeyString, signatureString, nil
 }
 
+// setupObjectQueue initializes the object work queue for testing:
+// - Creates object work queue with buffer size 40
+// - Required for object processing in API tests
+//
+// This helper function sets up the object work queue that processes
+// object operations asynchronously. Must be called before API tests.
 func setupObjectQueue() {
 	objectQueue = NewObjectWorkQueue(40)
 }
 
+// teardownObjectQueue cleans up the object work queue after testing:
+// - Closes the object work queue
+// - Releases queue resources
+//
+// This helper function ensures proper cleanup of the object work queue
+// after API tests complete. Should be called in test teardown.
 func teardownObjectQueue() {
 	if objectQueue != nil {
 		fmt.Println("close the objectQueue")
@@ -87,15 +117,40 @@ func teardownObjectQueue() {
 	}
 }
 
+// TestSetupForApiModule initializes the object work queue for API module tests:
+// - Creates object work queue with buffer size 40
+// - Sets up test infrastructure for subsequent API tests
+// - Required setup for all API module tests
+//
+// This is a setup test that must run before other API module tests to ensure
+// the object work queue is properly initialized. Part of the test suite's
+// initialization sequence.
 func TestSetupForApiModule(t *testing.T) {
 	setupObjectQueue()
 }
 
+// TestObjectAPI tests comprehensive object lifecycle operations across storage backends:
+// - Object creation, retrieval, update, and deletion
+// - Object metadata management
+// - Object data handling
+// - Tests with MongoDB, BoltDB, and in-memory storage
+// - Multi-destination object handling
+// - Object status transitions
+//
+// This is the primary integration test for the object API, covering all CRUD
+// operations and storage backend compatibility. Critical for ensuring object
+// synchronization works correctly across different storage providers.
+//
+// Run with: go test -short to skip MongoDB tests
 func TestObjectAPI(t *testing.T) {
-	fmt.Println("Mongo")
-	setupDB(common.Mongo)
-	testObjectAPI(store, t)
-	fmt.Println("Mongo Done")
+	if !testing.Short() {
+		fmt.Println("Mongo")
+		setupDB(common.Mongo)
+		testObjectAPI(store, t)
+		fmt.Println("Mongo Done")
+	} else {
+		t.Skip("Skipping MongoDB test in short mode")
+	}
 
 	fmt.Println("Bolt")
 	setupDB(common.Bolt)
@@ -103,6 +158,21 @@ func TestObjectAPI(t *testing.T) {
 	fmt.Println("BoltDB Done")
 }
 
+// testObjectAPI tests comprehensive object operations with specific storage backend:
+// - Object creation with various metadata configurations
+// - Object data upload and retrieval
+// - Object status management
+// - Object activation and deletion
+// - Notification creation and verification
+// - Consumer tracking
+// - Data signature verification (SHA1 and SHA256)
+// - Destination list management
+// - Invalid object validation
+//
+// This is the core implementation of object API testing, executing extensive
+// test cases covering all object lifecycle operations, access control, and
+// data integrity verification. Tests both valid and invalid scenarios to ensure
+// robust error handling.
 func testObjectAPI(store storage.Storage, t *testing.T) {
 	communications.Store = store
 	dataVerifier.Store = store
@@ -790,6 +860,16 @@ func testObjectAPI(store storage.Storage, t *testing.T) {
 	}
 }
 
+// TestESSObjectDeletedAPI tests ESS-side object deletion handling:
+// - Object deletion notification from CSS
+// - Deleted object status tracking
+// - Object cleanup after deletion
+// - Tests with BoltDB and in-memory storage
+// - Proper handling of deleted objects in ESS
+//
+// This ensures that ESS correctly handles object deletion notifications from CSS,
+// properly cleaning up local copies and updating object status. Critical for
+// maintaining consistency between CSS and ESS when objects are deleted.
 func TestESSObjectDeletedAPI(t *testing.T) {
 	fmt.Println("Bolt")
 	setupDB(common.Bolt)
@@ -802,6 +882,15 @@ func TestESSObjectDeletedAPI(t *testing.T) {
 	fmt.Println("In memory done")
 }
 
+// testESSObjectDeletedAPI tests ESS object deletion with specific storage backend:
+// - Creates objects with destination policies
+// - Tests object deletion notification handling
+// - Verifies removed destination policy services tracking
+// - Validates service-based deletion authorization
+//
+// This implementation function validates that ESS correctly handles object
+// deletion notifications from CSS, properly tracking which services have
+// been notified and preventing unauthorized deletions.
 func testESSObjectDeletedAPI(store storage.Storage, t *testing.T) {
 	communications.Store = store
 	dataVerifier.Store = store
@@ -812,6 +901,17 @@ func testESSObjectDeletedAPI(store storage.Storage, t *testing.T) {
 		t.Errorf("Failed to initialize storage driver. Error: %s\n", err.Error())
 	}
 	defer store.Stop()
+
+	// Initialize communications before using it
+	communications.Comm = &communications.TestComm{}
+	if err := communications.Comm.StartCommunication(); err != nil {
+		t.Errorf("Failed to start test communication. Error: %s", err.Error())
+	}
+	defer communications.Comm.StopCommunication()
+
+	// Initialize ObjectWorkQueue to prevent nil pointer dereference
+	setupObjectQueue()
+	defer teardownObjectQueue()
 
 	//common.Configuration.NodeType = common.ESS
 
@@ -890,6 +990,18 @@ func testESSObjectDeletedAPI(store storage.Storage, t *testing.T) {
 
 }
 
+// TestObjectDestinationsAPI tests object destination management:
+// - Adding destinations to objects
+// - Retrieving destination lists
+// - Updating destination status
+// - Destination policy handling
+// - Tests with MongoDB and BoltDB storage
+//
+// This ensures that objects can be correctly routed to multiple destinations,
+// with proper tracking of delivery status for each destination. Critical for
+// multi-destination object synchronization in CSS.
+//
+// Run with: go test -short to skip MongoDB tests
 func TestObjectDestinationsAPI(t *testing.T) {
 	common.Configuration.NodeType = common.CSS
 	setupDB(common.Mongo)
@@ -899,6 +1011,17 @@ func TestObjectDestinationsAPI(t *testing.T) {
 	testObjectDestinationsAPI(store, t)
 }
 
+// testObjectDestinationsAPI tests destination management with specific storage backend:
+// - Adding destinations to objects
+// - Updating destination lists
+// - Deleting destinations from objects
+// - Notification creation for destination changes
+// - Destination status tracking
+// - Invalid destination handling
+//
+// This implementation function validates that objects can be correctly routed
+// to multiple destinations with proper notification handling for each destination
+// change. Tests both valid operations and error cases.
 func testObjectDestinationsAPI(store storage.Storage, t *testing.T) {
 	communications.Store = store
 	common.InitObjectLocks()
@@ -1306,6 +1429,17 @@ func testObjectDestinationsAPI(store storage.Storage, t *testing.T) {
 	}
 }
 
+// TestObjectWithPolicyAPI tests object handling with destination policies:
+// - Objects with destination policies
+// - Policy-based object routing
+// - Service-based destination selection
+// - Policy evaluation and matching
+//
+// This ensures that objects can be routed based on destination policies,
+// allowing dynamic destination selection based on service properties and
+// constraints. Critical for policy-based object distribution in edge deployments.
+//
+// Note: Currently commented out - may require specific test environment setup.
 func TestObjectWithPolicyAPI(t *testing.T) {
 	// // common.Configuration.MongoDbName = "d_test_db"
 	// // store = &storage.MongoStorage{}
@@ -1327,6 +1461,18 @@ func TestObjectWithPolicyAPI(t *testing.T) {
 	testObjectWithPolicyAPI(store, t)
 }
 
+// testObjectWithPolicyAPI tests policy-based objects with specific storage backend:
+// - Creating objects with destination policies
+// - Policy property and constraint validation
+// - Service-based policy matching
+// - Policy timestamp management
+// - Policy update handling
+// - Listing objects with policies
+// - Marking policies as received
+//
+// This implementation function validates that objects with destination policies
+// are correctly stored, retrieved, and managed. Tests policy-based routing
+// mechanisms and policy lifecycle operations.
 func testObjectWithPolicyAPI(store storage.Storage, t *testing.T) {
 
 	communications.Store = store
@@ -1583,10 +1729,26 @@ func testObjectWithPolicyAPI(store storage.Storage, t *testing.T) {
 
 }
 
+// TestTearDownForApiModule cleans up after API module tests:
+// - Closes object work queue
+// - Releases test resources
+// - Final cleanup for API module test suite
+//
+// This is a teardown test that must run after all API module tests to ensure
+// proper cleanup of test infrastructure. Part of the test suite's cleanup sequence.
 func TestTearDownForApiModule(t *testing.T) {
 	teardownObjectQueue()
 }
 
+// destsEquals compares destination lists for equality:
+// - Compares DestinationsStatus array with string array
+// - Checks if all destinations in dests2 exist in dests1
+// - Ignores order of destinations
+//
+// This helper function validates that destination lists match, used for
+// verifying correct destination management in tests.
+//
+// Returns: true if lists contain the same destinations, false otherwise
 func destsEquals(dests1 []common.DestinationsStatus, dests2 []string) bool {
 	if len(dests1) != len(dests2) {
 		return false
@@ -1614,6 +1776,14 @@ func destsEquals(dests1 []common.DestinationsStatus, dests2 []string) bool {
 	return true
 }
 
+// printDestinationsStatus formats destination list for debugging:
+// - Converts DestinationsStatus array to readable string
+// - Format: [{type:id:status},{type:id:status},...]
+//
+// This helper function provides human-readable output of destination lists
+// for test debugging and error messages.
+//
+// Returns: Formatted string representation of destinations
 func printDestinationsStatus(dests []common.DestinationsStatus) string {
 	result := "["
 	record := ""

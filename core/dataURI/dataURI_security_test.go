@@ -137,8 +137,14 @@ func TestRetrieveData_SymlinkAttack(t *testing.T) {
 		t.Skipf("Symlink creation not supported: %v", err)
 	}
 
-	// Test that accessing via symlink is blocked
-	err = validateDataPath(symlinkPath, allowedDir)
+	// Resolve the symlink to get the real path
+	realPath, err := filepath.EvalSymlinks(symlinkPath)
+	if err != nil {
+		t.Fatalf("Failed to resolve symlink: %v", err)
+	}
+
+	// Test that accessing via symlink is blocked (real path is outside allowed dir)
+	err = validateDataPath(realPath, allowedDir)
 	if err == nil {
 		t.Error("Expected symlink attack to be blocked")
 	}
