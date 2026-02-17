@@ -1,11 +1,11 @@
 module github.com/open-horizon/edge-sync-service
 
-go 1.24.0
+go 1.25.7
 
 require (
 	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/google/uuid v1.6.0
-	github.com/open-horizon/edge-utilities v0.0.0-20190711093331-0908b45a7152
+	github.com/open-horizon/edge-utilities v0.11.0
 	go.etcd.io/bbolt v1.4.3
 	go.mongodb.org/mongo-driver v1.17.9
 	golang.org/x/sync v0.19.0

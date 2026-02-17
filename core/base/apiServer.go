@@ -210,7 +210,7 @@ func handleDestinations(writer http.ResponseWriter, request *http.Request) {
 					writer.Header().Add(contentType, applicationJSON)
 					writer.WriteHeader(http.StatusOK)
 					if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
-						log.Error("Failed to write response body, error: " + err.Error())
+						log.Error("Failed to write response body, error: %s", err.Error())
 					}
 				}
 			}
@@ -280,7 +280,7 @@ func handleDestinations(writer http.ResponseWriter, request *http.Request) {
 					writer.Header().Add(contentType, applicationJSON)
 					writer.WriteHeader(http.StatusOK)
 					if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
-						log.Error("Failed to write response body, error: " + err.Error())
+						log.Error("Failed to write response body, error: %s", err.Error())
 					}
 				}
 			}
@@ -670,7 +670,7 @@ func handleObjectRequest(orgID string, objectType string, objectID string, write
 						writer.Header().Add(contentType, applicationJSON)
 						writer.WriteHeader(http.StatusOK)
 						if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
-							log.Error("Failed to write response body, error: " + err.Error())
+							log.Error("Failed to write response body, error: %s", err.Error())
 						}
 					}
 				} else {
@@ -1053,7 +1053,7 @@ func handleListObjectsWithFilters(orgID string, writer http.ResponseWriter, requ
 					writer.Header().Add(contentType, applicationJSON)
 					writer.WriteHeader(http.StatusOK)
 					if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
-						log.Error("Failed to write response body, error: " + err.Error())
+						log.Error("Failed to write response body, error: %s", err.Error())
 					}
 				}
 			}
@@ -1147,7 +1147,7 @@ func handleListObjectTypes(orgID string, writer http.ResponseWriter, request *ht
 					writer.Header().Add(contentType, applicationJSON)
 					writer.WriteHeader(http.StatusOK)
 					if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
-						log.Error("Failed to write response body, error: " + err.Error())
+						log.Error("Failed to write response body, error: %s", err.Error())
 					}
 				}
 			}
@@ -1799,7 +1799,7 @@ func handleObjectStatus(orgID string, objectType string, objectID string, canAcc
 				writer.Header().Add(contentType, "plain/text")
 				writer.WriteHeader(http.StatusOK)
 				if _, err := writer.Write([]byte(status)); err != nil && log.IsLogging(logger.ERROR) {
-					log.Error("Failed to write response body, error: " + err.Error())
+					log.Error("Failed to write response body, error: %s", err.Error())
 				}
 			}
 		}
@@ -1881,7 +1881,7 @@ func handleObjectDestinations(orgID string, objectType string, objectID string, 
 					writer.Header().Add(contentType, applicationJSON)
 					writer.WriteHeader(http.StatusOK)
 					if _, err := writer.Write([]byte(destinations)); err != nil && log.IsLogging(logger.ERROR) {
-						log.Error("Failed to write response body, error: " + err.Error())
+						log.Error("Failed to write response body, error: %s", err.Error())
 					}
 				}
 			}
@@ -2550,7 +2550,7 @@ func handleListUpdatedObjects(orgID string, objectType string, received bool, wr
 				writer.Header().Add(contentType, applicationJSON)
 				writer.WriteHeader(http.StatusOK)
 				if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
-					log.Error("Failed to write response body, error: " + err.Error())
+					log.Error("Failed to write response body, error: %s", err.Error())
 				}
 			}
 		}
@@ -2713,7 +2713,7 @@ func handleListAllObjects(orgID string, objectType string, writer http.ResponseW
 				writer.Header().Add(contentType, applicationJSON)
 				writer.WriteHeader(http.StatusOK)
 				if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
-					log.Error("Failed to write response body, error: " + err.Error())
+					log.Error("Failed to write response body, error: %s", err.Error())
 				}
 			}
 		}
@@ -2929,7 +2929,7 @@ func handleListObjectsWithDestinationPolicy(orgID string, writer http.ResponseWr
 					writer.Header().Add(contentType, applicationJSON)
 					writer.WriteHeader(http.StatusOK)
 					if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
-						log.Error("Failed to write response body, error: " + err.Error())
+						log.Error("Failed to write response body, error: %s", err.Error())
 					}
 				}
 			}
@@ -3272,7 +3272,7 @@ func handleGetOrganizations(writer http.ResponseWriter, request *http.Request) {
 				writer.Header().Add(contentType, applicationJSON)
 				writer.WriteHeader(http.StatusOK)
 				if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
-					log.Error("Failed to write response body, error: " + err.Error())
+					log.Error("Failed to write response body, error: %s", err.Error())
 				}
 			}
 		}
@@ -3648,7 +3648,7 @@ func handleACLGet(aclType string, orgID string, key string, aclUserType string, 
 				writer.Header().Add(contentType, applicationJSON)
 				writer.WriteHeader(http.StatusOK)
 				if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
-					log.Error("Failed to write response body, error: " + err.Error())
+					log.Error("Failed to write response body, error: %s", err.Error())
 				}
 			}
 		}
@@ -3670,7 +3670,7 @@ func handleACLGet(aclType string, orgID string, key string, aclUserType string, 
 				writer.Header().Add(contentType, applicationJSON)
 				writer.WriteHeader(http.StatusOK)
 				if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
-					log.Error("Failed to write response body, error: " + err.Error())
+					log.Error("Failed to write response body, error: %s", err.Error())
 				}
 			}
 		}
@@ -4218,7 +4218,7 @@ func handleHealth(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Add(contentType, applicationJSON)
 		writer.WriteHeader(http.StatusOK)
 		if _, err := writer.Write(data); err != nil && log.IsLogging(logger.ERROR) {
-			log.Error("Failed to write response body, error: " + err.Error())
+			log.Error("Failed to write response body, error: %s", err.Error())
 		}
 	}
 }

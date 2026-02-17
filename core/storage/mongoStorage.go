@@ -236,11 +236,11 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 		if mongoClient, err = mongo.Connect(ctx, clientOptions); err == nil {
 			break
 		} else {
-			trace.Error("Error connecting to mongo. Error was: " + err.Error())
+			trace.Error("Error connecting to mongo. Error was: %s", err.Error())
 		}
 
 		if connectTime == 0 && trace.IsLogging(logger.ERROR) {
-			trace.Error("Failed to dial mgo. Error: " + err.Error())
+			trace.Error("Failed to dial mgo. Error: %s", err.Error())
 		}
 		if strings.HasPrefix(err.Error(), "unauthorized") ||
 			strings.HasPrefix(err.Error(), "not authorized") ||
@@ -282,7 +282,7 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 	indexModel := mongo.IndexModel{Keys: bson.D{{"destination.destination-org-id", -1}}}
 	if _, err = destinationsCollection.Indexes().CreateOne(context.TODO(), indexModel); err != nil {
 		message := fmt.Sprintf("Failed to create an index on %s. Error: %s", destinations, err)
-		log.Error(message)
+		log.Error("%s", message)
 		return &Error{message}
 	}
 
@@ -297,7 +297,7 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 	indexModel2 := mongo.IndexModel{Keys: bson.D{{"notification.resend-time", -1}, {"notification.status", -1}}}
 	if _, err = notificationsCollection.Indexes().CreateMany(context.TODO(), []mongo.IndexModel{indexModel1, indexModel2}); err != nil {
 		message := fmt.Sprintf("Failed to create an index on %s. Error: %s", notifications, err)
-		log.Error(message)
+		log.Error("%s", message)
 		return &Error{message}
 	}
 
@@ -319,7 +319,7 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 		// check if error is IndexKeySpecsConflict
 		if casterr := err.(mongo.CommandError); casterr.Code != 86 {
 			message := fmt.Sprintf("Failed to create an index on %s. Error: %s", objects, err)
-			log.Error(message)
+			log.Error("%s", message)
 			return &Error{message}
 		}
 	}
@@ -335,14 +335,14 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 		})
 	if err != nil {
 		message := fmt.Sprintf("Failed to create an index on %s. Error: %s", objects, err)
-		log.Error(message)
+		log.Error("%s", message)
 		return &Error{message}
 	}
 	db.Collection(acls).Indexes().CreateOne(context.TODO(), mongo.IndexModel{Keys: bson.D{{"org-id", 1}, {"acl-type", 1}}})
 	gridfsBucket, err := gridfs.NewBucket(db)
 	if err != nil {
-		message := fmt.Sprintf("Error creating gridfs buket Error was: " + err.Error())
-		log.Error(message)
+		message := fmt.Sprintf("Error creating gridfs buket Error was: %s", err.Error())
+		log.Error("%s", message)
 		return &Error{message}
 	}
 
@@ -1241,7 +1241,7 @@ func (store *MongoStorage) StoreObjectTempData(orgID string, objectType string, 
 func (store *MongoStorage) RemoveObjectTempData(orgID string, objectType string, objectID string) common.SyncServiceError {
 
 	if trace.IsLogging(logger.TRACE) {
-		trace.Trace(fmt.Sprintf("RemoveObjectTempData for org - %s, type - %s, id - %s", orgID, objectType, objectID))
+		trace.Trace("RemoveObjectTempData for org - %s, type - %s, id - %s", orgID, objectType, objectID)
 	}
 
 	metaData, err := store.RetrieveObject(orgID, objectType, objectID)
@@ -1259,7 +1259,7 @@ func (store *MongoStorage) RemoveObjectTempData(orgID string, objectType string,
 
 			id := createTempObjectCollectionID(orgID, objectType, objectID, chunkNumber)
 			if trace.IsLogging(logger.TRACE) {
-				trace.Trace(fmt.Sprintf("RemoveObjectTempData for org - %s, type - %s, id - %s, chunkNum - %d", orgID, objectType, objectID, chunkNumber))
+			trace.Trace("RemoveObjectTempData for org - %s, type - %s, id - %s, chunkNum - %d", orgID, objectType, objectID, chunkNumber)
 			}
 			fileHandle, _ := store.retrieveObjectTempData(id)
 
@@ -1281,7 +1281,7 @@ func (store *MongoStorage) RemoveObjectTempData(orgID string, objectType string,
 func (store *MongoStorage) RetrieveObjectTempData(orgID string, objectType string, objectID string) (io.Reader, common.SyncServiceError) {
 
 	if trace.IsLogging(logger.TRACE) {
-		trace.Trace(fmt.Sprintf("RetrieveObjectTempData for org - %s, type - %s, id - %s", orgID, objectType, objectID))
+		trace.Trace("RetrieveObjectTempData for org - %s, type - %s, id - %s", orgID, objectType, objectID)
 	}
 	readers := make([]io.Reader, 0)
 	metaData, err := store.RetrieveObject(orgID, objectType, objectID)
@@ -1299,7 +1299,7 @@ func (store *MongoStorage) RetrieveObjectTempData(orgID string, objectType strin
 
 			id := createTempObjectCollectionID(orgID, objectType, objectID, chunkNumber)
 			if trace.IsLogging(logger.TRACE) {
-				trace.Trace(fmt.Sprintf("RetrieveObjectTempData for org - %s, type - %s, id - %s, chunkNum - %d", orgID, objectType, objectID, chunkNumber))
+			trace.Trace("RetrieveObjectTempData for org - %s, type - %s, id - %s, chunkNum - %d", orgID, objectType, objectID, chunkNumber)
 			}
 			fileHandle, err := store.retrieveObjectTempData(id)
 			if err != nil {
@@ -1316,7 +1316,7 @@ func (store *MongoStorage) RetrieveObjectTempData(orgID string, objectType strin
 	}
 
 	if trace.IsLogging(logger.TRACE) {
-		trace.Trace(fmt.Sprintf("returning %d file readers in the MultiReader from RetrieveObjectTempData", len(readers)))
+	trace.Trace("returning %d file readers in the MultiReader from RetrieveObjectTempData", len(readers))
 	}
 	rr := io.MultiReader(readers...)
 	return rr, nil

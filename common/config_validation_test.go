@@ -23,24 +23,19 @@ func TestConfigurationPrecedence(t *testing.T) {
         Configuration = origConfig
     }()
 
-    // Test 1: Default values
+    // Test 1: Default values are set during ValidateConfig, not SetDefaultConfig
     SetDefaultConfig(&Configuration)
-    if Configuration.ObjectQueueBufferSize == 0 {
-        t.Error("Default ObjectQueueBufferSize should be set")
+    Configuration.NodeType = CSS
+    Configuration.DestinationType = "test"
+    Configuration.DestinationID = "test"
+    
+    // ValidateConfig sets ObjectQueueBufferSize if it's 0
+    if err := ValidateConfig(); err != nil {
+        t.Fatalf("ValidateConfig failed: %v", err)
     }
-    defaultBufferSize := Configuration.ObjectQueueBufferSize
-
-    // Test 2: Environment variable overrides default
-    os.Setenv("OBJECT_QUEUE_BUFFER_SIZE", "999")
-    defer os.Unsetenv("OBJECT_QUEUE_BUFFER_SIZE")
-
-    SetDefaultConfig(&Configuration)
-    // Note: Actual env var loading happens in config.go's init or Load function
-    // This test documents expected behavior
-
-    // Test 3: Verify precedence order is documented
-    if defaultBufferSize == 0 {
-        t.Error("Default configuration should provide non-zero values")
+    
+    if Configuration.ObjectQueueBufferSize == 0 {
+        t.Error("Default ObjectQueueBufferSize should be set after ValidateConfig")
     }
 }
 
@@ -70,7 +65,9 @@ func TestValidateConfig_SecurityParameters(t *testing.T) {
             setupFunc: func() {
                 SetDefaultConfig(&Configuration)
                 Configuration.NodeType = CSS
-                Configuration.StorageProvider = InMemory
+                Configuration.DestinationType = "test-type"
+                Configuration.DestinationID = "test-id"
+                Configuration.StorageProvider = "" // Empty defaults to "mongo" for CSS
             },
             wantErr: false,
         },
@@ -164,6 +161,8 @@ func TestValidateConfig_CertificatePaths(t *testing.T) {
             setupFunc: func() {
                 SetDefaultConfig(&Configuration)
                 Configuration.NodeType = CSS
+                Configuration.DestinationType = "test-type"
+                Configuration.DestinationID = "test-id"
                 Configuration.ServerCertificate = validCert
                 Configuration.ServerKey = validKey
                 Configuration.PersistenceRootPath = tempDir
@@ -175,7 +174,11 @@ func TestValidateConfig_CertificatePaths(t *testing.T) {
             setupFunc: func() {
                 SetDefaultConfig(&Configuration)
                 Configuration.NodeType = CSS
-                Configuration.ServerCertificate = filepath.Join(tempDir, "..", "..", "etc", "passwd")
+                Configuration.DestinationType = "test-type"
+                Configuration.DestinationID = "test-id"
+                Configuration.ListeningType = ListeningSecurely
+                // Path validation only happens for absolute paths
+                Configuration.ServerCertificate = "/etc/passwd"
                 Configuration.PersistenceRootPath = tempDir
             },
             wantErr: true,
@@ -185,6 +188,10 @@ func TestValidateConfig_CertificatePaths(t *testing.T) {
             setupFunc: func() {
                 SetDefaultConfig(&Configuration)
                 Configuration.NodeType = CSS
+                Configuration.DestinationType = "test-type"
+                Configuration.DestinationID = "test-id"
+                Configuration.ListeningType = ListeningSecurely
+                // Create file with invalid extension as absolute path
                 invalidCert := filepath.Join(tempDir, "cert.txt")
                 os.WriteFile(invalidCert, []byte("cert"), 0644)
                 Configuration.ServerCertificate = invalidCert

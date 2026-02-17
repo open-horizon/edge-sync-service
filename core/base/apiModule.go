@@ -930,7 +930,7 @@ func ObjectConsumed(orgID string, objectType string, objectID string) common.Syn
 	if status != common.CompletelyReceived && status != common.ObjReceived {
 		message := fmt.Sprintf("Invalid attempt to mark object in status %s as consumed\n", status)
 		if log.IsLogging(logger.ERROR) {
-			log.Error(message)
+			log.Error("%s", message)
 		}
 		common.ObjectLocks.Unlock(lockIndex)
 		return &common.InvalidRequest{Message: message}
@@ -1017,7 +1017,7 @@ func ObjectReceived(orgID string, objectType string, objectID string) common.Syn
 	if status != common.CompletelyReceived && status != common.ObjReceived {
 		message := fmt.Sprintf("Invalid attempt to mark object in status %s as received\n", status)
 		if log.IsLogging(logger.ERROR) {
-			log.Error(message)
+			log.Error("%s", message)
 		}
 		common.ObjectLocks.Unlock(lockIndex)
 		return &common.InvalidRequest{Message: message}
@@ -1088,7 +1088,7 @@ func ObjectDeleted(userID string, orgID string, objectType string, objectID stri
 		if status != common.ObjDeleted {
 			message := fmt.Sprintf("Invalid attempt to confirm deletion of object in status %s\n", status)
 			if log.IsLogging(logger.ERROR) {
-				log.Error(message)
+				log.Error("%s", message)
 			}
 			common.ObjectLocks.Unlock(lockIndex)
 			return &common.InvalidRequest{Message: message}
@@ -1127,7 +1127,7 @@ func ObjectDeleted(userID string, orgID string, objectType string, objectID stri
 		if len(lastRemovedPolicyServices) == 0 {
 			message := fmt.Sprintln("Invalid attempt to confirm deletion of object with empty lastRemovedPolicyServices list")
 			if log.IsLogging(logger.ERROR) {
-				log.Error(message)
+				log.Error("%s", message)
 			}
 			common.ObjectLocks.Unlock(lockIndex)
 			return &common.InvalidRequest{Message: message}
@@ -1149,7 +1149,7 @@ func ObjectDeleted(userID string, orgID string, objectType string, objectID stri
 		if !removed {
 			message := fmt.Sprintln("Invalid attempt to confirm deletion of object for service not in lastRemovedPolicyServices")
 			if log.IsLogging(logger.ERROR) {
-				log.Error(message)
+				log.Error("%s", message)
 			}
 			common.ObjectLocks.Unlock(lockIndex)
 			return &common.InvalidRequest{Message: message}

@@ -610,7 +610,7 @@ func testPingAndRegisterNew(storageType string, t *testing.T) {
 	var err error
 	Store, err = setUpStorage(storageType)
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Errorf("%s", err.Error())
 		return
 	}
 	defer Store.Stop()
@@ -793,7 +793,7 @@ func testRegisterAsNew(storageType string, t *testing.T) {
 	var err error
 	Store, err = setUpStorage(storageType)
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Errorf("%s", err.Error())
 		return
 	}
 	defer Store.Stop()
@@ -922,7 +922,7 @@ func TestRegisterDestinationValidity(t *testing.T) {
 	var err error
 	Store, err = setUpStorage(common.Mongo)
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Errorf("%s", err.Error())
 		return
 	}
 	defer Store.Stop()
