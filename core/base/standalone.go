@@ -116,7 +116,7 @@ func StandaloneSyncService(auth security.Authentication) {
 	err = Start(swaggerFile, true)
 	if err != nil {
 		if log.IsLogging(logger.FATAL) {
-			log.Fatal(err.Error())
+			log.Fatal("%s", err.Error())
 		}
 	} else {
 		log.Info("The Sync Service has started")

@@ -264,7 +264,7 @@ func (communication *HTTP) createError(response *http.Response, action string) c
 
 	}
 	if log.IsLogging(logger.ERROR) {
-		log.Error(message)
+		log.Error("%s", message)
 	}
 	return &Error{message}
 }
@@ -291,7 +291,7 @@ func (communication *HTTP) handleGetUpdates(writer http.ResponseWriter, request 
 	notifications, err := Store.RetrievePendingNotifications(orgID, destType, destID)
 	if err != nil {
 		if log.IsLogging(logger.ERROR) {
-			log.Error(err.Error())
+			log.Error("%s", err.Error())
 		}
 		SendErrorResponse(writer, err, "", 0)
 		return
@@ -310,7 +310,7 @@ func (communication *HTTP) handleGetUpdates(writer http.ResponseWriter, request 
 		if err != nil {
 			message := fmt.Sprintf("Error in handleGetUpdates. Error: %s\n", err)
 			if log.IsLogging(logger.ERROR) {
-				log.Error(message)
+				log.Error("%s", message)
 			}
 			continue
 		}
@@ -343,7 +343,7 @@ func (communication *HTTP) handleGetUpdates(writer http.ResponseWriter, request 
 	writer.Header().Add("Content-Type", "application/json")
 	writer.WriteHeader(http.StatusOK)
 	if _, err := writer.Write(body); err != nil && log.IsLogging(logger.ERROR) {
-		log.Error("Failed to write response body, error: " + err.Error())
+		log.Error("Failed to write response body, error: %s", err.Error())
 	}
 }
 
@@ -564,7 +564,7 @@ func (communication *HTTP) handleRegisterOrPing(url string, writer http.Response
 			writer.WriteHeader(http.StatusNotFound)
 		} else {
 			if log.IsLogging(logger.ERROR) {
-				log.Error(err.Error())
+				log.Error("%s", err.Error())
 			}
 			SendErrorResponse(writer, err, "", 0)
 		}
@@ -616,7 +616,7 @@ func (communication *HTTP) handleUnregisterHelper(url string, writer http.Respon
 			writer.WriteHeader(http.StatusNoContent)
 		} else {
 			if log.IsLogging(logger.ERROR) {
-				log.Error(err.Error())
+				log.Error("%s", err.Error())
 			}
 			SendErrorResponse(writer, err, "", 0)
 		}
@@ -1519,7 +1519,7 @@ func (communication *HTTP) handleObjects(writer http.ResponseWriter, request *ht
 			writer.WriteHeader(http.StatusNoContent)
 		} else {
 			if log.IsLogging(logger.ERROR) && !isIgnoredByHandler(err) {
-				log.Error(err.Error())
+				log.Error("%s", err.Error())
 			}
 			SendErrorResponse(writer, err, "", 0)
 		}

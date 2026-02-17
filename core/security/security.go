@@ -597,7 +597,7 @@ func CheckAddACLInputFormat(aclType string, aclInputList []common.ACLentry) (*[]
 		if aclUserType != ACLUser && aclUserType != ACLNode {
 			message = fmt.Sprintf("aclUserType \"%s\" is invalid for ACL entry %s, it should be \"%s\", or \"%s\"", aclUserType, aclInput, ACLUser, ACLNode)
 			if log.IsLogging(logger.ERROR) {
-				log.Error(message)
+				log.Error("%s", message)
 			}
 			return nil, errors.New(message)
 		}
@@ -606,7 +606,7 @@ func CheckAddACLInputFormat(aclType string, aclInputList []common.ACLentry) (*[]
 		if strings.TrimSpace(name) == "" {
 			message = fmt.Sprintf("username/nodename cannot be empty for ACL entry %s.", aclInput)
 			if log.IsLogging(logger.ERROR) {
-				log.Error(message)
+				log.Error("%s", message)
 			}
 			return nil, errors.New(message)
 		}
@@ -616,7 +616,7 @@ func CheckAddACLInputFormat(aclType string, aclInputList []common.ACLentry) (*[]
 			if role != ACLWriter && role != ACLReader {
 				message = fmt.Sprintf("aclRole \"%s\" is invalid for ACL entry %s, it should be \"%s\", or \"%s\"", role, aclInput, ACLWriter, ACLReader)
 				if log.IsLogging(logger.ERROR) {
-					log.Error(message)
+					log.Error("%s", message)
 				}
 				return nil, errors.New(message)
 			}
@@ -656,7 +656,7 @@ func CheckRemoveACLInputFormat(aclInputList []common.ACLentry) error {
 		if aclUserType != ACLUser && aclUserType != ACLNode {
 			message = fmt.Sprintf("aclUserType \"%s\" is invalid for ACL entry %s, it should be \"%s\", or \"%s\"", aclUserType, aclInput, ACLUser, ACLNode)
 			if log.IsLogging(logger.ERROR) {
-				log.Error(message)
+				log.Error("%s", message)
 			}
 			return errors.New(message)
 		}
@@ -664,7 +664,7 @@ func CheckRemoveACLInputFormat(aclInputList []common.ACLentry) error {
 		if strings.TrimSpace(name) == "" {
 			message = fmt.Sprintf("\"Username\" cannot be empty for ACL entry %s.", aclInput)
 			if log.IsLogging(logger.ERROR) {
-				log.Error(message)
+				log.Error("%s", message)
 			}
 			return errors.New(message)
 		}
@@ -689,7 +689,7 @@ func CheckObjectTypesCanBeAccessByGivenUser(orgID string, aclUserType string, ac
 	if err != nil {
 		message = fmt.Sprintf("Failed to fetch ACL object Types for user %s %s in org %s. Error: %s", aclUserType, aclUsername, orgID, err)
 		if log.IsLogging(logger.ERROR) {
-			log.Error(message)
+			log.Error("%s", message)
 		}
 		return false, nil, errors.New(message)
 	}

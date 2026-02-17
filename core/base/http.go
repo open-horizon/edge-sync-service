@@ -138,12 +138,12 @@ func startHTTPServerHelper(secure bool, listener net.Listener) {
 	}
 	if err == http.ErrServerClosed {
 		if log.IsLogging(logger.TRACE) {
-			log.Trace(err.Error())
+			log.Trace("%s", err.Error())
 		}
 		common.GoRoutineEnded()
 	} else {
 		if log.IsLogging(logger.FATAL) {
-			log.Fatal(err.Error())
+			log.Fatal("%s", err.Error())
 		}
 	}
 }
@@ -152,14 +152,14 @@ func stopHTTPServing() {
 	if common.Configuration.UnsecureListeningPort != 0 {
 		if err := unsecureHTTPServer.Shutdown(context.Background()); err != nil {
 			if log.IsLogging(logger.ERROR) {
-				log.Error(err.Error())
+				log.Error("%s", err.Error())
 			}
 		}
 	}
 	if len(common.Configuration.ServerCertificate) != 0 {
 		if err := secureHTTPServer.Shutdown(context.Background()); err != nil {
 			if log.IsLogging(logger.ERROR) {
-				log.Error(err.Error())
+				log.Error("%s", err.Error())
 			}
 		}
 	}

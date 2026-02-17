@@ -217,7 +217,7 @@ func destinationExists(orgID string, destType string, destID string) bool {
 	exists, err := Store.DestinationExists(orgID, destType, destID)
 	if err != nil {
 		if log.IsLogging(logger.ERROR) {
-			log.Error(err.Error())
+			log.Error("%s", err.Error())
 		}
 		return false
 	} else if !exists {

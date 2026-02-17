@@ -26,7 +26,7 @@ import (
 func testStorageObjects(storageType string, t *testing.T) {
 	store, err := setUpStorage(storageType)
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Errorf("%s", err.Error())
 		return
 	}
 	defer store.Stop()
@@ -266,7 +266,7 @@ func testStorageObjects(storageType string, t *testing.T) {
 func testStorageObjectsWithPolicy(storageType string, t *testing.T) {
 	store, err := setUpStorage(storageType)
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Errorf("%s", err.Error())
 		return
 	}
 	defer store.Stop()
@@ -467,7 +467,7 @@ func testStorageObjectsWithPolicy(storageType string, t *testing.T) {
 func testGetObjectWithFilters(storageType string, t *testing.T) {
 	store, err := setUpStorage(storageType)
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Errorf("%s", err.Error())
 		return
 	}
 	defer store.Stop()
@@ -775,7 +775,7 @@ func testGetObjectWithFilters(storageType string, t *testing.T) {
 func testStorageObjectActivation(storageType string, t *testing.T) {
 	store, err := setUpStorage(storageType)
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Errorf("%s", err.Error())
 		return
 	}
 	defer store.Stop()
@@ -864,7 +864,7 @@ func testStorageObjectActivation(storageType string, t *testing.T) {
 func testStorageObjectData(storageType string, t *testing.T) {
 	store, err := setUpStorage(storageType)
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Errorf("%s", err.Error())
 		return
 	}
 	defer store.Stop()
@@ -1102,7 +1102,7 @@ func testStorageObjectData(storageType string, t *testing.T) {
 func testStorageNotifications(storageType string, t *testing.T) {
 	store, err := setUpStorage(storageType)
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Errorf("%s", err.Error())
 		return
 	}
 	defer store.Stop()
@@ -1241,7 +1241,7 @@ func testStorageNotifications(storageType string, t *testing.T) {
 func testStorageWebhooks(storageType string, t *testing.T) {
 	store, err := setUpStorage(storageType)
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Errorf("%s", err.Error())
 		return
 	}
 	defer store.Stop()
@@ -1328,7 +1328,7 @@ func testStorageObjectExpiration(storageType string, t *testing.T) {
 	common.Configuration.NodeType = common.CSS
 	store, err := setUpStorage(storageType)
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Errorf("%s", err.Error())
 		return
 	}
 	defer store.Stop()
@@ -1447,7 +1447,7 @@ func testStorageOrgDeleteObjects(storageType string, t *testing.T) {
 	common.Configuration.NodeType = common.CSS
 	store, err := setUpStorage(storageType)
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Errorf("%s", err.Error())
 		return
 	}
 	defer store.Stop()
@@ -1551,7 +1551,7 @@ func testStorageOrgDeleteNotifications(storageType string, t *testing.T) {
 	common.Configuration.NodeType = common.CSS
 	store, err := setUpStorage(storageType)
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Errorf("%s", err.Error())
 		return
 	}
 	defer store.Stop()
@@ -1615,7 +1615,7 @@ func testStorageOrgDeleteACLs(storageType string, t *testing.T) {
 	common.Configuration.NodeType = common.CSS
 	store, err := setUpStorage(storageType)
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Errorf("%s", err.Error())
 		return
 	}
 	defer store.Stop()
@@ -1738,7 +1738,7 @@ func testStorageMessagingGroups(storageType string, t *testing.T) {
 	common.Configuration.NodeType = common.CSS
 	store, err := setUpStorage(storageType)
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Errorf("%s", err.Error())
 		return
 	}
 	defer store.Stop()
@@ -1826,7 +1826,7 @@ func testStorageObjectDestinations(storageType string, t *testing.T) {
 	common.Configuration.NodeType = common.CSS
 	store, err := setUpStorage(storageType)
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Errorf("%s", err.Error())
 		return
 	}
 	defer store.Stop()
@@ -2027,7 +2027,7 @@ func testStorageOrganizations(storageType string, t *testing.T) {
 	common.Configuration.NodeType = common.CSS
 	store, err := setUpStorage(storageType)
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Errorf("%s", err.Error())
 		return
 	}
 	defer store.Stop()
@@ -2108,7 +2108,7 @@ func testStorageInactiveDestinations(storageType string, t *testing.T) {
 	common.Configuration.NodeType = common.CSS
 	store, err := setUpStorage(storageType)
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Errorf("%s", err.Error())
 		return
 	}
 	defer store.Stop()

@@ -42,7 +42,7 @@ func TestHandleDestinations(t *testing.T) {
 // with proper access control enforcement across different storage backends.
 func testHandleDestinations(storageType string, t *testing.T) {
 	if status := testAPIServerSetup(common.CSS, storageType); status != "" {
-		t.Errorf(status)
+		t.Errorf("%s", status)
 	}
 	defer communications.Store.Stop()
 	defer security.Stop()
@@ -116,7 +116,7 @@ func TestHandleDestinationsInvalidCalls(t *testing.T) {
 // for invalid destination API requests.
 func testHandleDestinationsInvalidCalls(storageType string, t *testing.T) {
 	if status := testAPIServerSetup(common.CSS, storageType); status != "" {
-		t.Errorf(status)
+		t.Errorf("%s", status)
 	}
 	defer communications.Store.Stop()
 	defer security.Stop()
@@ -165,7 +165,7 @@ func TestMisceleneousHandlers(t *testing.T) {
 // with proper access control enforcement.
 func testMisceleneousHandlers(storageType string, t *testing.T) {
 	if status := testAPIServerSetup(common.ESS, storageType); status != "" {
-		t.Errorf(status)
+		t.Errorf("%s", status)
 	}
 	defer communications.Store.Stop()
 
@@ -246,7 +246,7 @@ func TestHandleObject(t *testing.T) {
 // access control scenarios.
 func testHandleObjectHelper(nodeType string, storageType string, t *testing.T) {
 	if status := testAPIServerSetup(nodeType, storageType); status != "" {
-		t.Errorf(status)
+		t.Errorf("%s", status)
 	}
 	defer communications.Store.Stop()
 
@@ -1010,7 +1010,7 @@ func TestHandleManifest(t *testing.T) {
 // from unauthorized modifications while allowing appropriate read access.
 func testHandleManifestHelper(nodeType string, storageType string, t *testing.T) {
 	if status := testAPIServerSetup(nodeType, storageType); status != "" {
-		t.Errorf(status)
+		t.Errorf("%s", status)
 	}
 	defer communications.Store.Stop()
 
@@ -1101,7 +1101,7 @@ func TestInvalidURLs(t *testing.T) {
 // requests consistently regardless of the storage backend.
 func testInvalidURLs(storageType string, t *testing.T) {
 	if status := testAPIServerSetup(common.CSS, storageType); status != "" {
-		t.Errorf(status)
+		t.Errorf("%s", status)
 	}
 	defer communications.Store.Stop()
 	defer security.Stop()
@@ -1161,7 +1161,7 @@ func testInvalidURLs(storageType string, t *testing.T) {
 // Run with: go test -v
 func TestPolicies(t *testing.T) {
 	if status := testAPIServerSetup(common.ESS, common.InMemory); status != "" {
-		t.Errorf(status)
+		t.Errorf("%s", status)
 	}
 	defer communications.Store.Stop()
 
@@ -1261,7 +1261,7 @@ func TestObjectsWithPolicyUpdatedSince(t *testing.T) {
 // for efficient incremental synchronization of policy-based objects.
 func testObjectsWithPolicyUpdatedSinceHelper(storageProvider string, t *testing.T) {
 	if status := testAPIServerSetup(common.CSS, storageProvider); status != "" {
-		t.Errorf(status)
+		t.Errorf("%s", status)
 	}
 	defer communications.Store.Stop()
 
@@ -1444,7 +1444,7 @@ func TestGetObjectsWithFilters(t *testing.T) {
 // proper access control enforcement across different storage backends.
 func testGetObjectsWithFiltersHelper(storageProvider string, t *testing.T) {
 	if status := testAPIServerSetup(common.CSS, storageProvider); status != "" {
-		t.Errorf(status)
+		t.Errorf("%s", status)
 	}
 	defer communications.Store.Stop()
 

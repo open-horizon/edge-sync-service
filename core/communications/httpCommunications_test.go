@@ -31,7 +31,7 @@ func TestHTTPCommUpdatedObjects(t *testing.T) {
 		t.Skip("Skipping MongoDB test in short mode")
 	}
 	if status := testHTTPCommSetup("CSS"); status != "" {
-		t.Errorf(status)
+		t.Errorf("%s", status)
 	}
 	defer Store.Stop()
 	defer security.Stop()
@@ -133,7 +133,7 @@ func TestHttpCommCssMisc(t *testing.T) {
 		t.Skip("Skipping MongoDB test in short mode")
 	}
 	if status := testHTTPCommSetup("CSS"); status != "" {
-		t.Errorf(status)
+		t.Errorf("%s", status)
 	}
 	defer Store.Stop()
 	defer security.Stop()
@@ -233,7 +233,7 @@ func TestHTTPCommEssSendObjects(t *testing.T) {
 			testObject.metaData.ObjectID + "/1/1/" + testObject.action
 		body, err := json.MarshalIndent(testObject.metaData, "", "  ")
 		if err != nil {
-			t.Errorf("Failed to marshal payload. Error: " + err.Error())
+		t.Errorf("Failed to marshal payload. Error: %s", err.Error())
 		}
 		request, _ := http.NewRequest(http.MethodPut, theURL, bytes.NewReader(body))
 		identity := "myorg000/" + testObject.metaData.OriginType + "/" + testObject.metaData.OriginID

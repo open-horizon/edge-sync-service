@@ -166,7 +166,7 @@ func parseMessage(msg mqtt.Message, messageInfo *messageHandlerInfo) bool {
 		if err := json.Unmarshal(payload, &messageInfo.messagePayload); err != nil {
 			err = &Error{"Failed to unmarshal payload. Error: %s" + err.Error()}
 			if log.IsLogging(logger.ERROR) {
-				log.Error(err.Error())
+			log.Error("%s", err.Error())
 			}
 			if !Store.IsConnected() {
 				if log.IsLogging(logger.TRACE) {
@@ -396,7 +396,7 @@ func newTLSConfig() *tls.Config {
 					pemCerts = []byte(common.Configuration.MQTTCACertificate)
 				} else {
 					if log.IsLogging(logger.ERROR) {
-						log.Error(readErr.Error())
+			log.Error("%s", readErr.Error())
 					}
 				}
 			}
@@ -596,10 +596,10 @@ func (communication *MQTT) createClients() ([]clientInfo, common.SyncServiceErro
 						common.Configuration.CommunicationProtocol == common.HybridMQTT {
 						message := fmt.Sprintf("Can't create MQTT client for organization %s: no broker address\n", org.Org.OrgID)
 						if trace.IsLogging(logger.ERROR) {
-							trace.Error(message)
+							trace.Error("%s", message)
 						}
 						if log.IsLogging(logger.ERROR) {
-							log.Error(message)
+							log.Error("%s", message)
 						}
 						continue
 					}
@@ -754,7 +754,7 @@ func (context *mqttClientContext) subscribe() {
 		if context.subAttempts > 0 && context.subAttempts <= 10 {
 			// Break the connection and connect again
 			if trace.IsLogging(logger.ERROR) {
-				trace.Error(err.Error())
+		trace.Error("%s", err.Error())
 			}
 			client.Disconnect(0)
 
@@ -771,10 +771,10 @@ func (context *mqttClientContext) subscribe() {
 					newClient, err := context.createAndConnectClient(c, username, password, context.communicator.serverURIs[i])
 					if err != nil {
 						if log.IsLogging(logger.FATAL) {
-							log.Fatal(err.Error())
+		log.Fatal("%s", err.Error())
 						}
 						if trace.IsLogging(logger.FATAL) {
-							trace.Fatal(err.Error())
+		trace.Fatal("%s", err.Error())
 						}
 						os.Exit(99)
 					}
@@ -886,10 +886,10 @@ func (communication *MQTT) StartCommunication() common.SyncServiceError {
 		if err != nil {
 			message := fmt.Sprintf("Failed to retrieve time on server. Error: %s\n", err.Error())
 			if trace.IsLogging(logger.ERROR) {
-				trace.Error(message)
+				trace.Error("%s", message)
 			}
 			if log.IsLogging(logger.ERROR) {
-				log.Error(message)
+				log.Error("%s", message)
 			}
 		}
 		communication.checkForUpdates()
@@ -1026,10 +1026,10 @@ func (communication *MQTT) publishCSSOnWIoTP(orgID string, destType string, dest
 		// No client to send the message to
 		message := fmt.Sprintf("Failed to find client to publish (org id = %s, dest type = %s, dest id = %s)\n", orgID, destType, destID)
 		if trace.IsLogging(logger.ERROR) {
-			trace.Error(message)
+			trace.Error("%s", message)
 		}
 		if log.IsLogging(logger.ERROR) {
-			log.Error(message)
+			log.Error("%s", message)
 		}
 		return nil
 	}
@@ -1059,10 +1059,10 @@ func (communication *MQTT) publishCSSOutsideWIoTP(orgID string, destType string,
 		// No client to send the message to
 		message := fmt.Sprintf("Failed to find client to publish (org id = %s, dest type = %s, dest id = %s)\n", orgID, destType, destID)
 		if trace.IsLogging(logger.ERROR) {
-			trace.Error(message)
+			trace.Error("%s", message)
 		}
 		if log.IsLogging(logger.ERROR) {
-			log.Error(message)
+			log.Error("%s", message)
 		}
 		return nil
 	}
@@ -1286,10 +1286,10 @@ func (nodeContext *mqttContext) changeLeadership(isLeader bool) common.SyncServi
 
 				message := fmt.Sprintf("Failed to unsubscribe. Error: %s\n", token.Error().Error())
 				if trace.IsLogging(logger.ERROR) {
-					trace.Error(message)
+					trace.Error("%s", message)
 				}
 				if log.IsLogging(logger.ERROR) {
-					log.Error(message)
+					log.Error("%s", message)
 				}
 			}
 		}
@@ -1303,10 +1303,10 @@ func (nodeContext *mqttContext) unsubscribe() common.SyncServiceError {
 	if len(nodeContext.contexts) == 0 {
 		message := "Failed to unsubscribe: no context found"
 		if trace.IsLogging(logger.ERROR) {
-			trace.Error(message)
+			trace.Error("%s", message)
 		}
 		if log.IsLogging(logger.ERROR) {
-			log.Error(message)
+			log.Error("%s", message)
 		}
 		return &Error{message}
 	}
@@ -1321,10 +1321,10 @@ OUTER:
 				}
 				message := fmt.Sprintf("Failed to unsubscribe. Error: %s\n", token.Error().Error())
 				if trace.IsLogging(logger.ERROR) {
-					trace.Error(message)
+					trace.Error("%s", message)
 				}
 				if log.IsLogging(logger.ERROR) {
-					log.Error(message)
+					log.Error("%s", message)
 				}
 			}
 		}
@@ -1353,10 +1353,10 @@ func (communication *MQTT) checkDatabaseConnection() {
 						if token := client.Subscribe(communication.topic, 0, nil); token.WaitTimeout(time.Duration(10*time.Second)) && token.Error() != nil {
 							message := fmt.Sprintf("Failed to subscribe. Error: %s\n", token.Error().Error())
 							if trace.IsLogging(logger.ERROR) {
-								trace.Error(message)
+								trace.Error("%s", message)
 							}
 							if log.IsLogging(logger.ERROR) {
-								log.Error(message)
+								log.Error("%s", message)
 							}
 							subErr = true
 						}
@@ -1416,7 +1416,7 @@ func (communication *MQTT) UpdateOrganization(org common.Organization, timestamp
 		if index == -1 {
 			message := fmt.Sprintf("Couldn't find client for existing org %s", org.OrgID)
 			if trace.IsLogging(logger.ERROR) {
-				trace.Error(message)
+				trace.Error("%s", message)
 			}
 			return &Error{message}
 		}
@@ -1494,10 +1494,10 @@ func (communication *MQTT) checkForUpdates() {
 				if err != nil {
 					message := fmt.Sprintf("Failed to retrieve time on server. Error: %s\n", err.Error())
 					if trace.IsLogging(logger.ERROR) {
-						trace.Error(message)
+						trace.Error("%s", message)
 					}
 					if log.IsLogging(logger.ERROR) {
-						log.Error(message)
+						log.Error("%s", message)
 					}
 					continue
 				}
@@ -1507,10 +1507,10 @@ func (communication *MQTT) checkForUpdates() {
 					if err != nil {
 						message := fmt.Sprintf("Failed to retrieve messaging groups. Error: %s\n", err.Error())
 						if trace.IsLogging(logger.ERROR) {
-							trace.Error(message)
+							trace.Error("%s", message)
 						}
 						if log.IsLogging(logger.ERROR) {
-							log.Error(message)
+							log.Error("%s", message)
 						}
 					} else if groups != nil {
 						for _, group := range groups {
@@ -1528,20 +1528,20 @@ func (communication *MQTT) checkForUpdates() {
 					if err != nil {
 						message := fmt.Sprintf("Failed to retrieve organizations. Error: %s\n", err.Error())
 						if trace.IsLogging(logger.ERROR) {
-							trace.Error(message)
+							trace.Error("%s", message)
 						}
 						if log.IsLogging(logger.ERROR) {
-							log.Error(message)
+							log.Error("%s", message)
 						}
 					} else if orgs != nil {
 						for _, org := range orgs {
 							if err := communication.UpdateOrganization(org.Org, org.Timestamp); err != nil {
 								message := fmt.Sprintf("Failed to update organization. Error: %s\n", err.Error())
 								if trace.IsLogging(logger.ERROR) {
-									trace.Error(message)
+									trace.Error("%s", message)
 								}
 								if log.IsLogging(logger.ERROR) {
-									log.Error(message)
+									log.Error("%s", message)
 								}
 							}
 						}

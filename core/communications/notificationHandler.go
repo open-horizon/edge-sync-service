@@ -244,14 +244,14 @@ func handleRegisterAsNew() common.SyncServiceError {
 	// Remove all notifications
 	if err := Store.DeleteNotificationRecords("", "", "", "", ""); err != nil {
 		if trace.IsLogging(logger.ERROR) {
-			trace.Error("Failed to delete notifications before registering as new. Error: " + err.Error())
+			trace.Error("Failed to delete notifications before registering as new. Error: %s", err.Error())
 		}
 	}
 
 	// Remove objects not completely received from the CSS or everything for not persistent storage - CSS will resend these objects
 	if err := Store.CleanObjects(); err != nil {
 		if trace.IsLogging(logger.ERROR) {
-			trace.Error("Failed to delete objects before registering as new. Error: " + err.Error())
+			trace.Error("Failed to delete objects before registering as new. Error: %s", err.Error())
 		}
 	}
 
@@ -272,7 +272,7 @@ func handleRegAck() {
 		objects, err := Store.RetrieveObjects("", "", "", common.ResendAll)
 		if err != nil {
 			if trace.IsLogging(logger.ERROR) {
-				trace.Error("Failed to retrieve objects to resend. Error: " + err.Error())
+		trace.Error("Failed to retrieve objects to resend. Error: %s", err.Error())
 			}
 		}
 
@@ -284,7 +284,7 @@ func handleRegAck() {
 				if err == nil {
 					if err := SendNotifications(notificationsInfo); err != nil {
 						if trace.IsLogging(logger.ERROR) {
-							trace.Error(err.Error())
+			trace.Error("%s", err.Error())
 						}
 					}
 				} else {
