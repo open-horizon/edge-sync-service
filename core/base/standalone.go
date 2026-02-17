@@ -62,6 +62,10 @@ func ConfigStandaloneSyncService() {
 func StandaloneSyncService(auth security.Authentication) {
 	destinations, entries := log.ParseDestinationsList(common.Configuration.LogTraceDestination)
 	if !entries {
+		// ParseDestinationsList returns []bool, ensure it has enough elements
+		if destinations == nil || len(destinations) <= logger.FILE {
+			destinations = make([]bool, logger.GLOG+1)
+		}
 		destinations[logger.FILE] = true
 	}
 
