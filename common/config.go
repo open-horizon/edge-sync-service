@@ -89,7 +89,7 @@ type Config struct {
 	// Only applies when ListeningType is "unix" or "secure-unix"
 	// Default: 0660 (owner and group read/write)
 	// Example values: 0600 (owner only), 0666 (all users), 0660 (owner and group)
-	UnixSocketFilePermissions uint32 `env:"UNIX_SOCKET_FILE_PERMISSIONS"`
+	UnixSocketFilePermissions string `env:"UNIX_SOCKET_FILE_PERMISSIONS"`
 
 	// SecureListeningPort specifies the port to listen on for HTTPS
 	SecureListeningPort uint16 `env:"SECURE_LISTENING_PORT"`
@@ -539,6 +539,12 @@ func ValidateConfig() error {
 			if len(Configuration.ListeningAddress) == 0 {
 				return &configError{"When Listening via Unix Sockets, you must specify the Socket file using the ListeningAddress property"}
 			}
+			// Validate UnixSocketFilePermissions format
+			if Configuration.UnixSocketFilePermissions != "" {
+				if _, err := strconv.ParseUint(Configuration.UnixSocketFilePermissions, 8, 32); err != nil {
+					return &configError{fmt.Sprintf("UnixSocketFilePermissions must be a valid octal number (e.g., 0660). Error: %s", err)}
+				}
+			}
 		}
 	}
 
@@ -904,5 +910,5 @@ func SetDefaultConfig(config *Config) {
 	config.AllowPrivateIPs = true
 	config.AllowedCertificateExtensions = []string{".pem", ".crt", ".cert"}
 	config.AllowedKeyExtensions = []string{".pem", ".key"}
-	config.UnixSocketFilePermissions = 0o660
+	config.UnixSocketFilePermissions = "0660"
 }
