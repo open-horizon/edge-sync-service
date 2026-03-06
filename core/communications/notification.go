@@ -30,7 +30,7 @@ func PrepareObjectNotifications(metaData common.MetaData) ([]common.Notification
 	if err == nil {
 		err = Store.UpdateObjectDelivering(metaData.DestOrgID, metaData.ObjectType, metaData.ObjectID)
 		if err != nil && log.IsLogging(logger.ERROR) {
-		log.Error("Failed to update object's delivery status. Error: %s", err.Error())
+			log.Error("Failed to update object's delivery status. Error: %s", err.Error())
 		}
 		common.ObjectLocks.Unlock(lockIndex)
 		return PrepareUpdateNotification(metaData, destinations)
@@ -216,7 +216,7 @@ func resendNotificationsForDestination(dest common.Destination, resendReceivedOb
 			}
 			if err := Store.UpdateNotificationResendTime(*n); err != nil {
 				if log.IsLogging(logger.ERROR) {
-			log.Error("%s", err.Error())
+					log.Error("%s", err.Error())
 				}
 				common.ObjectLocks.Unlock(lockIndex)
 				continue
@@ -288,7 +288,7 @@ func resendNotificationsForDestination(dest common.Destination, resendReceivedOb
 					n.Status = common.Update
 					n.ResendTime = 0
 					if err := Store.UpdateNotificationRecord(*n); err != nil && log.IsLogging(logger.ERROR) {
-			log.Error("Failed to update notification record. Error: %s", err.Error())
+						log.Error("Failed to update notification record. Error: %s", err.Error())
 					}
 					common.ObjectLocks.Unlock(lockIndex)
 					metaData.DestType = n.DestType
@@ -340,7 +340,7 @@ func resendNotificationsForDestination(dest common.Destination, resendReceivedOb
 					n.Status = common.Update
 					n.ResendTime = 0
 					if err := Store.UpdateNotificationRecord(*n); err != nil && log.IsLogging(logger.ERROR) {
-						log.Error("Failed to update notification record. Error: " + err.Error())
+						log.Error("%s", "Failed to update notification record. Error: "+err.Error())
 					}
 					common.ObjectLocks.Unlock(lockIndex)
 					metaData.DestType = n.DestType

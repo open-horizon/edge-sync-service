@@ -65,7 +65,6 @@ func TestValidateURLParameter_PathTraversal(t *testing.T) {
 
 func TestValidateURLParameter_SpecialCharacters(t *testing.T) {
 	specialChars := []string{
-		"user@domain",
 		"user#tag",
 		"user$money",
 		"user%percent",

@@ -207,7 +207,7 @@ func TestHTTPCommEssSendObjects(t *testing.T) {
 		if strings.Contains(status, "Failed to ping mgo") || strings.Contains(status, "Failed to initialize storage") {
 			t.Skipf("Skipping test due to MongoDB unavailability: %s", status)
 		}
-		t.Errorf(status)
+		t.Errorf("%s", status)
 	}
 	defer Store.Stop()
 	defer security.Stop()
@@ -233,7 +233,7 @@ func TestHTTPCommEssSendObjects(t *testing.T) {
 			testObject.metaData.ObjectID + "/1/1/" + testObject.action
 		body, err := json.MarshalIndent(testObject.metaData, "", "  ")
 		if err != nil {
-		t.Errorf("Failed to marshal payload. Error: %s", err.Error())
+			t.Errorf("Failed to marshal payload. Error: %s", err.Error())
 		}
 		request, _ := http.NewRequest(http.MethodPut, theURL, bytes.NewReader(body))
 		identity := "myorg000/" + testObject.metaData.OriginType + "/" + testObject.metaData.OriginID
@@ -298,7 +298,7 @@ func TestEssHTTPComm(t *testing.T) {
 	common.Configuration.DestinationID = "dev2"
 
 	if status := testHTTPCommSetup("ESS"); status != "" {
-		t.Errorf(status)
+		t.Errorf("%s", status)
 	}
 	defer Store.Stop()
 	defer DestReqQueue.Close()

@@ -77,7 +77,7 @@ func validateURLParameter(param string) error {
 	// \p{L} = Unicode letters (all languages)
 	// \p{N} = Unicode numbers (all scripts)
 	// \p{M} = Unicode marks (combining characters, accents)
-	validPattern := regexp.MustCompile(`^[\p{L}\p{N}\p{M}._-]+$`)
+	validPattern := regexp.MustCompile(`^[\p{L}\p{N}\p{M}._@-]+$`)
 	if !validPattern.MatchString(param) {
 		return &common.InvalidRequest{Message: "Invalid characters in parameter"}
 	}
