@@ -902,17 +902,6 @@ func testESSObjectDeletedAPI(store storage.Storage, t *testing.T) {
 	}
 	defer store.Stop()
 
-	// Initialize communications before using it
-	communications.Comm = &communications.TestComm{}
-	if err := communications.Comm.StartCommunication(); err != nil {
-		t.Errorf("Failed to start test communication. Error: %s", err.Error())
-	}
-	defer communications.Comm.StopCommunication()
-
-	// Initialize ObjectWorkQueue to prevent nil pointer dereference
-	setupObjectQueue()
-	defer teardownObjectQueue()
-
 	//common.Configuration.NodeType = common.ESS
 
 	validObjects := []struct {

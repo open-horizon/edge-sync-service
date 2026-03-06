@@ -166,7 +166,7 @@ func parseMessage(msg mqtt.Message, messageInfo *messageHandlerInfo) bool {
 		if err := json.Unmarshal(payload, &messageInfo.messagePayload); err != nil {
 			err = &Error{"Failed to unmarshal payload. Error: %s" + err.Error()}
 			if log.IsLogging(logger.ERROR) {
-			log.Error("%s", err.Error())
+				log.Error("%s", err.Error())
 			}
 			if !Store.IsConnected() {
 				if log.IsLogging(logger.TRACE) {
@@ -288,7 +288,7 @@ func processMessage(messageInfo *messageHandlerInfo) {
 
 	if err != nil && !isIgnoredByHandler(err) {
 		if log.IsLogging(logger.ERROR) {
-			log.Error(err.Error())
+			log.Error("%s", err.Error())
 		}
 		if !Store.IsConnected() {
 			if log.IsLogging(logger.TRACE) {
@@ -377,7 +377,7 @@ func newTLSConfig() *tls.Config {
 		} else {
 			caCert = common.Configuration.PersistenceRootPath + common.Configuration.MQTTCACertificate
 		}
-		
+
 		// Validate certificate file path to prevent path traversal attacks (CWE-22)
 		var pemCerts []byte
 		certExtensions := common.Configuration.AllowedCertificateExtensions
@@ -396,7 +396,7 @@ func newTLSConfig() *tls.Config {
 					pemCerts = []byte(common.Configuration.MQTTCACertificate)
 				} else {
 					if log.IsLogging(logger.ERROR) {
-			log.Error("%s", readErr.Error())
+						log.Error("%s", readErr.Error())
 					}
 				}
 			}
@@ -431,7 +431,7 @@ func newTLSConfig() *tls.Config {
 		}
 		validatedCert, certPathErr := common.ValidateFilePathWithExtension(cert, common.Configuration.PersistenceRootPath, certExtensions)
 		validatedKey, keyPathErr := common.ValidateFilePathWithExtension(key, common.Configuration.PersistenceRootPath, keyExtensions)
-		
+
 		var clientCert tls.Certificate
 		var err error
 		if certPathErr != nil || keyPathErr != nil {
@@ -448,7 +448,7 @@ func newTLSConfig() *tls.Config {
 		}
 		if err != nil {
 			if log.IsLogging(logger.ERROR) {
-				log.Error(err.Error())
+				log.Error("%s", err.Error())
 			}
 		}
 
@@ -462,11 +462,11 @@ func newTLSConfig() *tls.Config {
 		// SECURITY WARNING: Certificate validation is DISABLED!
 		// This should NEVER be used in production environments.
 		// This configuration makes the connection vulnerable to MITM attacks.
-		
+
 		if log.IsLogging(logger.ERROR) {
 			log.Error("SECURITY CRITICAL: MQTT certificate validation is DISABLED! Connection is vulnerable to MITM attacks. Set MQTTAllowInvalidCertificates=false for production.")
 		}
-		
+
 		// Prevent use on CSS (Cloud Sync Service) nodes
 		if common.Configuration.NodeType == common.CSS {
 			if log.IsLogging(logger.ERROR) {
@@ -479,7 +479,7 @@ func newTLSConfig() *tls.Config {
 			if trace.IsLogging(logger.WARNING) {
 				trace.Warning("Connecting to MQTT broker with certificate validation DISABLED")
 			}
-			
+
 			tlsConfig.InsecureSkipVerify = true
 		}
 	}
@@ -754,7 +754,7 @@ func (context *mqttClientContext) subscribe() {
 		if context.subAttempts > 0 && context.subAttempts <= 10 {
 			// Break the connection and connect again
 			if trace.IsLogging(logger.ERROR) {
-		trace.Error("%s", err.Error())
+				trace.Error("%s", err.Error())
 			}
 			client.Disconnect(0)
 
@@ -771,10 +771,10 @@ func (context *mqttClientContext) subscribe() {
 					newClient, err := context.createAndConnectClient(c, username, password, context.communicator.serverURIs[i])
 					if err != nil {
 						if log.IsLogging(logger.FATAL) {
-		log.Fatal("%s", err.Error())
+							log.Fatal("%s", err.Error())
 						}
 						if trace.IsLogging(logger.FATAL) {
-		trace.Fatal("%s", err.Error())
+							trace.Fatal("%s", err.Error())
 						}
 						os.Exit(99)
 					}
@@ -791,10 +791,10 @@ func (context *mqttClientContext) subscribe() {
 		} else {
 			// Starting up - fail
 			if log.IsLogging(logger.FATAL) {
-				log.Fatal(err.Error())
+				log.Fatal("%s", err.Error())
 			}
 			if trace.IsLogging(logger.FATAL) {
-				trace.Fatal(err.Error())
+				trace.Fatal("%s", err.Error())
 			}
 			os.Exit(99)
 		}
@@ -1433,7 +1433,7 @@ func (communication *MQTT) UpdateOrganization(org common.Organization, timestamp
 	}
 	password := common.NewSecureString(org.Password)
 	defer password.Clear()
-	
+
 	c, err := currentContext.createAndConnectClient(clientInfo, org.User, password, communication.serverURIs[index])
 	if err != nil {
 		return err

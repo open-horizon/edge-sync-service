@@ -272,7 +272,7 @@ func handleRegAck() {
 		objects, err := Store.RetrieveObjects("", "", "", common.ResendAll)
 		if err != nil {
 			if trace.IsLogging(logger.ERROR) {
-		trace.Error("Failed to retrieve objects to resend. Error: %s", err.Error())
+				trace.Error("Failed to retrieve objects to resend. Error: %s", err.Error())
 			}
 		}
 
@@ -284,12 +284,12 @@ func handleRegAck() {
 				if err == nil {
 					if err := SendNotifications(notificationsInfo); err != nil {
 						if trace.IsLogging(logger.ERROR) {
-			trace.Error("%s", err.Error())
+							trace.Error("%s", err.Error())
 						}
 					}
 				} else {
 					if trace.IsLogging(logger.ERROR) {
-						trace.Error(err.Error())
+						trace.Error("%s", err.Error())
 					}
 				}
 			}

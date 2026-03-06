@@ -2,44 +2,26 @@ package dataURI
 
 import (
 	"bytes"
-	"io/ioutil"
 	"os"
 	"testing"
 
 	"github.com/open-horizon/edge-sync-service/common"
 )
 
-// TestDataURI tests data URI operations for file-based storage:
-// - AppendData stores data at specified URI with offset
-// - GetData retrieves data from URI
-// - StoreData replaces entire data at URI
-// - DeleteStoredData removes data from URI
-// - Multi-chunk data appending (first, middle, last chunks)
-// - GetDataChunk retrieves data with offset and size limits
-//
-// This comprehensive test ensures that the data URI abstraction works correctly
-// for file-based storage operations. Data URIs provide a uniform interface for
-// storing and retrieving object data regardless of the underlying storage mechanism.
-// Critical for handling large file transfers in chunks, which is essential for
-// efficient bandwidth usage in edge computing scenarios.
-//
-// The test uses temporary directories to ensure isolation and automatic cleanup.
 func TestDataURI(t *testing.T) {
-	// Create temporary directory for test data
-	tmpDir, err := ioutil.TempDir("", "datauri-test-")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
 
-	// Set PersistenceRootPath to temp directory
+	dir, err := os.Getwd()
 	originalPath := common.Configuration.PersistenceRootPath
-	common.Configuration.PersistenceRootPath = tmpDir
+
+	if err != nil {
+		t.Errorf("Failed to get current directory. Error: %s", err.Error())
+	}
+
+	common.Configuration.PersistenceRootPath = dir
 	defer func() {
 		common.Configuration.PersistenceRootPath = originalPath
 	}()
 
-	dir := tmpDir
 	tests := []struct {
 		uri        string
 		data       []byte
