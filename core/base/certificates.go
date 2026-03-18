@@ -11,7 +11,6 @@ import (
 	"math/big"
 	"net"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/open-horizon/edge-utilities/logger"
@@ -55,8 +54,8 @@ func setupCertificates() error {
 		if len(keyExtensions) == 0 {
 			keyExtensions = []string{".pem", ".key"}
 		}
-		validatedCert, certPathErr := common.ValidateFilePathWithExtension(common.Configuration.ServerCertificate, filepath.Dir(common.Configuration.ServerCertificate), certExtensions)
-		validatedKey, keyPathErr := common.ValidateFilePathWithExtension(common.Configuration.ServerKey, filepath.Dir(common.Configuration.ServerKey), keyExtensions)
+		validatedCert, certPathErr := common.ValidateFilePathWithExtension(common.Configuration.ServerCertificate, "", certExtensions)
+		validatedKey, keyPathErr := common.ValidateFilePathWithExtension(common.Configuration.ServerKey, "", keyExtensions)
 		if certPathErr == nil && keyPathErr == nil {
 			_, err = tls.LoadX509KeyPair(validatedCert, validatedKey)
 			if err == nil {

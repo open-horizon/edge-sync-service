@@ -790,12 +790,12 @@ func ValidateConfig() error {
 	if (Configuration.ListeningType == ListeningSecurely || Configuration.ListeningType == ListeningBoth || Configuration.ListeningType == ListeningSecureUnix) &&
 		Configuration.NodeType == CSS {
 		if len(Configuration.ServerCertificate) > 0 && strings.HasPrefix(Configuration.ServerCertificate, "/") {
-			if _, err := ValidateFilePathWithExtension(Configuration.ServerCertificate, Configuration.PersistenceRootPath, certExtensions); err != nil {
+			if _, err := ValidateFilePathWithExtension(Configuration.ServerCertificate, "", certExtensions); err != nil {
 				return &configError{fmt.Sprintf("Invalid ServerCertificate path: %s", err)}
 			}
 		}
 		if len(Configuration.ServerKey) > 0 && strings.HasPrefix(Configuration.ServerKey, "/") {
-			if _, err := ValidateFilePathWithExtension(Configuration.ServerKey, Configuration.PersistenceRootPath, keyExtensions); err != nil {
+			if _, err := ValidateFilePathWithExtension(Configuration.ServerKey, "", keyExtensions); err != nil {
 				return &configError{fmt.Sprintf("Invalid ServerKey path: %s", err)}
 			}
 		}
@@ -804,17 +804,17 @@ func ValidateConfig() error {
 	// Validate MQTT certificate paths (when using MQTT with SSL)
 	if mqtt && Configuration.MQTTUseSSL {
 		if len(Configuration.MQTTCACertificate) > 0 && strings.HasPrefix(Configuration.MQTTCACertificate, "/") {
-			if _, err := ValidateFilePathWithExtension(Configuration.MQTTCACertificate, Configuration.PersistenceRootPath, certExtensions); err != nil {
+			if _, err := ValidateFilePathWithExtension(Configuration.MQTTCACertificate, "", certExtensions); err != nil {
 				return &configError{fmt.Sprintf("Invalid MQTTCACertificate path: %s", err)}
 			}
 		}
 		if len(Configuration.MQTTSSLCert) > 0 && strings.HasPrefix(Configuration.MQTTSSLCert, "/") {
-			if _, err := ValidateFilePathWithExtension(Configuration.MQTTSSLCert, Configuration.PersistenceRootPath, certExtensions); err != nil {
+			if _, err := ValidateFilePathWithExtension(Configuration.MQTTSSLCert, "", certExtensions); err != nil {
 				return &configError{fmt.Sprintf("Invalid MQTTSSLCert path: %s", err)}
 			}
 		}
 		if len(Configuration.MQTTSSLKey) > 0 && strings.HasPrefix(Configuration.MQTTSSLKey, "/") {
-			if _, err := ValidateFilePathWithExtension(Configuration.MQTTSSLKey, Configuration.PersistenceRootPath, keyExtensions); err != nil {
+			if _, err := ValidateFilePathWithExtension(Configuration.MQTTSSLKey, "", keyExtensions); err != nil {
 				return &configError{fmt.Sprintf("Invalid MQTTSSLKey path: %s", err)}
 			}
 		}
@@ -823,7 +823,7 @@ func ValidateConfig() error {
 	// Validate MongoDB certificate path (when using MongoDB with SSL)
 	if Configuration.StorageProvider == Mongo && Configuration.MongoUseSSL {
 		if len(Configuration.MongoCACertificate) > 0 && strings.HasPrefix(Configuration.MongoCACertificate, "/") {
-			if _, err := ValidateFilePathWithExtension(Configuration.MongoCACertificate, Configuration.PersistenceRootPath, certExtensions); err != nil {
+			if _, err := ValidateFilePathWithExtension(Configuration.MongoCACertificate, "", certExtensions); err != nil {
 				return &configError{fmt.Sprintf("Invalid MongoCACertificate path: %s", err)}
 			}
 		}

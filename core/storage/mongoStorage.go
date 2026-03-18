@@ -137,7 +137,7 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 		// Use SecureString for password
 		password := common.NewSecureString(common.Configuration.MongoPassword)
 		defer password.Clear()
-		
+
 		credential := options.Credential{
 			AuthMechanism: common.Configuration.MongoAuthMechanism,
 			AuthSource:    common.Configuration.MongoAuthDbName,
@@ -145,7 +145,7 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 			Password:      password.String(), // Only convert when needed
 		}
 		clientOptions = clientOptions.SetAuth(credential)
-		
+
 		// Clear credential password after connection is established
 		defer func() {
 			credential.Password = ""
@@ -164,14 +164,14 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 			} else {
 				caFile = common.Configuration.PersistenceRootPath + common.Configuration.MongoCACertificate
 			}
-			
+
 			// Validate certificate file path to prevent path traversal attacks (CWE-22)
 			var serverCaCert []byte
 			certExtensions := common.Configuration.AllowedCertificateExtensions
 			if len(certExtensions) == 0 {
 				certExtensions = []string{".pem", ".crt", ".cert"}
 			}
-			validatedPath, pathErr := common.ValidateFilePathWithExtension(caFile, common.Configuration.PersistenceRootPath, certExtensions)
+			validatedPath, pathErr := common.ValidateFilePathWithExtension(caFile, "", certExtensions)
 			if pathErr != nil {
 				// If path validation fails, treat as certificate content rather than file path
 				serverCaCert = []byte(common.Configuration.MongoCACertificate)
@@ -198,22 +198,22 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 			// SECURITY WARNING: Certificate validation is DISABLED!
 			// This should NEVER be used in production environments.
 			// This configuration makes the connection vulnerable to MITM attacks.
-			
+
 			if log.IsLogging(logger.ERROR) {
 				log.Error("SECURITY CRITICAL: MongoDB certificate validation is DISABLED! Connection is vulnerable to MITM attacks. Set MongoAllowInvalidCertificates=false for production.")
 			}
-			
+
 			// Prevent use on CSS (Cloud Sync Service) nodes
 			if common.Configuration.NodeType == common.CSS {
 				message := "MongoAllowInvalidCertificates cannot be enabled on CSS nodes for security reasons"
 				return &Error{message}
 			}
-			
+
 			// Log every connection attempt with disabled validation
 			if trace.IsLogging(logger.WARNING) {
 				trace.Warning("Connecting to MongoDB with certificate validation DISABLED")
 			}
-			
+
 			tlsConfig.InsecureSkipVerify = true
 		}
 
@@ -1259,7 +1259,7 @@ func (store *MongoStorage) RemoveObjectTempData(orgID string, objectType string,
 
 			id := createTempObjectCollectionID(orgID, objectType, objectID, chunkNumber)
 			if trace.IsLogging(logger.TRACE) {
-			trace.Trace("RemoveObjectTempData for org - %s, type - %s, id - %s, chunkNum - %d", orgID, objectType, objectID, chunkNumber)
+				trace.Trace("RemoveObjectTempData for org - %s, type - %s, id - %s, chunkNum - %d", orgID, objectType, objectID, chunkNumber)
 			}
 			fileHandle, _ := store.retrieveObjectTempData(id)
 
@@ -1299,7 +1299,7 @@ func (store *MongoStorage) RetrieveObjectTempData(orgID string, objectType strin
 
 			id := createTempObjectCollectionID(orgID, objectType, objectID, chunkNumber)
 			if trace.IsLogging(logger.TRACE) {
-			trace.Trace("RetrieveObjectTempData for org - %s, type - %s, id - %s, chunkNum - %d", orgID, objectType, objectID, chunkNumber)
+				trace.Trace("RetrieveObjectTempData for org - %s, type - %s, id - %s, chunkNum - %d", orgID, objectType, objectID, chunkNumber)
 			}
 			fileHandle, err := store.retrieveObjectTempData(id)
 			if err != nil {
@@ -1316,7 +1316,7 @@ func (store *MongoStorage) RetrieveObjectTempData(orgID string, objectType strin
 	}
 
 	if trace.IsLogging(logger.TRACE) {
-	trace.Trace("returning %d file readers in the MultiReader from RetrieveObjectTempData", len(readers))
+		trace.Trace("returning %d file readers in the MultiReader from RetrieveObjectTempData", len(readers))
 	}
 	rr := io.MultiReader(readers...)
 	return rr, nil
