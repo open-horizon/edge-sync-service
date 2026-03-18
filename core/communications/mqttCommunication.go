@@ -384,7 +384,7 @@ func newTLSConfig() *tls.Config {
 		if len(certExtensions) == 0 {
 			certExtensions = []string{".pem", ".crt", ".cert"}
 		}
-		validatedPath, pathErr := common.ValidateFilePathWithExtension(caCert, common.Configuration.PersistenceRootPath, certExtensions)
+		validatedPath, pathErr := common.ValidateFilePathWithExtension(caCert, "", certExtensions)
 		if pathErr != nil {
 			// If path validation fails, treat as certificate content rather than file path
 			pemCerts = []byte(common.Configuration.MQTTCACertificate)
@@ -429,8 +429,8 @@ func newTLSConfig() *tls.Config {
 		if len(keyExtensions) == 0 {
 			keyExtensions = []string{".pem", ".key"}
 		}
-		validatedCert, certPathErr := common.ValidateFilePathWithExtension(cert, common.Configuration.PersistenceRootPath, certExtensions)
-		validatedKey, keyPathErr := common.ValidateFilePathWithExtension(key, common.Configuration.PersistenceRootPath, keyExtensions)
+		validatedCert, certPathErr := common.ValidateFilePathWithExtension(cert, "", certExtensions)
+		validatedKey, keyPathErr := common.ValidateFilePathWithExtension(key, "", keyExtensions)
 
 		var clientCert tls.Certificate
 		var err error

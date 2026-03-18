@@ -38,15 +38,17 @@ func ValidateFilePath(path, baseDir string) (string, error) {
 		return "", fmt.Errorf("invalid file path: failed to get absolute path: %w", err)
 	}
 
-	absBase, err := filepath.Abs(baseDir)
-	if err != nil {
-		return "", fmt.Errorf("invalid file path: failed to get absolute base directory: %w", err)
-	}
+	if baseDir != "" {
+		absBase, err := filepath.Abs(baseDir)
+		if err != nil {
+			return "", fmt.Errorf("invalid file path: failed to get absolute base directory: %w", err)
+		}
 
-	// Ensure the path is within the base directory (CWE-22: Path Traversal)
-	// The path must either be exactly the base directory or start with base directory + separator
-	if absPath != absBase && !strings.HasPrefix(absPath, absBase+string(os.PathSeparator)) {
-		return "", fmt.Errorf("invalid file path: path traversal detected: %s is outside allowed directory %s", absPath, absBase)
+		// Ensure the path is within the base directory (CWE-22: Path Traversal)
+		// The path must either be exactly the base directory or start with base directory + separator
+		if absPath != absBase && !strings.HasPrefix(absPath, absBase+string(os.PathSeparator)) {
+			return "", fmt.Errorf("invalid file path: path traversal detected: %s is outside allowed directory %s", absPath, absBase)
+		}
 	}
 
 	return absPath, nil
