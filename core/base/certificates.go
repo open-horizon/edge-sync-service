@@ -24,7 +24,7 @@ const (
 	certName     = "cert.pem"
 	keyName      = "key.pem"
 	rsaBits      = 2048
-	daysValidFor = 500
+	daysValidFor = 2500
 )
 
 func setupCertificates() error {
