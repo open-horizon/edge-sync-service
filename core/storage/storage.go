@@ -432,13 +432,17 @@ func resendNotification(notification common.Notification, retrieveReceived bool)
 		(retrieveReceived && (s == common.Data || s == common.Updated || s == common.ReceivedByDestination)))
 }
 
-func ensureArrayCapacity(data []byte, newCapacity int64) []byte {
+func ensureArrayCapacity(data []byte, newCapacity int64) ([]byte, common.SyncServiceError) {
 	if newCapacity <= int64(cap(data)) {
-		return data
+		return data, nil
+	}
+	if newCapacity < 0 || newCapacity > common.Configuration.MaxInMemoryObjectDataSize || int64(int(newCapacity)) != newCapacity {
+		err := &Error{fmt.Sprintf("invalid byte slice capacity requested: %d", newCapacity)}
+		return data, err
 	}
 	new := make([]byte, newCapacity)
 	copy(new, data)
-	return new
+	return new, nil
 }
 
 func createDataPath(prefix string, orgID string, objectType string, objectID string) string {

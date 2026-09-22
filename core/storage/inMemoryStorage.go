@@ -232,6 +232,14 @@ func (store *InMemoryStorage) AppendObjectData(orgID string, objectType string, 
 		if total < offset+int64(dataLength) {
 			total = offset + int64(dataLength)
 		}
+
+		if offset < 0 || total < 0 || offset > total {
+			return isLastChunk, &Error{"Invalid chunk range values"}
+		}
+		if total > common.Configuration.MaxInMemoryObjectDataSize {
+			return isLastChunk, &Error{fmt.Sprintf("Object data too large: %d exceeds max allowed %d bytes", total, common.Configuration.MaxInMemoryObjectDataSize)}
+		}
+
 		if isFirstChunk {
 			if isTempData {
 				object.tmpData = make([]byte, total)
@@ -240,10 +248,15 @@ func (store *InMemoryStorage) AppendObjectData(orgID string, objectType string, 
 			}
 
 		} else {
+			var err common.SyncServiceError
 			if isTempData {
-				object.tmpData = ensureArrayCapacity(object.tmpData, total)
+				if object.tmpData, err = ensureArrayCapacity(object.tmpData, total); err != nil {
+					return isLastChunk, err
+				}
 			} else {
-				object.data = ensureArrayCapacity(object.data, total)
+				if object.data, err = ensureArrayCapacity(object.data, total); err != nil {
+					return isLastChunk, err
+				}
 			}
 
 		}
