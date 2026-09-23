@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -278,6 +279,9 @@ func (store *InMemoryStorage) AppendObjectData(orgID string, objectType string, 
 
 			if err != nil && err != io.EOF {
 				return isLastChunk, &Error{"Failed to read object data. Error: " + err.Error()}
+			}
+			if dataLength > uint32(math.MaxInt32) {
+				return isLastChunk, &Error{fmt.Sprintf("Data length exceeds maximum allowed size: %d", dataLength)}
 			}
 			if count != int(dataLength) {
 				return isLastChunk, &Error{fmt.Sprintf("Read %d bytes for the object data, instead of %d", count, dataLength)}

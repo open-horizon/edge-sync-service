@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -1375,7 +1376,11 @@ func (store *MongoStorage) AppendObjectData(orgID string, objectType string, obj
 	// Figure out which chunk this is by looking at offset + length of data
 	var chunkNumber int
 	if (offset + n_int64) < total {
-		chunkNumber = (int(offset) + n) / n
+		chunkNumber64 := (offset + n_int64) / n_int64
+		if chunkNumber64 > int64(math.MaxInt32) || chunkNumber64 < int64(math.MinInt32) {
+			return isLastChunk, &Error{fmt.Sprintf("Calculated chunk number %d is out of supported range.", chunkNumber64)}
+		}
+		chunkNumber = int(chunkNumber64)
 	} else {
 		updatedLastChunk = true
 

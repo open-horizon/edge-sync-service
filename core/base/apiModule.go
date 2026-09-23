@@ -190,6 +190,10 @@ func UpdateObject(orgID string, objectType string, objectID string, metaData com
 			return &common.InvalidRequest{Message: "Both source data URI and data are set"}
 		}
 
+		if err := common.ValidateURL(metaData.SourceDataURI); err != nil {
+			return &common.InvalidRequest{Message: err.Error()}
+		}
+
 		uri, err := url.Parse(metaData.SourceDataURI)
 		if err != nil || !strings.EqualFold(uri.Scheme, "file") || uri.Host != "" {
 			return &common.InvalidRequest{Message: "Invalid source data URI"}
