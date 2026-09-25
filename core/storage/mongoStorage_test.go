@@ -3,7 +3,11 @@ package storage
 import (
 	"testing"
 
+	"bytes"
 	"github.com/open-horizon/edge-sync-service/common"
+	"io"
+	"sync"
+	"time"
 )
 
 func TestMongoStorageObjects(t *testing.T) {
@@ -166,4 +170,69 @@ func TestMongoStorageOrganizations(t *testing.T) {
 
 func TestMongoStorageInactiveDestinations(t *testing.T) {
 	testStorageInactiveDestinations(common.Mongo, t)
+}
+
+// TestConcurrentReadObjectData verifies ReadObjectData reads correct chunks concurrently
+func TestConcurrentReadObjectData(t *testing.T) {
+	common.Configuration.MongoDbName = "d_test_db"
+	store := &MongoStorage{}
+	if err := store.Init(); err != nil {
+		t.Fatalf("Failed to initialize storage driver. Error: %s", err.Error())
+	}
+	defer store.Stop()
+
+	// Create a test object with predictable content
+	id := "org:type:id-for-concurrent-test"
+	// 1MB data pattern
+	totalSize := 1024 * 1024
+	data := bytes.Repeat([]byte{0xAB}, totalSize)
+
+	if err := store.createFile(id, bytes.NewReader(data)); err != nil {
+		t.Fatalf("Failed to create test file in GridFS: %v", err)
+	}
+
+	// Concurrently read multiple chunks
+	var wg sync.WaitGroup
+	concurrency := 16
+	chunkSize := 64 * 1024
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			offset := int64(idx * chunkSize)
+			ret, eof, n, err := store.ReadObjectData("org", "type", "id-for-concurrent-test", chunkSize, offset)
+			if err != nil {
+				t.Errorf("ReadObjectData error: %v", err)
+				return
+			}
+			if n == 0 && !eof {
+				t.Errorf("Unexpected zero-length read at idx %d", idx)
+				return
+			}
+			if n > 0 {
+				// verify contents
+				for j := 0; j < n; j++ {
+					if ret[j] != 0xAB {
+						t.Errorf("Data mismatch at idx %d, byte %d", idx, j)
+						return
+					}
+				}
+			}
+			// also exercise CloseDataReader path
+			if r, serr := store.RetrieveObjectData("org", "type", "id-for-concurrent-test", false); serr == nil && r != nil {
+				// read all and close
+				_, _ = io.Copy(io.Discard, r)
+				_ = store.CloseDataReader(r)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	// cleanup
+	if err := store.removeFile(id); err != nil {
+		t.Logf("cleanup removeFile error: %v", err)
+	}
+
+	// allow background reconnect goroutines to settle
+	time.Sleep(200 * time.Millisecond)
 }
