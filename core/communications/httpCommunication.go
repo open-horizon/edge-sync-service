@@ -1833,6 +1833,9 @@ func (communication *HTTP) handleGetData(orgID string, objectType string, object
 	objectMeta, _, err := Store.RetrieveObjectAndStatus(orgID, objectType, objectID)
 	if err != nil {
 		SendErrorResponse(writer, err, "", 0)
+	} else if objectMeta == nil {
+		err = &Error{"Error in handleGetData: no ObjectMeta found."}
+		SendErrorResponse(writer, err, "", 0)
 	}
 
 	hasRangeHeader := true

@@ -112,10 +112,10 @@ func TestRetrieveData_FileExtensionWhitelist_CaseInsensitive(t *testing.T) {
 		// Case-insensitive comparison using strings.EqualFold
 		if len(ext) > 0 && len(allowedExt) > 0 {
 			if ext[0] == '.' && allowedExt[0] == '.' {
-				if ext[1:] == allowedExt[1:] || 
-				   (len(ext) == len(allowedExt) && 
-				    ((ext == ".TXT" && allowedExt == ".txt") || 
-				     (ext == ".JSON" && allowedExt == ".json"))) {
+				if ext[1:] == allowedExt[1:] ||
+					(len(ext) == len(allowedExt) &&
+						((ext == ".TXT" && allowedExt == ".txt") ||
+							(ext == ".JSON" && allowedExt == ".json"))) {
 					allowed = true
 					break
 				}

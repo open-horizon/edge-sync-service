@@ -1143,43 +1143,44 @@ func (store *MongoStorage) ReadObjectData(orgID string, objectType string, objec
 	}
 
 	offset64 := int64(offset)
-	if offset64 >= fileHandle.GetFile().Length {
+	fileLen := fileHandle.GetFile().Length
+	if offset64 >= fileLen {
 		fileHandle.Close()
 		return make([]byte, 0), true, 0, nil
 	}
 
-	b := make([]byte, fileHandle.GetFile().Length)
-	_, err = fileHandle.Read(b)
-	if err != nil {
+	// Skip to the requested offset using io.CopyN to avoid buffering skipped bytes
+	if offset64 > 0 {
+		if _, err := io.CopyN(io.Discard, fileHandle, offset64); err != nil {
+			fileHandle.Close()
+			return nil, true, 0, &Error{fmt.Sprintf("Failed to skip to offset. Error: %s.", err)}
+		}
+	}
+
+	remaining := fileLen - offset64
+	toRead := int64(size)
+	if toRead > remaining {
+		toRead = remaining
+	}
+
+	// Read requested bytes directly into a new buffer
+	buf := make([]byte, toRead)
+	n, err := io.ReadFull(fileHandle, buf[:toRead])
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
 		fileHandle.Close()
 		return nil, true, 0, &Error{fmt.Sprintf("Failed to read the data. Error: %s.", err)}
 	}
 
-	if err = fileHandle.Close(); err != nil {
-		return nil, true, 0, &Error{fmt.Sprintf("Failed to close the file. Error: %s.", err)}
-	}
-
-	br := bytes.NewReader(b)
-	_, err = br.Seek(offset64, 0)
-	if err != nil {
-		return nil, true, 0, &Error{fmt.Sprintf("Failed to read the data. Error: %s.", err)}
-	}
-
-	s := int64(size)
-	if s > fileHandle.GetFile().Length-offset64 {
-		s = fileHandle.GetFile().Length - offset64
-	}
-
-	ret := make([]byte, s)
-	n, err := br.Read(ret)
-
-	if err != nil {
-		return nil, true, 0, &Error{fmt.Sprintf("Failed to read the data. Error: %s.", err)}
-	}
-
 	eof := false
-	if fileHandle.GetFile().Length-offset64 == int64(n) {
+	if remaining == int64(n) {
 		eof = true
+	}
+
+	// copy out the exact bytes to return
+	ret := buf[:n]
+
+	if err = fileHandle.Close(); err != nil {
+		return nil, eof, n, &Error{fmt.Sprintf("Failed to close the file. Error: %s.", err)}
 	}
 
 	return ret, eof, n, nil
