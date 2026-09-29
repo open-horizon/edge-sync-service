@@ -566,12 +566,14 @@ type StoreDestinationStatus struct {
 // DestinationsStatus provides information about the delivery status of an object for a certain destination.
 // The status can be one of the following:
 // Indication whether the object has been delivered to the destination
-//   pending - inidicates that the object is pending delivery to this destination
-//   delivering - indicates that the object is being delivered to this destination
-//   delivered - indicates that the object was delivered to this destination
-//   consumed - indicates that the object was consumed by this destination
-//   deleted - indicates that this destination acknowledged the deletion of the object
-//   error - indicates that a feedback error message was received from this destination
+//
+//	pending - inidicates that the object is pending delivery to this destination
+//	delivering - indicates that the object is being delivered to this destination
+//	delivered - indicates that the object was delivered to this destination
+//	consumed - indicates that the object was consumed by this destination
+//	deleted - indicates that this destination acknowledged the deletion of the object
+//	error - indicates that a feedback error message was received from this destination
+//
 // swagger:model
 type DestinationsStatus struct {
 	// DestType is the destination type
@@ -595,11 +597,13 @@ type DestinationsStatus struct {
 // ObjectStatus describes the delivery status of an object for a destination
 // The status can be one of the following:
 // Indication whether the object has been delivered to the destination
-//   delivering - indicates that the object is being delivered
-//   delivered - indicates that the object was delivered
-//   consumed - indicates that the object was consumed
-//   deleted - indicates that this destination acknowledged the deletion of the object
-//   error - indicates that a feedback error message was received
+//
+//	delivering - indicates that the object is being delivered
+//	delivered - indicates that the object was delivered
+//	consumed - indicates that the object was consumed
+//	deleted - indicates that this destination acknowledged the deletion of the object
+//	error - indicates that a feedback error message was received
+//
 // swagger:model
 type ObjectStatus struct {
 	// OrgID is the organization ID of the organization
@@ -1121,4 +1125,11 @@ func ValidateDestinationListInput(destinationsList []string) (bool, SyncServiceE
 func init() {
 	Version.Major = 1
 	Version.Minor = 0
+}
+
+func ValidateURL(sourcePath string) SyncServiceError {
+	if strings.HasPrefix(sourcePath, "/") || strings.Contains(sourcePath, "\\") || strings.Contains(sourcePath, "..") {
+		return &PathError{Message: fmt.Sprintf("Invalid source data URI: %s", sourcePath)}
+	}
+	return nil
 }

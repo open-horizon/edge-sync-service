@@ -24,38 +24,42 @@ func (e *Error) Error() string {
 
 // validateDataPath ensures the resolved file path is within the allowed base directory
 func validateDataPath(resolvedPath string, baseDir string) error {
+	// ensure no null bytes in path (can bypass some checks)
+	if strings.Contains(resolvedPath, "\x00") {
+		return fmt.Errorf("null byte detected in path")
+	}
+
 	// Ensure baseDir is absolute and clean
 	absBaseDir, err := filepath.Abs(filepath.Clean(baseDir))
 	if err != nil {
 		return fmt.Errorf("failed to resolve base directory: %v", err)
 	}
-	
+
 	// Resolve symlinks in base directory
 	realBaseDir, err := filepath.EvalSymlinks(absBaseDir)
 	if err != nil {
 		// If base dir symlink resolution fails, use original
 		realBaseDir = absBaseDir
 	}
-	
+
 	// Check if the resolved path is within the base directory
 	relPath, err := filepath.Rel(realBaseDir, resolvedPath)
 	if err != nil {
 		return fmt.Errorf("failed to compute relative path: %v", err)
 	}
-	
+
 	// If the relative path starts with "..", it's outside the base directory
 	if strings.HasPrefix(relPath, "..") || strings.HasPrefix(relPath, string(filepath.Separator)) {
 		return fmt.Errorf("path traversal detected: %s is outside allowed directory %s", resolvedPath, realBaseDir)
 	}
-	
+
 	// Additional check: ensure no null bytes in path (can bypass some checks)
 	if strings.Contains(resolvedPath, "\x00") {
 		return fmt.Errorf("null byte detected in path")
 	}
-	
+
 	return nil
 }
-
 
 // AppendData appends a chunk of data to the file stored at the given URI
 func AppendData(uri string, dataReader io.Reader, dataLength uint32, offset int64, total int64, isFirstChunk bool, isLastChunk bool, isTempData bool) (bool, common.SyncServiceError) {

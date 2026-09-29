@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -232,6 +233,14 @@ func (store *InMemoryStorage) AppendObjectData(orgID string, objectType string, 
 		if total < offset+int64(dataLength) {
 			total = offset + int64(dataLength)
 		}
+
+		if offset < 0 || total < 0 || offset > total {
+			return isLastChunk, &Error{"Invalid chunk range values"}
+		}
+		if total > common.Configuration.MaxInMemoryObjectDataSize {
+			return isLastChunk, &Error{fmt.Sprintf("Object data too large: %d exceeds max allowed %d bytes", total, common.Configuration.MaxInMemoryObjectDataSize)}
+		}
+
 		if isFirstChunk {
 			if isTempData {
 				object.tmpData = make([]byte, total)
@@ -240,10 +249,15 @@ func (store *InMemoryStorage) AppendObjectData(orgID string, objectType string, 
 			}
 
 		} else {
+			var err common.SyncServiceError
 			if isTempData {
-				object.tmpData = ensureArrayCapacity(object.tmpData, total)
+				if object.tmpData, err = ensureArrayCapacity(object.tmpData, total); err != nil {
+					return isLastChunk, err
+				}
 			} else {
-				object.data = ensureArrayCapacity(object.data, total)
+				if object.data, err = ensureArrayCapacity(object.data, total); err != nil {
+					return isLastChunk, err
+				}
 			}
 
 		}
@@ -265,6 +279,9 @@ func (store *InMemoryStorage) AppendObjectData(orgID string, objectType string, 
 
 			if err != nil && err != io.EOF {
 				return isLastChunk, &Error{"Failed to read object data. Error: " + err.Error()}
+			}
+			if dataLength > uint32(math.MaxInt32) {
+				return isLastChunk, &Error{fmt.Sprintf("Data length exceeds maximum allowed size: %d", dataLength)}
 			}
 			if count != int(dataLength) {
 				return isLastChunk, &Error{fmt.Sprintf("Read %d bytes for the object data, instead of %d", count, dataLength)}

@@ -313,6 +313,10 @@ type Config struct {
 	// Max num of inflight chunks
 	MaxInflightChunks int `env:"MAX_INFLIGHT_CHUNKS"`
 
+	// Max object data size that can be stored in memory, only for ESS with in-memory storage provider. Default is 1GB
+	// 	MaxInMemoryObjectDataSize limits dynamic in-memory slice growth to prevent DoS via oversized user-controlled input.
+	MaxInMemoryObjectDataSize int64 `env:"MAX_IN_MEMORY_OBJECT_DATA_SIZE"`
+
 	// MongoAddressCsv specifies one or more addresses of the mongo database
 	MongoAddressCsv string `env:"MONGO_ADDRESS_CSV"`
 
@@ -882,6 +886,7 @@ func SetDefaultConfig(config *Config) {
 	config.EnableDataChunk = true
 	config.MaxDataChunkSize = 5120 * 1024
 	config.MaxInflightChunks = 1
+	config.MaxInMemoryObjectDataSize = 1024 * 1024 * 1024
 	config.MongoAddressCsv = "mongodb://localhost:27017"
 	config.MongoAuthMechanism = MongoDBAuthMechanism_SHA256
 	config.MongoDbName = "d_edge"
