@@ -3,6 +3,7 @@ package storage
 import (
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -436,7 +437,7 @@ func ensureArrayCapacity(data []byte, newCapacity int64) ([]byte, common.SyncSer
 	if newCapacity <= int64(cap(data)) {
 		return data, nil
 	}
-	if newCapacity < 0 || newCapacity > common.Configuration.MaxInMemoryObjectDataSize || int64(int(newCapacity)) != newCapacity {
+	if newCapacity < 0 || newCapacity > common.Configuration.MaxInMemoryObjectDataSize || newCapacity > int64(math.MaxInt) {
 		err := &Error{fmt.Sprintf("invalid byte slice capacity requested: %d", newCapacity)}
 		return data, err
 	}
