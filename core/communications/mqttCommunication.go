@@ -457,33 +457,6 @@ func newTLSConfig() *tls.Config {
 		}
 	}
 
-	// Please avoid using this if possible! Makes using TLS pointless
-	if common.Configuration.MQTTAllowInvalidCertificates {
-		// SECURITY WARNING: Certificate validation is DISABLED!
-		// This should NEVER be used in production environments.
-		// This configuration makes the connection vulnerable to MITM attacks.
-
-		if log.IsLogging(logger.ERROR) {
-			log.Error("SECURITY CRITICAL: MQTT certificate validation is DISABLED! Connection is vulnerable to MITM attacks. Set MQTTAllowInvalidCertificates=false for production.")
-		}
-
-		// Prevent use on CSS (Cloud Sync Service) nodes
-		if common.Configuration.NodeType == common.CSS {
-			if log.IsLogging(logger.ERROR) {
-				log.Error("MQTTAllowInvalidCertificates cannot be enabled on CSS nodes for security reasons")
-			}
-			// Return a secure config instead of allowing insecure mode
-			tlsConfig.InsecureSkipVerify = false
-		} else {
-			// Log every connection attempt with disabled validation
-			if trace.IsLogging(logger.WARNING) {
-				trace.Warning("Connecting to MQTT broker with certificate validation DISABLED")
-			}
-
-			tlsConfig.InsecureSkipVerify = true
-		}
-	}
-
 	// Optional: Certificate pinning for enhanced security
 	if len(common.Configuration.MQTTPinnedCertFingerprints) > 0 {
 		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
