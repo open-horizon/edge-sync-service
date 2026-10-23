@@ -194,30 +194,6 @@ func (store *MongoStorage) Init() common.SyncServiceError {
 			tlsConfig.RootCAs = caCertPool
 		}
 
-		// Please avoid using this if possible! Makes using TLS pointless
-		if common.Configuration.MongoAllowInvalidCertificates {
-			// SECURITY WARNING: Certificate validation is DISABLED!
-			// This should NEVER be used in production environments.
-			// This configuration makes the connection vulnerable to MITM attacks.
-
-			if log.IsLogging(logger.ERROR) {
-				log.Error("SECURITY CRITICAL: MongoDB certificate validation is DISABLED! Connection is vulnerable to MITM attacks. Set MongoAllowInvalidCertificates=false for production.")
-			}
-
-			// Prevent use on CSS (Cloud Sync Service) nodes
-			if common.Configuration.NodeType == common.CSS {
-				message := "MongoAllowInvalidCertificates cannot be enabled on CSS nodes for security reasons"
-				return &Error{message}
-			}
-
-			// Log every connection attempt with disabled validation
-			if trace.IsLogging(logger.WARNING) {
-				trace.Warning("Connecting to MongoDB with certificate validation DISABLED")
-			}
-
-			tlsConfig.InsecureSkipVerify = true
-		}
-
 		// Optional: Certificate pinning for enhanced security
 		if len(common.Configuration.MongoPinnedCertFingerprints) > 0 {
 			tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
