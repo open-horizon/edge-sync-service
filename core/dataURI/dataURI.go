@@ -68,7 +68,7 @@ func AppendData(uri string, dataReader io.Reader, dataLength uint32, offset int6
 	}
 
 	dataURI, err := url.Parse(uri)
-	if err != nil || !strings.EqualFold(dataURI.Scheme, "file") {
+	if err != nil || !strings.EqualFold(dataURI.Scheme, "file") || dataURI.Host != "" {
 		return isLastChunk, &Error{"Invalid data URI"}
 	}
 
@@ -131,7 +131,7 @@ func StoreData(uri string, dataReader io.Reader, dataLength uint32) (int64, comm
 	}
 
 	dataURI, err := url.Parse(uri)
-	if err != nil || !strings.EqualFold(dataURI.Scheme, "file") {
+	if err != nil || !strings.EqualFold(dataURI.Scheme, "file") || dataURI.Host != "" {
 		return 0, &Error{"Invalid data URI"}
 	}
 
@@ -247,7 +247,7 @@ func StoreDataFromTempData(uri string) common.SyncServiceError {
 // After reading, the reader has to be closed.
 func GetData(uri string, isTempData bool) (io.Reader, common.SyncServiceError) {
 	dataURI, err := url.Parse(uri)
-	if err != nil || !strings.EqualFold(dataURI.Scheme, "file") {
+	if err != nil || !strings.EqualFold(dataURI.Scheme, "file") || dataURI.Host != "" {
 		return nil, &Error{"Invalid data URI"}
 	}
 
@@ -283,7 +283,8 @@ func GetData(uri string, isTempData bool) (io.Reader, common.SyncServiceError) {
 // After reading, the reader has to be closed.
 func GetDataChunk(uri string, size int, offset int64) ([]byte, bool, int, common.SyncServiceError) {
 	dataURI, err := url.Parse(uri)
-	if err != nil || !strings.EqualFold(dataURI.Scheme, "file") {
+	// Only allow local file URIs (no authority/host component).
+	if err != nil || !strings.EqualFold(dataURI.Scheme, "file") || dataURI.Host != "" {
 		return nil, false, 0, &Error{"Invalid data URI"}
 	}
 
