@@ -446,15 +446,31 @@ func ensureArrayCapacity(data []byte, newCapacity int64) ([]byte, common.SyncSer
 	return new, nil
 }
 
+func sanitizeDataPathComponent(value string) string {
+	safe := strings.TrimSpace(value)
+	safe = strings.ReplaceAll(safe, "/", "_")
+	safe = strings.ReplaceAll(safe, "\\", "_")
+	safe = strings.ReplaceAll(safe, "..", "_")
+	safe = strings.ReplaceAll(safe, ":", "_")
+	if safe == "" {
+		safe = "_"
+	}
+	return safe
+}
+
 func createDataPath(prefix string, orgID string, objectType string, objectID string) string {
+	safeOrgID := sanitizeDataPathComponent(orgID)
+	safeObjectType := sanitizeDataPathComponent(objectType)
+	safeObjectID := sanitizeDataPathComponent(objectID)
+
 	var strBuilder strings.Builder
-	strBuilder.Grow(len(prefix) + len(orgID) + len(objectType) + len(objectID) + 3)
+	strBuilder.Grow(len(prefix) + len(safeOrgID) + len(safeObjectType) + len(safeObjectID) + 3)
 	strBuilder.WriteString(prefix)
-	strBuilder.WriteString(orgID)
+	strBuilder.WriteString(safeOrgID)
 	strBuilder.WriteByte('-')
-	strBuilder.WriteString(objectType)
+	strBuilder.WriteString(safeObjectType)
 	strBuilder.WriteByte('-')
-	strBuilder.WriteString(objectID)
+	strBuilder.WriteString(safeObjectID)
 	return strBuilder.String()
 }
 
